@@ -25,7 +25,10 @@ class WhisperContext private constructor(private var ptr: Long) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
         Log.d(LOG_TAG, "Selecting $numThreads threads")
-        WhisperLib.fullTranscribe(ptr, numThreads, data, language)
+        val result = WhisperLib.fullTranscribe(ptr, numThreads, data, language)
+        check(result == 0) {
+            "Whisper konnte die Audiodatei nicht verarbeiten (Fehlercode $result)."
+        }
         val textCount = WhisperLib.getTextSegmentCount(ptr)
         return@withContext List(textCount) { index ->
             WhisperSegment(
@@ -140,7 +143,7 @@ private class WhisperLib {
             numThreads: Int,
             audioData: FloatArray,
             language: String
-        )
+        ): Int
         external fun getTextSegmentCount(contextPtr: Long): Int
         external fun getTextSegment(contextPtr: Long, index: Int): String
         external fun getTextSegmentT0(contextPtr: Long, index: Int): Long

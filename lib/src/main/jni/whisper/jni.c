@@ -161,7 +161,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
     whisper_free(context);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jint JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
         jfloatArray audio_data, jstring language_str) {
@@ -179,7 +179,10 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.translate = false;
     const char *language = (*env)->GetStringUTFChars(env, language_str, NULL);
     params.language = language;
-    params.detect_language = strcmp(language, "auto") == 0;
+    // Passing "auto" already makes whisper_full detect the language and then
+    // continue transcribing. detect_language=true is a detection-only mode
+    // that deliberately returns before producing any text segments.
+    params.detect_language = false;
     params.n_threads = num_threads;
     params.offset_ms = 0;
     params.no_context = true;
@@ -188,13 +191,15 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     whisper_reset_timings(context);
 
     LOGI("About to run whisper_full");
-    if (whisper_full(context, params, audio_data_arr, audio_data_length) != 0) {
-        LOGI("Failed to run the model");
+    const int result = whisper_full(context, params, audio_data_arr, audio_data_length);
+    if (result != 0) {
+        LOGI("Failed to run the model: %d", result);
     } else {
         whisper_print_timings(context);
     }
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio_data_arr, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, language_str, language);
+    return result;
 }
 
 JNIEXPORT jint JNICALL
@@ -253,9 +258,3 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_benchMemcpy(JNIEnv *env, j
 
 JNIEXPORT jstring JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_benchGgmlMulMat(JNIEnv *env, jobject thiz,
-                                                                          jint n_threads) {
-    UNUSED(thiz);
-    const char *bench_ggml_mul_mat = whisper_bench_ggml_mul_mat_str(n_threads);
-    jstring string = (*env)->NewStringUTF(env, bench_ggml_mul_mat);
-    return string;
-}
