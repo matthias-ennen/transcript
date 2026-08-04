@@ -258,3 +258,9 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_benchMemcpy(JNIEnv *env, j
 
 JNIEXPORT jstring JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_benchGgmlMulMat(JNIEnv *env, jobject thiz,
+                                                                          jint n_threads) {
+    UNUSED(thiz);
+    const char *bench_ggml_mul_mat = whisper_bench_ggml_mul_mat_str(n_threads);
+    jstring string = (*env)->NewStringUTF(env, bench_ggml_mul_mat);
+    return string;
+}
