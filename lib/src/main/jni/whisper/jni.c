@@ -32,6 +32,62 @@ struct input_stream_context {
     jmethodID mid_read;
 };
 
+struct progress_callback_context {
+    JavaVM *vm;
+    jobject listener;
+    jmethodID on_progress;
+};
+
+static void on_whisper_progress(
+        struct whisper_context *ctx,
+        struct whisper_state *state,
+        int progress,
+        void *user_data) {
+    UNUSED(ctx);
+    UNUSED(state);
+    struct progress_callback_context *callback =
+            (struct progress_callback_context *) user_data;
+    if (callback == NULL || callback->listener == NULL || callback->on_progress == NULL) {
+        return;
+    }
+
+    JNIEnv *callback_env = NULL;
+    bool detach_after_callback = false;
+    const jint env_status = (*callback->vm)->GetEnv(
+            callback->vm,
+            (void **) &callback_env,
+            JNI_VERSION_1_6
+    );
+    if (env_status == JNI_EDETACHED) {
+        if ((*callback->vm)->AttachCurrentThread(
+                callback->vm,
+                &callback_env,
+                NULL
+        ) != JNI_OK) {
+            LOGW("Could not attach Whisper progress callback thread");
+            return;
+        }
+        detach_after_callback = true;
+    } else if (env_status != JNI_OK) {
+        LOGW("Could not access JNI environment for Whisper progress callback");
+        return;
+    }
+
+    (*callback_env)->CallVoidMethod(
+            callback_env,
+            callback->listener,
+            callback->on_progress,
+            (jint) progress
+    );
+    if ((*callback_env)->ExceptionCheck(callback_env)) {
+        (*callback_env)->ExceptionDescribe(callback_env);
+        (*callback_env)->ExceptionClear(callback_env);
+    }
+    if (detach_after_callback) {
+        (*callback->vm)->DetachCurrentThread(callback->vm);
+    }
+}
+
 size_t inputStreamRead(void * ctx, void * output, size_t read_size) {
     struct input_stream_context* is = (struct input_stream_context*)ctx;
 
@@ -164,7 +220,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
 JNIEXPORT jint JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
-        jfloatArray audio_data, jstring language_str) {
+        jfloatArray audio_data, jstring language_str, jobject progress_listener) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     jfloat *audio_data_arr = (*env)->GetFloatArrayElements(env, audio_data, NULL);
@@ -188,6 +244,22 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.no_context = true;
     params.single_segment = false;
 
+    struct progress_callback_context progress_context = {};
+    if (progress_listener != NULL) {
+        (*env)->GetJavaVM(env, &progress_context.vm);
+        progress_context.listener = (*env)->NewGlobalRef(env, progress_listener);
+        jclass listener_class = (*env)->GetObjectClass(env, progress_listener);
+        progress_context.on_progress = (*env)->GetMethodID(
+                env,
+                listener_class,
+                "onProgress",
+                "(I)V"
+        );
+        (*env)->DeleteLocalRef(env, listener_class);
+        params.progress_callback = on_whisper_progress;
+        params.progress_callback_user_data = &progress_context;
+    }
+
     whisper_reset_timings(context);
 
     LOGI("About to run whisper_full");
@@ -199,6 +271,9 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     }
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio_data_arr, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, language_str, language);
+    if (progress_context.listener != NULL) {
+        (*env)->DeleteGlobalRef(env, progress_context.listener);
+    }
     return result;
 }
 

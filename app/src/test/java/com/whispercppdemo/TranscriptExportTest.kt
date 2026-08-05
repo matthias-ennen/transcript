@@ -4,6 +4,7 @@ import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.export.formatTimestamp
+import de.matthiasennen.transcript.ui.main.formatClock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,5 +30,12 @@ class TranscriptExportTest {
     @Test
     fun formatsLongDurations() {
         assertEquals("01:02:03.004", formatTimestamp(3_723_004))
+    }
+
+    @Test
+    fun formatsDiagnosticRuntime() {
+        assertEquals("00:00", formatClock(0))
+        assertEquals("03:40", formatClock(220))
+        assertEquals("1:02:03", formatClock(3_723))
     }
 }

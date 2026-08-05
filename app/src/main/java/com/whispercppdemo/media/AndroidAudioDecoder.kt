@@ -13,12 +13,20 @@ import kotlin.math.floor
 private const val TARGET_SAMPLE_RATE = 16_000
 private const val TIMEOUT_US = 10_000L
 
+data class DecodedAudio(
+    val samples: FloatArray,
+    val durationMs: Long,
+    val sourceSampleRate: Int,
+    val sourceChannelCount: Int,
+    val mimeType: String
+)
+
 /** Decodes any Android-supported audio file and returns 16 kHz mono float PCM for Whisper. */
 fun decodeAudio(
     context: Context,
     uri: Uri,
     onProgress: (Float) -> Unit = {}
-): FloatArray {
+): DecodedAudio {
     val extractor = MediaExtractor()
     extractor.setDataSource(context, uri, null)
 
@@ -109,7 +117,19 @@ fun decodeAudio(
     }
 
     onProgress(1f)
-    return resample(samples.toArray(), sampleRate, TARGET_SAMPLE_RATE)
+    val resampled = resample(samples.toArray(), sampleRate, TARGET_SAMPLE_RATE)
+    val decodedDurationMs = if (durationUs > 0L) {
+        durationUs / 1_000L
+    } else {
+        resampled.size * 1_000L / TARGET_SAMPLE_RATE
+    }
+    return DecodedAudio(
+        samples = resampled,
+        durationMs = decodedDurationMs,
+        sourceSampleRate = sampleRate,
+        sourceChannelCount = channelCount,
+        mimeType = mime
+    )
 }
 
 private fun appendDownmixed(

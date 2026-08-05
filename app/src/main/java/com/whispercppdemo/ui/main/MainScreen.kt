@@ -114,7 +114,30 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             }
 
             Text(state.status, style = MaterialTheme.typography.bodyMedium)
+            if (state.isBusy) {
+                Text(
+                    "Laufzeit: ${formatClock(state.elapsedSeconds)}",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            state.activityDetail?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+            if (state.diagnostics.isNotEmpty()) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("Diagnose", style = MaterialTheme.typography.titleSmall)
+                        state.diagnostics.forEach { entry ->
+                            Text(entry, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
 
             if (state.segments.isNotEmpty()) {
                 Row(

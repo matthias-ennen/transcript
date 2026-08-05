@@ -41,6 +41,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    // The downloadable APK is a Debug APK. Build whisper.cpp with
+                    // release optimizations anyway; an unoptimized inference build
+                    // can take dramatically longer on a phone.
+                    arguments "-DCMAKE_BUILD_TYPE=Release"
+                }
+            }
+        }
         release {
             minifyEnabled false
         }

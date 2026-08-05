@@ -14,6 +14,19 @@ Transkriptionsdienst benötigt.
 - Ausgabe mit Segmentzeitstempeln
 - Export als TXT, SRT und JSON
 - automatischer Debug-APK-Build mit GitHub Actions
+- sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
+- laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
+
+## Diagnose während der Transkription
+
+Version `0.2.0-diagnostic` zeigt, welchen Verarbeitungsschritt die App gerade
+ausführt. Die native Whisper-Engine meldet ihren tatsächlichen Fortschritt in
+Prozent an die Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die
+App außerdem an, seit wann kein neuer Fortschrittswert empfangen wurde.
+
+Die Debug-APK baut den rechenintensiven nativen Whisper-Code mit
+Release-Optimierungen. Die Optimierung muss im `lib`-Modul gesetzt sein, weil
+dort der CMake-/NDK-Build stattfindet.
 
 Die erste Version dient als technisches Fundament. Gesangstrennung,
 Wortzeitstempel und die Synchronisierung eines bereits bekannten Songtexts

@@ -12,6 +12,10 @@ private const val LOG_TAG = "LibWhisper"
 
 data class WhisperSegment(val startMs: Long, val endMs: Long, val text: String)
 
+fun interface WhisperProgressListener {
+    fun onProgress(percent: Int)
+}
+
 class WhisperContext private constructor(private var ptr: Long) {
     // Meet Whisper C++ constraint: Don't access from more than one thread at a time.
     private val scope: CoroutineScope = CoroutineScope(
@@ -20,12 +24,19 @@ class WhisperContext private constructor(private var ptr: Long) {
 
     suspend fun transcribeSegments(
         data: FloatArray,
-        language: String = "auto"
+        language: String = "auto",
+        onProgress: (Int) -> Unit = {}
     ): List<WhisperSegment> = withContext(scope.coroutineContext) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
         Log.d(LOG_TAG, "Selecting $numThreads threads")
-        val result = WhisperLib.fullTranscribe(ptr, numThreads, data, language)
+        val result = WhisperLib.fullTranscribe(
+            ptr,
+            numThreads,
+            data,
+            language,
+            WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
+        )
         check(result == 0) {
             "Whisper konnte die Audiodatei nicht verarbeiten (Fehlercode $result)."
         }
@@ -142,7 +153,8 @@ private class WhisperLib {
             contextPtr: Long,
             numThreads: Int,
             audioData: FloatArray,
-            language: String
+            language: String,
+            progressListener: WhisperProgressListener
         ): Int
         external fun getTextSegmentCount(contextPtr: Long): Int
         external fun getTextSegment(contextPtr: Long, index: Int): String
