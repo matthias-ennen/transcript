@@ -2,6 +2,9 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  schedule:
+    # Temporärer einmaliger Start für den Signierungs-Test am 6. August 2026.
+    - cron: "55 18 6 8 *"
   push:
     branches:
       - main
@@ -74,22 +77,3 @@ jobs:
           name: transcript-signed-apk-${{ env.TRANSCRIPT_VERSION_CODE }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-*.jks
-*.keystore
-signing-backup*
