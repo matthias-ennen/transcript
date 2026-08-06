@@ -3,8 +3,8 @@ name: Build Android APK
 on:
   workflow_dispatch:
   schedule:
-    # Temporärer einmaliger Start für den Signierungs-Test am 6. August 2026.
-    - cron: "55 18 6 8 *"
+    # Temporärer Fünf-Minuten-Auslöser; wird nach dem ersten gestarteten Test entfernt.
+    - cron: "*/5 * * * *"
   push:
     branches:
       - main
