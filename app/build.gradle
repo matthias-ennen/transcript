@@ -18,7 +18,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode (System.getenv("TRANSCRIPT_VERSION_CODE") ?: "3").toInteger()
-        versionName System.getenv("TRANSCRIPT_VERSION_NAME") ?: "0.3.0-signed"
+        versionName (System.getenv("TRANSCRIPT_VERSION_NAME") ?: "0.3.0-signed")
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
