@@ -71,6 +71,8 @@ Benötigte GitHub-Actions-Secrets:
 - `ANDROID_SIGNING_KEY_ALIAS`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 
+Build-Test der dauerhaft signierten APK: 6. August 2026.
+
 ## Modell und Speicherbedarf
 
 Beim ersten Start lädt die App `ggml-base.bin` mit ungefähr 142 MB. Das Modell
