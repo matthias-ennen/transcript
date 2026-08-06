@@ -14,6 +14,8 @@ Transkriptionsdienst benötigt.
 - Ausgabe mit Segmentzeitstempeln
 - Export als TXT, SRT und JSON
 - automatischer Debug-APK-Build mit GitHub Actions
+- dauerhafte APK-Signierung für installierbare Updates
+- automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
 - laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
 
@@ -48,6 +50,26 @@ Die APK liegt anschließend unter
 
 Alternativ kann der Workflow **Build Android APK** in GitHub Actions gestartet
 und die APK als Build-Artefakt heruntergeladen werden.
+
+## APK-Updates und Signierung
+
+GitHub Actions signiert jede APK mit demselben privaten Schlüssel. Die dazu
+gehörenden Signierdaten liegen ausschließlich in geschützten Repository-Secrets
+und werden nicht eingecheckt. Der Workflow vergibt außerdem bei jedem Lauf eine
+höhere `versionCode`-Nummer. Dadurch kann Android eine neuere APK über eine
+ältere, dauerhaft signierte APK installieren, ohne App-Daten oder das bereits
+geladene Whisper-Modell zu löschen.
+
+Eine APK, die noch mit einem früheren Debug-Schlüssel signiert wurde, muss vor
+der ersten dauerhaft signierten Version einmalig deinstalliert werden. Danach
+lassen sich weitere GitHub-APKs direkt als Update darüberinstallieren.
+
+Benötigte GitHub-Actions-Secrets:
+
+- `ANDROID_SIGNING_KEYSTORE_BASE64`
+- `ANDROID_SIGNING_STORE_PASSWORD`
+- `ANDROID_SIGNING_KEY_ALIAS`
+- `ANDROID_SIGNING_KEY_PASSWORD`
 
 ## Modell und Speicherbedarf
 

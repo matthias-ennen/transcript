@@ -3,6 +3,12 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+def signingStoreFile = System.getenv("ANDROID_SIGNING_STORE_FILE")
+def signingStorePassword = System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+def signingKeyAlias = System.getenv("ANDROID_SIGNING_KEY_ALIAS")
+def signingKeyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+def hasPersistentSigning = signingStoreFile && signingStorePassword && signingKeyAlias && signingKeyPassword
+
 android {
     namespace 'de.matthiasennen.transcript'
     compileSdk 34
@@ -11,8 +17,8 @@ android {
         applicationId "de.matthiasennen.transcript"
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName "0.2.0-diagnostic"
+        versionCode (System.getenv("TRANSCRIPT_VERSION_CODE") ?: "3").toInteger()
+        versionName System.getenv("TRANSCRIPT_VERSION_NAME") ?: "0.3.0-signed"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -21,11 +27,28 @@ android {
 
     }
 
+    signingConfigs {
+        persistent {
+            if (hasPersistentSigning) {
+                storeFile file(signingStoreFile)
+                storePassword signingStorePassword
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+
     buildTypes {
-        debug { }
+        debug {
+            if (hasPersistentSigning) {
+                signingConfig signingConfigs.persistent
+            }
+        }
 
         release {
-            signingConfig signingConfigs.debug
+            if (hasPersistentSigning) {
+                signingConfig signingConfigs.persistent
+            }
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
