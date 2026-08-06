@@ -88,3 +88,5 @@ Modelldownload benötigt Internetzugriff.
 
 `whisper.cpp` steht unter der MIT-Lizenz. Der vollständige Lizenztext befindet
 sich unter [`licenses/whisper.cpp-MIT.txt`](licenses/whisper.cpp-MIT.txt).
+
+Build-Auslöser: 1
