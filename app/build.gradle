@@ -1,0 +1,88 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def signingStoreFile = System.getenv("ANDROID_SIGNING_STORE_FILE")
+def signingStorePassword = System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+def signingKeyAlias = System.getenv("ANDROID_SIGNING_KEY_ALIAS")
+def signingKeyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+def hasPersistentSigning = signingStoreFile && signingStorePassword && signingKeyAlias && signingKeyPassword
+
+android {
+    namespace 'de.matthiasennen.transcript'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "de.matthiasennen.transcript"
+        minSdk 26
+        targetSdk 34
+        versionCode (System.getenv("TRANSCRIPT_VERSION_CODE") ?: "3").toInteger()
+        versionName System.getenv("TRANSCRIPT_VERSION_NAME") ?: "0.3.0-signed"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+
+    }
+
+    signingConfigs {
+        persistent {
+            if (hasPersistentSigning) {
+                storeFile file(signingStoreFile)
+                storePassword signingStorePassword
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (hasPersistentSigning) {
+                signingConfig signingConfigs.persistent
+            }
+        }
+
+        release {
+            if (hasPersistentSigning) {
+                signingConfig signingConfigs.persistent
+            }
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    buildFeatures {
+        compose true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.0'
+    }
+}
+
+dependencies {
+    implementation project(':lib')
+    implementation 'androidx.activity:activity-compose:1.7.2'
+    implementation 'androidx.compose.material:material-icons-core:1.5.0'
+    implementation 'androidx.compose.material3:material3:1.1.1'
+    implementation "androidx.compose.ui:ui:1.5.0"
+    implementation "androidx.compose.ui:ui-tooling-preview:1.5.0"
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.2'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation "androidx.compose.ui:ui-test-junit4:1.5.0"
+    debugImplementation "androidx.compose.ui:ui-tooling:1.5.0"
+    debugImplementation "androidx.compose.ui:ui-test-manifest:1.5.0"
+}
