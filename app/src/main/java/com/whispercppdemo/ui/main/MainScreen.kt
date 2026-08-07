@@ -132,12 +132,25 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             )
 
             Button(
-                onClick = viewModel::transcribe,
-                enabled = state.modelReady && state.selectedAudio != null &&
-                    !state.isBusy && !state.isRecording,
+                onClick = {
+                    if (state.isTranscribing) viewModel.cancelTranscription()
+                    else viewModel.transcribe()
+                },
+                enabled = if (state.isTranscribing) {
+                    !state.isCancellationRequested
+                } else {
+                    state.modelReady && state.selectedAudio != null &&
+                        !state.isBusy && !state.isRecording
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Transkribieren")
+                Text(
+                    when {
+                        state.isCancellationRequested -> "Wird abgebrochen …"
+                        state.isTranscribing -> "Abbrechen"
+                        else -> "Transkribieren"
+                    }
+                )
             }
 
             if (state.isBusy && state.downloadingModel == null) {

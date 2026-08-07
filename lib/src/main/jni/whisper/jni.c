@@ -3,6 +3,7 @@
 #include <android/asset_manager_jni.h>
 #include <android/log.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <sys/sysinfo.h>
 #include <string.h>
 #include "whisper.h"
@@ -37,6 +38,56 @@ struct progress_callback_context {
     jobject listener;
     jmethodID on_progress;
 };
+
+struct abort_callback_context {
+    atomic_bool requested;
+};
+
+static bool on_whisper_abort(void *user_data) {
+    struct abort_callback_context *abort_context =
+            (struct abort_callback_context *) user_data;
+    return abort_context != NULL && atomic_load(&abort_context->requested);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_createAbortToken(
+        JNIEnv *env, jobject thiz) {
+    UNUSED(env);
+    UNUSED(thiz);
+    struct abort_callback_context *abort_context =
+            (struct abort_callback_context *) calloc(1, sizeof(struct abort_callback_context));
+    if (abort_context == NULL) return 0;
+    atomic_init(&abort_context->requested, false);
+    return (jlong) abort_context;
+}
+
+JNIEXPORT void JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_requestAbort(
+        JNIEnv *env, jobject thiz, jlong abort_token) {
+    UNUSED(env);
+    UNUSED(thiz);
+    struct abort_callback_context *abort_context =
+            (struct abort_callback_context *) abort_token;
+    if (abort_context != NULL) atomic_store(&abort_context->requested, true);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_isAbortRequested(
+        JNIEnv *env, jobject thiz, jlong abort_token) {
+    UNUSED(env);
+    UNUSED(thiz);
+    struct abort_callback_context *abort_context =
+            (struct abort_callback_context *) abort_token;
+    return abort_context != NULL && atomic_load(&abort_context->requested) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeAbortToken(
+        JNIEnv *env, jobject thiz, jlong abort_token) {
+    UNUSED(env);
+    UNUSED(thiz);
+    free((struct abort_callback_context *) abort_token);
+}
 
 static void on_whisper_progress(
         struct whisper_context *ctx,
@@ -220,7 +271,8 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
 JNIEXPORT jint JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
-        jfloatArray audio_data, jstring language_str, jobject progress_listener) {
+        jfloatArray audio_data, jstring language_str, jlong abort_token,
+        jobject progress_listener) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     jfloat *audio_data_arr = (*env)->GetFloatArrayElements(env, audio_data, NULL);
@@ -243,6 +295,8 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.offset_ms = 0;
     params.no_context = true;
     params.single_segment = false;
+    params.abort_callback = on_whisper_abort;
+    params.abort_callback_user_data = (void *) abort_token;
 
     struct progress_callback_context progress_context = {};
     if (progress_listener != NULL) {

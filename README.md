@@ -20,6 +20,7 @@ Transkriptionsdienst benötigt.
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
 - laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
+- laufende Transkription direkt über die Hauptschaltfläche abbrechen
 - direkte Mikrofonaufnahme mit automatischer Speicherung im App-Bereich
 - Play/Pause für ausgewählte Dateien und eigene Aufnahmen
 - Wellenform mit mitlaufender und per Finger verschiebbarer Positionsmarke

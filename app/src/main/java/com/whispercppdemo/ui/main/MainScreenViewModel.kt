@@ -30,6 +30,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val PREFERENCES_NAME = "transcript_preferences"
 private const val SELECTED_MODEL_KEY = "selected_model"
@@ -52,6 +53,8 @@ data class TranscriptUiState(
     val downloadedBytes: Long = 0L,
     val downloadTotalBytes: Long = 0L,
     val isBusy: Boolean = false,
+    val isTranscribing: Boolean = false,
+    val isCancellationRequested: Boolean = false,
     val progress: Float? = null,
     val status: String = "Bitte zuerst das Whisper-Modell herunterladen.",
     val elapsedSeconds: Long = 0L,
@@ -93,6 +96,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private var recordingMeter: Job? = null
     private var playbackTimer: Job? = null
     private var waveformJob: Job? = null
+    private var transcriptionJob: Job? = null
+    private val transcriptionCancellationRequested = AtomicBoolean(false)
     private var operationStartedAtMs = 0L
     private var lastNativeProgressAtMs = 0L
     private var lastProgressBucket = -1
@@ -325,10 +330,13 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val selectedModelFile = modelFile(selectedModel)
 
         stopPlayback(release = false)
-        viewModelScope.launch {
+        transcriptionCancellationRequested.set(false)
+        transcriptionJob = viewModelScope.launch {
             startDiagnostics()
             uiState = uiState.copy(
                 isBusy = true,
+                isTranscribing = true,
+                isCancellationRequested = false,
                 progress = 0f,
                 segments = emptyList(),
                 error = null,
@@ -336,11 +344,15 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             )
             addDiagnostic("1/4 · MP3-Decodierung gestartet.")
 
-            runCatching {
+            try {
                 val decodedAudio = withContext(Dispatchers.IO) {
-                    decodeAudio(application, uri) { progress ->
+                    decodeAudio(
+                        context = application,
+                        uri = uri,
+                        shouldCancel = transcriptionCancellationRequested::get
+                    ) { progress ->
                         viewModelScope.launch {
-                            if (uiState.isBusy) {
+                            if (uiState.isTranscribing && !uiState.isCancellationRequested) {
                                 val percent = (progress * 100).toInt().coerceIn(0, 100)
                                 uiState = uiState.copy(
                                     progress = progress,
@@ -350,6 +362,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         }
                     }
                 }
+                ensureTranscriptionContinues()
                 addDiagnostic(
                     "1/4 · Audio dekodiert: ${formatClock(decodedAudio.durationMs / 1_000L)}, " +
                         "${decodedAudio.sourceSampleRate} Hz, " +
@@ -362,12 +375,14 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 val contextWasCached = whisperContext != null && activeContextModel == selectedModel
                 val context = withContext(Dispatchers.IO) {
                     if (activeContextModel != selectedModel) releaseWhisperContext()
+                    ensureTranscriptionContinues()
                     whisperContext ?: WhisperContext.createContextFromFile(selectedModelFile.absolutePath)
                         .also {
                             whisperContext = it
                             activeContextModel = selectedModel
                         }
                 }
+                ensureTranscriptionContinues()
                 addDiagnostic(
                     "2/4 · ${selectedModel.modelLabel} " +
                         "${if (contextWasCached) "war bereits geladen" else "wurde geladen"} " +
@@ -388,9 +403,13 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         "${decodedAudio.samples.size} PCM-Samples."
                 )
 
-                context.transcribeSegments(decodedAudio.samples, selectedLanguage) { percent ->
+                val result = context.transcribeSegments(
+                    data = decodedAudio.samples,
+                    language = selectedLanguage,
+                    shouldCancel = transcriptionCancellationRequested::get
+                ) { percent ->
                     viewModelScope.launch {
-                        if (!uiState.isBusy) return@launch
+                        if (!uiState.isTranscribing || uiState.isCancellationRequested) return@launch
                         val now = SystemClock.elapsedRealtime()
                         lastNativeProgressAtMs = now
                         val bucket = percent / 10
@@ -405,13 +424,15 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         )
                     }
                 }
-            }.onSuccess { result ->
+                ensureTranscriptionContinues()
                 stopDiagnosticTimer()
                 val elapsed = (SystemClock.elapsedRealtime() - operationStartedAtMs) / 1_000L
                 val segments = result.segments
                 addDiagnostic("Abgeschlossen: ${segments.size} Textabschnitte empfangen.")
                 uiState = uiState.copy(
                     isBusy = false,
+                    isTranscribing = false,
+                    isCancellationRequested = false,
                     progress = null,
                     activityDetail = null,
                     segments = segments,
@@ -424,13 +445,57 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         "Fertig: ${segments.size} Textabschnitte erkannt."
                     }
                 )
-            }.onFailure { throwable ->
-                addDiagnostic(
-                    "Fehler: ${throwable.localizedMessage ?: throwable.javaClass.simpleName}."
-                )
-                fail(throwable)
+            } catch (throwable: Throwable) {
+                if (transcriptionCancellationRequested.get()) {
+                    finishCancelledTranscription()
+                } else {
+                    addDiagnostic(
+                        "Fehler: ${throwable.localizedMessage ?: throwable.javaClass.simpleName}."
+                    )
+                    fail(throwable)
+                }
+            } finally {
+                transcriptionJob = null
             }
         }
+    }
+
+    fun cancelTranscription() {
+        if (!uiState.isTranscribing || !transcriptionCancellationRequested.compareAndSet(false, true)) {
+            return
+        }
+        uiState = uiState.copy(
+            isCancellationRequested = true,
+            progress = null,
+            status = "Transkription wird abgebrochen …",
+            activityDetail = "Das Abbruchsignal wurde an die laufende Verarbeitung gesendet."
+        )
+        addDiagnostic("Abbruch durch den Benutzer angefordert.")
+        whisperContext?.requestAbort()
+    }
+
+    private fun ensureTranscriptionContinues() {
+        check(!transcriptionCancellationRequested.get()) { "Transkription abgebrochen." }
+    }
+
+    private suspend fun finishCancelledTranscription() {
+        releaseWhisperContext()
+        stopDiagnosticTimer()
+        addDiagnostic("Transkription vollständig abgebrochen; Whisper-Kontext freigegeben.")
+        uiState = uiState.copy(
+            isBusy = false,
+            isTranscribing = false,
+            isCancellationRequested = false,
+            progress = null,
+            activityDetail = null,
+            segments = emptyList(),
+            detectedLanguage = null,
+            completedModel = null,
+            transcriptionDurationSeconds = null,
+            error = null,
+            status = "Transkription abgebrochen. Du kannst ein anderes Modell wählen."
+        )
+        transcriptionCancellationRequested.set(false)
     }
 
     private fun startDiagnostics() {
@@ -607,6 +672,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         stopDiagnosticTimer()
         uiState = uiState.copy(
             isBusy = false,
+            isTranscribing = false,
+            isCancellationRequested = false,
             progress = null,
             downloadingModel = null,
             activityDetail = null,
@@ -616,6 +683,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     override fun onCleared() {
+        transcriptionCancellationRequested.set(true)
+        whisperContext?.requestAbort()
+        transcriptionJob?.cancel()
         stopDiagnosticTimer()
         recordingMeter?.cancel()
         waveformJob?.cancel()

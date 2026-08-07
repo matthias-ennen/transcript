@@ -7,6 +7,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import java.nio.ByteOrder
+import java.util.concurrent.CancellationException
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -25,6 +26,7 @@ data class DecodedAudio(
 fun decodeAudio(
     context: Context,
     uri: Uri,
+    shouldCancel: () -> Boolean = { false },
     onProgress: (Float) -> Unit = {}
 ): DecodedAudio {
     val extractor = MediaExtractor()
@@ -56,6 +58,7 @@ fun decodeAudio(
 
     try {
         while (!outputEnded) {
+            if (shouldCancel()) throw CancellationException("Audiodekodierung abgebrochen.")
             if (!inputEnded) {
                 val inputIndex = codec.dequeueInputBuffer(TIMEOUT_US)
                 if (inputIndex >= 0) {
@@ -116,8 +119,9 @@ fun decodeAudio(
         extractor.release()
     }
 
+    if (shouldCancel()) throw CancellationException("Audiodekodierung abgebrochen.")
     onProgress(1f)
-    val resampled = resample(samples.toArray(), sampleRate, TARGET_SAMPLE_RATE)
+    val resampled = resample(samples.toArray(), sampleRate, TARGET_SAMPLE_RATE, shouldCancel)
     val decodedDurationMs = if (durationUs > 0L) {
         durationUs / 1_000L
     } else {
@@ -160,10 +164,18 @@ private fun appendDownmixed(
     }
 }
 
-private fun resample(input: FloatArray, sourceRate: Int, targetRate: Int): FloatArray {
+private fun resample(
+    input: FloatArray,
+    sourceRate: Int,
+    targetRate: Int,
+    shouldCancel: () -> Boolean
+): FloatArray {
     if (input.isEmpty() || sourceRate == targetRate) return input
     val outputSize = ceil(input.size.toDouble() * targetRate / sourceRate).toInt()
     return FloatArray(outputSize) { index ->
+        if (index % 16_384 == 0 && shouldCancel()) {
+            throw CancellationException("Audioaufbereitung abgebrochen.")
+        }
         val sourcePosition = index.toDouble() * sourceRate / targetRate
         val left = floor(sourcePosition).toInt().coerceIn(0, input.lastIndex)
         val right = (left + 1).coerceAtMost(input.lastIndex)

@@ -30,33 +30,60 @@ class WhisperContext private constructor(private var ptr: Long) {
     suspend fun transcribeSegments(
         data: FloatArray,
         language: String = "auto",
+        shouldCancel: () -> Boolean = { false },
         onProgress: (Int) -> Unit = {}
     ): WhisperTranscriptResult = withContext(scope.coroutineContext) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
         Log.d(LOG_TAG, "Selecting $numThreads threads")
-        val result = WhisperLib.fullTranscribe(
-            ptr,
-            numThreads,
-            data,
-            language,
-            WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
-        )
-        check(result == 0) {
-            "Whisper konnte die Audiodatei nicht verarbeiten (Fehlercode $result)."
+        val abortToken = WhisperLib.createAbortToken()
+        check(abortToken != 0L) { "Das Abbruchsignal für Whisper konnte nicht vorbereitet werden." }
+        synchronized(abortLock) {
+            activeAbortToken = abortToken
         }
-        val textCount = WhisperLib.getTextSegmentCount(ptr)
-        val segments = List(textCount) { index ->
-            WhisperSegment(
-                startMs = WhisperLib.getTextSegmentT0(ptr, index) * 10,
-                endMs = WhisperLib.getTextSegmentT1(ptr, index) * 10,
-                text = WhisperLib.getTextSegment(ptr, index).trim()
+        try {
+            if (shouldCancel()) WhisperLib.requestAbort(abortToken)
+            val result = WhisperLib.fullTranscribe(
+                ptr,
+                numThreads,
+                data,
+                language,
+                abortToken,
+                WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
             )
+            if (WhisperLib.isAbortRequested(abortToken)) {
+                throw java.util.concurrent.CancellationException("Whisper-Transkription abgebrochen.")
+            }
+            check(result == 0) {
+                "Whisper konnte die Audiodatei nicht verarbeiten (Fehlercode $result)."
+            }
+            val textCount = WhisperLib.getTextSegmentCount(ptr)
+            val segments = List(textCount) { index ->
+                WhisperSegment(
+                    startMs = WhisperLib.getTextSegmentT0(ptr, index) * 10,
+                    endMs = WhisperLib.getTextSegmentT1(ptr, index) * 10,
+                    text = WhisperLib.getTextSegment(ptr, index).trim()
+                )
+            }
+            return@withContext WhisperTranscriptResult(
+                segments = segments,
+                detectedLanguage = WhisperLib.getDetectedLanguage(ptr)
+            )
+        } finally {
+            synchronized(abortLock) {
+                if (activeAbortToken == abortToken) activeAbortToken = 0L
+            }
+            WhisperLib.freeAbortToken(abortToken)
         }
-        return@withContext WhisperTranscriptResult(
-            segments = segments,
-            detectedLanguage = WhisperLib.getDetectedLanguage(ptr)
-        )
+    }
+
+    private val abortLock = Any()
+    private var activeAbortToken = 0L
+
+    fun requestAbort() {
+        synchronized(abortLock) {
+            if (activeAbortToken != 0L) WhisperLib.requestAbort(activeAbortToken)
+        }
     }
 
     suspend fun benchMemory(nthreads: Int): String = withContext(scope.coroutineContext) {
@@ -158,11 +185,16 @@ private class WhisperLib {
         external fun initContextFromAsset(assetManager: AssetManager, assetPath: String): Long
         external fun initContext(modelPath: String): Long
         external fun freeContext(contextPtr: Long)
+        external fun createAbortToken(): Long
+        external fun requestAbort(abortToken: Long)
+        external fun isAbortRequested(abortToken: Long): Boolean
+        external fun freeAbortToken(abortToken: Long)
         external fun fullTranscribe(
             contextPtr: Long,
             numThreads: Int,
             audioData: FloatArray,
             language: String,
+            abortToken: Long,
             progressListener: WhisperProgressListener
         ): Int
         external fun getTextSegmentCount(contextPtr: Long): Int
