@@ -14,7 +14,8 @@ Transkriptionsdienst benötigt.
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
 - Export als TXT, SRT und JSON
-- verwendetes Whisper-Modell als Metadatum in TXT- und JSON-Exporten
+- Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
+  als Metadaten in TXT- und JSON-Exporten
 - automatischer Debug-APK-Build mit GitHub Actions
 - dauerhafte APK-Signierung für installierbare Updates
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
