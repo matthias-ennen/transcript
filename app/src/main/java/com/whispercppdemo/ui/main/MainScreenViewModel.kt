@@ -29,10 +29,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
-private const val BASE_MODEL_URL =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
-private const val MINIMUM_MODEL_BYTES = 100L * 1024L * 1024L
+private const val PREFERENCES_NAME = "transcript_preferences"
+private const val SELECTED_MODEL_KEY = "selected_model"
 
 data class TranscriptUiState(
     val selectedAudio: Uri? = null,
@@ -45,7 +45,12 @@ data class TranscriptUiState(
     val liveWaveform: List<Float> = emptyList(),
     val isWaveformLoading: Boolean = false,
     val language: String = "auto",
+    val selectedModel: WhisperModel = WhisperModel.BASE,
+    val modelInstallations: List<ModelInstallation> = emptyList(),
     val modelReady: Boolean = false,
+    val downloadingModel: WhisperModel? = null,
+    val downloadedBytes: Long = 0L,
+    val downloadTotalBytes: Long = 0L,
     val isBusy: Boolean = false,
     val progress: Float? = null,
     val status: String = "Bitte zuerst das Whisper-Modell herunterladen.",
@@ -53,6 +58,9 @@ data class TranscriptUiState(
     val activityDetail: String? = null,
     val diagnostics: List<String> = emptyList(),
     val segments: List<WhisperSegment> = emptyList(),
+    val detectedLanguage: String? = null,
+    val completedModel: WhisperModel? = null,
+    val transcriptionDurationSeconds: Long? = null,
     val error: String? = null
 )
 
@@ -60,7 +68,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     var uiState by mutableStateOf(TranscriptUiState())
         private set
 
-    private val modelFile = File(application.filesDir, "models/ggml-base.bin")
+    private val modelsDirectory = File(application.filesDir, "models")
+    private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val audioRecorder = AudioRecorder(application)
     private val audioPlayer = AudioPlayerController(
         context = application,
@@ -79,6 +88,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     )
     private var whisperContext: WhisperContext? = null
+    private var activeContextModel: WhisperModel? = null
     private var diagnosticTimer: Job? = null
     private var recordingMeter: Job? = null
     private var playbackTimer: Job? = null
@@ -88,11 +98,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private var lastProgressBucket = -1
 
     init {
-        val ready = modelFile.isFile && modelFile.length() >= MINIMUM_MODEL_BYTES
-        uiState = uiState.copy(
-            modelReady = ready,
-            status = if (ready) "Whisper Base ist bereit." else uiState.status
-        )
+        modelsDirectory.mkdirs()
+        val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
+        refreshModelInstallations(selectedModel)
     }
 
     fun selectAudio(uri: Uri) {
@@ -208,6 +216,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             elapsedSeconds = 0L,
             activityDetail = null,
             diagnostics = emptyList(),
+            detectedLanguage = null,
+            completedModel = null,
+            transcriptionDurationSeconds = null,
             status = status
         )
         runCatching { audioPlayer.prepare(uri) }
@@ -247,31 +258,71 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(language = language)
     }
 
-    fun downloadModel() {
+    fun selectModel(model: WhisperModel) {
+        if (uiState.isBusy) return
+        preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
+        refreshModelInstallations(model)
+    }
+
+    fun downloadModel(model: WhisperModel = uiState.selectedModel) {
         if (uiState.isBusy) return
         viewModelScope.launch {
             uiState = uiState.copy(
                 isBusy = true,
                 progress = 0f,
+                downloadingModel = model,
+                downloadedBytes = 0L,
+                downloadTotalBytes = 0L,
                 error = null,
-                status = "Whisper Base wird heruntergeladen …"
+                status = "${model.modelLabel} wird heruntergeladen …"
             )
-            runCatching { downloadBaseModel() }
+            runCatching { downloadModelFile(model) }
                 .onSuccess {
+                    preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
+                    refreshModelInstallations(model)
                     uiState = uiState.copy(
-                        modelReady = true,
                         isBusy = false,
                         progress = null,
-                        status = "Whisper Base ist bereit."
+                        downloadingModel = null,
+                        status = "${model.modelLabel} ist installiert und aktiv."
                     )
                 }
                 .onFailure { throwable -> fail(throwable) }
         }
     }
 
+    fun deleteModel(model: WhisperModel = uiState.selectedModel) {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "${model.modelLabel} wird gelöscht …"
+            )
+            runCatching {
+                if (activeContextModel == model) releaseWhisperContext()
+                withContext(Dispatchers.IO) {
+                    val file = modelFile(model)
+                    check(!file.exists() || file.delete()) {
+                        "Das Modell konnte nicht gelöscht werden."
+                    }
+                }
+            }.onSuccess {
+                refreshModelInstallations(uiState.selectedModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "${model.modelLabel} wurde gelöscht."
+                )
+            }.onFailure { throwable -> fail(throwable) }
+        }
+    }
+
     fun transcribe() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
+        val selectedModel = uiState.selectedModel
+        val selectedModelFile = modelFile(selectedModel)
 
         stopPlayback(release = false)
         viewModelScope.launch {
@@ -308,14 +359,19 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     status = "2/4 · Whisper-Modell wird in den Speicher geladen …"
                 )
-                val contextWasCached = whisperContext != null
+                val contextWasCached = whisperContext != null && activeContextModel == selectedModel
                 val context = withContext(Dispatchers.IO) {
-                    whisperContext ?: WhisperContext.createContextFromFile(modelFile.absolutePath)
-                        .also { whisperContext = it }
+                    if (activeContextModel != selectedModel) releaseWhisperContext()
+                    whisperContext ?: WhisperContext.createContextFromFile(selectedModelFile.absolutePath)
+                        .also {
+                            whisperContext = it
+                            activeContextModel = selectedModel
+                        }
                 }
                 addDiagnostic(
-                    "2/4 · Whisper Base ${if (contextWasCached) "war bereits geladen" else "wurde geladen"} " +
-                        "(${formatFileSize(modelFile.length())})."
+                    "2/4 · ${selectedModel.modelLabel} " +
+                        "${if (contextWasCached) "war bereits geladen" else "wurde geladen"} " +
+                        "(${formatFileSize(selectedModelFile.length())})."
                 )
 
                 val selectedLanguage = uiState.language
@@ -349,14 +405,19 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         )
                     }
                 }
-            }.onSuccess { segments ->
+            }.onSuccess { result ->
                 stopDiagnosticTimer()
+                val elapsed = (SystemClock.elapsedRealtime() - operationStartedAtMs) / 1_000L
+                val segments = result.segments
                 addDiagnostic("Abgeschlossen: ${segments.size} Textabschnitte empfangen.")
                 uiState = uiState.copy(
                     isBusy = false,
                     progress = null,
                     activityDetail = null,
                     segments = segments,
+                    detectedLanguage = result.detectedLanguage,
+                    completedModel = selectedModel,
+                    transcriptionDurationSeconds = elapsed,
                     status = if (segments.isEmpty()) {
                         "Es wurde kein Text erkannt."
                     } else {
@@ -448,12 +509,13 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
-    private suspend fun downloadBaseModel() = withContext(Dispatchers.IO) {
-        modelFile.parentFile?.mkdirs()
-        val partial = File(modelFile.parentFile, "${modelFile.name}.part")
+    private suspend fun downloadModelFile(model: WhisperModel) = withContext(Dispatchers.IO) {
+        modelsDirectory.mkdirs()
+        val destination = modelFile(model)
+        val partial = File(modelsDirectory, "${model.fileName}.part")
         if (partial.exists()) partial.delete()
 
-        val connection = URL(BASE_MODEL_URL).openConnection() as HttpURLConnection
+        val connection = URL(model.downloadUrl).openConnection() as HttpURLConnection
         connection.instanceFollowRedirects = true
         connection.connectTimeout = 20_000
         connection.readTimeout = 60_000
@@ -464,6 +526,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 error("Modelldownload fehlgeschlagen (HTTP ${connection.responseCode}).")
             }
             val total = connection.contentLengthLong
+            val digest = MessageDigest.getInstance("SHA-256")
             connection.inputStream.use { input ->
                 partial.outputStream().buffered().use { output ->
                     val buffer = ByteArray(128 * 1024)
@@ -472,24 +535,62 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
+                        digest.update(buffer, 0, count)
                         downloaded += count
-                        if (total > 0L) {
-                            uiState = uiState.copy(
-                                progress = (downloaded.toFloat() / total).coerceIn(0f, 1f)
-                            )
-                        }
+                        uiState = uiState.copy(
+                            progress = if (total > 0L) {
+                                (downloaded.toFloat() / total).coerceIn(0f, 1f)
+                            } else null,
+                            downloadedBytes = downloaded,
+                            downloadTotalBytes = total.coerceAtLeast(0L)
+                        )
                     }
                 }
             }
-            check(partial.length() >= MINIMUM_MODEL_BYTES) {
+            check(partial.length() >= model.minimumBytes) {
                 "Das heruntergeladene Modell ist unvollständig."
             }
-            if (modelFile.exists()) modelFile.delete()
-            check(partial.renameTo(modelFile)) { "Das Modell konnte nicht gespeichert werden." }
+            val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+            check(actualSha256 == model.sha256) {
+                "Die Prüfsumme des Downloads stimmt nicht. Bitte erneut herunterladen."
+            }
+            if (destination.exists()) destination.delete()
+            check(partial.renameTo(destination)) { "Das Modell konnte nicht gespeichert werden." }
         } finally {
             connection.disconnect()
-            if (!modelFile.exists()) partial.delete()
+            if (partial.exists()) partial.delete()
         }
+    }
+
+    private fun modelFile(model: WhisperModel): File = File(modelsDirectory, model.fileName)
+
+    private fun refreshModelInstallations(selectedModel: WhisperModel) {
+        val installations = WhisperModel.entries.map { model ->
+            val file = modelFile(model)
+            ModelInstallation(
+                model = model,
+                isInstalled = file.isFile && file.length() >= model.minimumBytes,
+                installedBytes = file.takeIf { it.isFile }?.length() ?: 0L
+            )
+        }
+        val selectedInstallation = installations.first { it.model == selectedModel }
+        uiState = uiState.copy(
+            selectedModel = selectedModel,
+            modelInstallations = installations,
+            modelReady = selectedInstallation.isInstalled,
+            status = if (selectedInstallation.isInstalled) {
+                "${selectedModel.modelLabel} ist bereit."
+            } else {
+                "Bitte ${selectedModel.modelLabel} herunterladen."
+            }
+        )
+    }
+
+    private suspend fun releaseWhisperContext() {
+        val context = whisperContext
+        whisperContext = null
+        activeContextModel = null
+        context?.release()
     }
 
     private fun displayName(uri: Uri): String {
@@ -507,6 +608,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             isBusy = false,
             progress = null,
+            downloadingModel = null,
             activityDetail = null,
             error = throwable.localizedMessage ?: throwable.javaClass.simpleName,
             status = "Vorgang fehlgeschlagen."
@@ -520,8 +622,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         stopPlaybackTimer()
         audioRecorder.release()
         audioPlayer.release()
-        runBlocking { whisperContext?.release() }
-        whisperContext = null
+        runBlocking { releaseWhisperContext() }
     }
 
     companion object {

@@ -9,7 +9,8 @@ Transkriptionsdienst benötigt.
 
 - Android-Dateiauswahl für MP3 und weitere unterstützte Audioformate
 - Offline-Dekodierung zu 16 kHz Mono-PCM
-- lokaler Download des Whisper-Base-Modells
+- lokale Modellverwaltung mit vier Qualitätsstufen
+- Download, Auswahl, Prüfsummenprüfung und Löschen jedes Modells
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
 - Export als TXT, SRT und JSON
@@ -22,6 +23,7 @@ Transkriptionsdienst benötigt.
 - Play/Pause für ausgewählte Dateien und eigene Aufnahmen
 - Wellenform mit mitlaufender und per Finger verschiebbarer Positionsmarke
 - Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
+- Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
 
 ## Aufnahme und Vorhören
 
@@ -90,11 +92,21 @@ Benötigte GitHub-Actions-Secrets:
 
 Build-Test der dauerhaft signierten APK: 6. August 2026.
 
-## Modell und Speicherbedarf
+## Modelle und Speicherbedarf
 
-Beim ersten Start lädt die App `ggml-base.bin` mit ungefähr 142 MB. Das Modell
-wird im privaten App-Speicher abgelegt und nicht in das Git-Repository
-eingecheckt.
+Die App bietet vier mehrsprachige Modelle für automatische, deutsche und
+englische Transkriptionen:
+
+- **Schnell:** `ggml-base.bin` (ca. 148 MB)
+- **Ausgewogen:** `ggml-small-q5_1.bin` (ca. 190 MB)
+- **Sehr genau:** `ggml-large-v3-turbo-q5_0.bin` (ca. 574 MB)
+- **Maximale Qualität:** `ggml-large-v3-q5_0.bin` (ca. 1,08 GB)
+
+Jedes Modell kann einzeln heruntergeladen, ausgewählt und gelöscht werden. Die
+App merkt sich die zuletzt verwendete Qualitätsstufe. Nach dem Download wird
+die SHA-256-Prüfsumme kontrolliert, damit unvollständige oder beschädigte
+Modelldateien nicht verwendet werden. Die Modelle liegen im privaten
+App-Speicher und werden nicht in das Git-Repository oder die APK eingecheckt.
 
 ## Datenschutz
 

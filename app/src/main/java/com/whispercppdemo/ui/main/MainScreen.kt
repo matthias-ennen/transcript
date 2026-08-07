@@ -14,9 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -45,7 +45,7 @@ import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.export.formatTimestamp
 
 private val languages = listOf(
-    "auto" to "Automatisch",
+    "auto" to "Automatisch – empfohlen",
     "en" to "Englisch",
     "de" to "Deutsch"
 )
@@ -75,7 +75,8 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -83,15 +84,18 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 style = MaterialTheme.typography.bodyMedium
             )
 
-            if (!state.modelReady) {
-                Button(
-                    onClick = viewModel::downloadModel,
-                    enabled = !state.isBusy,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Whisper Base herunterladen (ca. 142 MB)")
-                }
-            }
+            ModelSelector(
+                selected = state.selectedModel,
+                installations = state.modelInstallations,
+                enabled = !state.isBusy && !state.isRecording,
+                onSelected = viewModel::selectModel
+            )
+
+            ModelManagerCard(
+                state = state,
+                onDownload = { viewModel.downloadModel(state.selectedModel) },
+                onDelete = { viewModel.deleteModel(state.selectedModel) }
+            )
 
             OutlinedButton(
                 onClick = { audioPicker.launch(arrayOf("audio/*")) },
@@ -136,14 +140,14 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 Text("Transkribieren")
             }
 
-            if (state.isBusy) {
+            if (state.isBusy && state.downloadingModel == null) {
                 state.progress?.let {
                     LinearProgressIndicator(progress = it, modifier = Modifier.fillMaxWidth())
                 } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
             Text(state.status, style = MaterialTheme.typography.bodyMedium)
-            if (state.isBusy) {
+            if (state.isBusy && state.downloadingModel == null) {
                 Text(
                     "Laufzeit: ${formatClock(state.elapsedSeconds)}",
                     style = MaterialTheme.typography.labelLarge
@@ -153,6 +157,10 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 Text(it, style = MaterialTheme.typography.bodySmall)
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+            if (state.segments.isNotEmpty()) {
+                TranscriptResultSummary(state)
+            }
 
             if (state.diagnostics.isNotEmpty()) {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -188,7 +196,128 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 }
             }
 
-            TranscriptList(state.segments, Modifier.weight(1f))
+            TranscriptList(state.segments)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelSelector(
+    selected: WhisperModel,
+    installations: List<ModelInstallation>,
+    enabled: Boolean,
+    onSelected: (WhisperModel) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (enabled) expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = "${selected.qualityLabel} · ${selected.modelLabel}",
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text("Qualitätsstufe") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            installations.forEach { installation ->
+                val model = installation.model
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(model.qualityLabel)
+                            Text(
+                                "${model.modelLabel} · ${model.downloadSizeLabel}" +
+                                    if (installation.isInstalled) " · Installiert" else "",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSelected(model)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelManagerCard(
+    state: TranscriptUiState,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val model = state.selectedModel
+    val installation = state.modelInstallations.firstOrNull { it.model == model }
+    val installed = installation?.isInstalled == true
+    val isDownloading = state.downloadingModel == model
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(model.qualityLabel, style = MaterialTheme.typography.titleMedium)
+            Text(model.modelLabel, style = MaterialTheme.typography.bodyMedium)
+            Text(model.description, style = MaterialTheme.typography.bodySmall)
+
+            when {
+                isDownloading -> {
+                    val downloaded = formatDownloadSize(state.downloadedBytes)
+                    val total = state.downloadTotalBytes.takeIf { it > 0L }
+                        ?.let(::formatDownloadSize)
+                        ?: model.downloadSizeLabel
+                    Text("Download: $downloaded von $total")
+                    state.progress?.let {
+                        LinearProgressIndicator(progress = it, modifier = Modifier.fillMaxWidth())
+                    } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                installed -> {
+                    Text(
+                        "Aktiv · Installiert (${formatDownloadSize(installation?.installedBytes ?: 0L)})",
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    OutlinedButton(
+                        onClick = onDelete,
+                        enabled = !state.isBusy && !state.isRecording,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Modell löschen")
+                    }
+                }
+                else -> {
+                    Text("Noch nicht installiert · Download ${model.downloadSizeLabel}")
+                    Button(
+                        onClick = onDownload,
+                        enabled = !state.isBusy && !state.isRecording,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Modell herunterladen")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TranscriptResultSummary(state: TranscriptUiState) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("Ergebnis", style = MaterialTheme.typography.titleSmall)
+            state.completedModel?.let { Text("Modell: ${it.modelLabel}") }
+            state.detectedLanguage?.let { Text("Erkannte Sprache: ${languageDisplayName(it)}") }
+            state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
         }
     }
 }
@@ -233,11 +362,10 @@ private fun LanguageSelector(
 @Composable
 private fun TranscriptList(segments: List<WhisperSegment>, modifier: Modifier = Modifier) {
     if (segments.isEmpty()) {
-        Spacer(modifier)
         return
     }
-    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(segments) { segment ->
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        segments.forEach { segment ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 SelectionContainer {
                     Column(modifier = Modifier.padding(12.dp)) {
@@ -273,4 +401,15 @@ private fun defaultName(state: TranscriptUiState, extension: String): String {
         ?.ifBlank { "Transcript" }
         ?: "Transcript"
     return "$base Transcript.$extension"
+}
+
+private fun languageDisplayName(code: String): String = when (code) {
+    "de" -> "Deutsch"
+    "en" -> "Englisch"
+    else -> code.ifBlank { "Unbekannt" }
+}
+
+private fun formatDownloadSize(bytes: Long): String = when {
+    bytes >= 1_000_000_000L -> "%.2f GB".format(bytes / 1_000_000_000.0)
+    else -> "%.1f MB".format(bytes / 1_000_000.0)
 }

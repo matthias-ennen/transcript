@@ -12,6 +12,11 @@ private const val LOG_TAG = "LibWhisper"
 
 data class WhisperSegment(val startMs: Long, val endMs: Long, val text: String)
 
+data class WhisperTranscriptResult(
+    val segments: List<WhisperSegment>,
+    val detectedLanguage: String
+)
+
 fun interface WhisperProgressListener {
     fun onProgress(percent: Int)
 }
@@ -26,7 +31,7 @@ class WhisperContext private constructor(private var ptr: Long) {
         data: FloatArray,
         language: String = "auto",
         onProgress: (Int) -> Unit = {}
-    ): List<WhisperSegment> = withContext(scope.coroutineContext) {
+    ): WhisperTranscriptResult = withContext(scope.coroutineContext) {
         require(ptr != 0L)
         val numThreads = WhisperCpuConfig.preferredThreadCount
         Log.d(LOG_TAG, "Selecting $numThreads threads")
@@ -41,13 +46,17 @@ class WhisperContext private constructor(private var ptr: Long) {
             "Whisper konnte die Audiodatei nicht verarbeiten (Fehlercode $result)."
         }
         val textCount = WhisperLib.getTextSegmentCount(ptr)
-        return@withContext List(textCount) { index ->
+        val segments = List(textCount) { index ->
             WhisperSegment(
                 startMs = WhisperLib.getTextSegmentT0(ptr, index) * 10,
                 endMs = WhisperLib.getTextSegmentT1(ptr, index) * 10,
                 text = WhisperLib.getTextSegment(ptr, index).trim()
             )
         }
+        return@withContext WhisperTranscriptResult(
+            segments = segments,
+            detectedLanguage = WhisperLib.getDetectedLanguage(ptr)
+        )
     }
 
     suspend fun benchMemory(nthreads: Int): String = withContext(scope.coroutineContext) {
@@ -160,6 +169,7 @@ private class WhisperLib {
         external fun getTextSegment(contextPtr: Long, index: Int): String
         external fun getTextSegmentT0(contextPtr: Long, index: Int): Long
         external fun getTextSegmentT1(contextPtr: Long, index: Int): Long
+        external fun getDetectedLanguage(contextPtr: Long): String
         external fun getSystemInfo(): String
         external fun benchMemcpy(nthread: Int): String
         external fun benchGgmlMulMat(nthread: Int): String

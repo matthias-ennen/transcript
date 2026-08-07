@@ -313,6 +313,16 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_getTextSegmentT1(
 }
 
 JNIEXPORT jstring JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_getDetectedLanguage(
+        JNIEnv *env, jobject thiz, jlong context_ptr) {
+    UNUSED(thiz);
+    struct whisper_context *context = (struct whisper_context *) context_ptr;
+    const int language_id = whisper_full_lang_id(context);
+    const char *language = language_id >= 0 ? whisper_lang_str(language_id) : NULL;
+    return (*env)->NewStringUTF(env, language != NULL ? language : "");
+}
+
+JNIEXPORT jstring JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_getSystemInfo(
         JNIEnv *env, jobject thiz
 ) {
