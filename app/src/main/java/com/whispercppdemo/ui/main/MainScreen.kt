@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +65,13 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::selectAudio)
     }
+    var pendingModelDownload by remember { mutableStateOf<WhisperModel?>(null) }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        pendingModelDownload?.let(viewModel::downloadModel)
+        pendingModelDownload = null
+    }
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -95,7 +103,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "MP3- und Audiodateien vollständig offline mit Whisper transkribieren.",
+                "Audio- und Videodateien vollständig offline mit Whisper transkribieren.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
@@ -108,16 +116,30 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 
             ModelManagerCard(
                 state = state,
-                onDownload = { viewModel.downloadModel(state.selectedModel) },
+                onDownload = {
+                    val model = state.selectedModel
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingModelDownload = model
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.downloadModel(model)
+                    }
+                },
                 onDelete = { viewModel.deleteModel(state.selectedModel) }
             )
 
             OutlinedButton(
-                onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                onClick = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
                 enabled = !state.isBusy && !state.isRecording,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(state.selectedFileName ?: "MP3 oder Audiodatei auswählen")
+                Text(state.selectedFileName ?: "Audio- oder Videodatei auswählen")
             }
 
             AudioControls(

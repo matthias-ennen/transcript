@@ -2,17 +2,18 @@
 
 Die kompakte CannaBot-Animation in der Titelzeile spiegelt den aktuellen App-Zustand wider, ohne die Höhe der App-Leiste zu verändern.
 
-Eine lokale Android-App, die MP3- und andere Audiodateien mit
+Eine lokale Android-App, die Audio- und Videodateien über ihre Audiospur mit
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) transkribiert.
-Die Audiodatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
+Die Mediendatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
 Transkriptionsdienst benötigt.
 
 ## Stand der ersten Ausbaustufe
 
-- Android-Dateiauswahl für MP3 und weitere unterstützte Audioformate
+- Android-Dateiauswahl für unterstützte Audio- und Videoformate
+- Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
 - lokale Modellverwaltung mit vier Qualitätsstufen
-- Download, Auswahl, Prüfsummenprüfung und Löschen jedes Modells
+- stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
 - Export als TXT, SRT und JSON
@@ -112,6 +113,11 @@ App merkt sich die zuletzt verwendete Qualitätsstufe. Nach dem Download wird
 die SHA-256-Prüfsumme kontrolliert, damit unvollständige oder beschädigte
 Modelldateien nicht verwendet werden. Die Modelle liegen im privaten
 App-Speicher und werden nicht in das Git-Repository oder die APK eingecheckt.
+
+Der Modelldownload läuft als Android-Foreground-Dienst weiter, wenn die App in
+den Hintergrund wechselt. Eine Systembenachrichtigung zeigt den Fortschritt.
+Unterbrochene `.part`-Downloads bleiben erhalten und werden beim nächsten
+Versuch per HTTP-Range fortgesetzt, sofern der Downloadserver dies unterstützt.
 
 ## Datenschutz
 

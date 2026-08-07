@@ -16,6 +16,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.whispercpp.whisper.WhisperCpuConfig
 import com.whispercpp.whisper.WhisperContext
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.download.ModelDownloadCoordinator
+import de.matthiasennen.transcript.download.ModelDownloadService
+import de.matthiasennen.transcript.download.ModelDownloadState
 import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.AudioRecorder
 import de.matthiasennen.transcript.media.decodeAudio
@@ -27,9 +30,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val PREFERENCES_NAME = "transcript_preferences"
@@ -106,6 +106,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         modelsDirectory.mkdirs()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
         refreshModelInstallations(selectedModel)
+        viewModelScope.launch {
+            ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
+        }
     }
 
     fun selectAudio(uri: Uri) {
@@ -118,7 +121,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         selectAudioInternal(
             uri = uri,
             fileName = displayName(uri),
-            status = "Audiodatei ausgewählt."
+            status = "Audio- oder Videodatei ausgewählt."
         )
     }
 
@@ -192,7 +195,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 stopPlaybackTimer()
                 uiState = uiState.copy(
                     isPlaying = false,
-                    error = throwable.localizedMessage ?: "Die Audiodatei konnte nicht abgespielt werden."
+                    error = throwable.localizedMessage ?: "Die Mediendatei konnte nicht abgespielt werden."
                 )
             }
     }
@@ -229,7 +232,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         runCatching { audioPlayer.prepare(uri) }
             .onFailure { throwable ->
                 uiState = uiState.copy(
-                    error = throwable.localizedMessage ?: "Die Audiodatei konnte nicht geöffnet werden."
+                    error = throwable.localizedMessage ?: "Die Mediendatei konnte nicht geöffnet werden."
                 )
             }
         waveformJob = viewModelScope.launch {
@@ -271,29 +274,17 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun downloadModel(model: WhisperModel = uiState.selectedModel) {
         if (uiState.isBusy) return
-        viewModelScope.launch {
-            uiState = uiState.copy(
-                isBusy = true,
-                progress = 0f,
-                downloadingModel = model,
-                downloadedBytes = 0L,
-                downloadTotalBytes = 0L,
-                error = null,
-                status = "${model.modelLabel} wird heruntergeladen …"
-            )
-            runCatching { downloadModelFile(model) }
-                .onSuccess {
-                    preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
-                    refreshModelInstallations(model)
-                    uiState = uiState.copy(
-                        isBusy = false,
-                        progress = null,
-                        downloadingModel = null,
-                        status = "${model.modelLabel} ist installiert und aktiv."
-                    )
-                }
-                .onFailure { throwable -> fail(throwable) }
-        }
+        preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
+        uiState = uiState.copy(
+            isBusy = true,
+            progress = 0f,
+            downloadingModel = model,
+            downloadedBytes = 0L,
+            downloadTotalBytes = 0L,
+            error = null,
+            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …"
+        )
+        ModelDownloadService.start(application, model)
     }
 
     fun deleteModel(model: WhisperModel = uiState.selectedModel) {
@@ -342,7 +333,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 error = null,
                 status = "1/4 · Audiodatei wird dekodiert …"
             )
-            addDiagnostic("1/4 · MP3-Decodierung gestartet.")
+            addDiagnostic("1/4 · Audio-/Video-Dekodierung gestartet.")
 
             try {
                 val decodedAudio = withContext(Dispatchers.IO) {
@@ -574,56 +565,65 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
-    private suspend fun downloadModelFile(model: WhisperModel) = withContext(Dispatchers.IO) {
-        modelsDirectory.mkdirs()
-        val destination = modelFile(model)
-        val partial = File(modelsDirectory, "${model.fileName}.part")
-        if (partial.exists()) partial.delete()
-
-        val connection = URL(model.downloadUrl).openConnection() as HttpURLConnection
-        connection.instanceFollowRedirects = true
-        connection.connectTimeout = 20_000
-        connection.readTimeout = 60_000
-
-        try {
-            connection.connect()
-            if (connection.responseCode !in 200..299) {
-                error("Modelldownload fehlgeschlagen (HTTP ${connection.responseCode}).")
-            }
-            val total = connection.contentLengthLong
-            val digest = MessageDigest.getInstance("SHA-256")
-            connection.inputStream.use { input ->
-                partial.outputStream().buffered().use { output ->
-                    val buffer = ByteArray(128 * 1024)
-                    var downloaded = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        digest.update(buffer, 0, count)
-                        downloaded += count
-                        uiState = uiState.copy(
-                            progress = if (total > 0L) {
-                                (downloaded.toFloat() / total).coerceIn(0f, 1f)
-                            } else null,
-                            downloadedBytes = downloaded,
-                            downloadTotalBytes = total.coerceAtLeast(0L)
-                        )
+    private fun handleModelDownloadState(downloadState: ModelDownloadState) {
+        when (downloadState) {
+            ModelDownloadState.Idle -> Unit
+            is ModelDownloadState.Running -> {
+                val total = downloadState.totalBytes
+                uiState = uiState.copy(
+                    isBusy = true,
+                    downloadingModel = downloadState.model,
+                    downloadedBytes = downloadState.downloadedBytes,
+                    downloadTotalBytes = total,
+                    progress = if (total > 0L) {
+                        (downloadState.downloadedBytes.toFloat() / total).coerceIn(0f, 1f)
+                    } else null,
+                    error = null,
+                    status = if (downloadState.resumed) {
+                        "${downloadState.model.modelLabel}: Download wird im Hintergrund fortgesetzt …"
+                    } else {
+                        "${downloadState.model.modelLabel} wird im Hintergrund heruntergeladen …"
                     }
-                }
+                )
             }
-            check(partial.length() >= model.minimumBytes) {
-                "Das heruntergeladene Modell ist unvollständig."
+            is ModelDownloadState.Verifying -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    downloadingModel = downloadState.model,
+                    downloadedBytes = downloadState.downloadedBytes,
+                    downloadTotalBytes = downloadState.downloadedBytes,
+                    progress = null,
+                    status = "Download vollständig · Prüfsumme wird kontrolliert …"
+                )
             }
-            val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
-            check(actualSha256 == model.sha256) {
-                "Die Prüfsumme des Downloads stimmt nicht. Bitte erneut herunterladen."
+            is ModelDownloadState.Completed -> {
+                preferences.edit().putString(SELECTED_MODEL_KEY, downloadState.model.id).apply()
+                refreshModelInstallations(downloadState.model)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    progress = null,
+                    downloadingModel = null,
+                    error = null,
+                    status = "${downloadState.model.modelLabel} ist installiert und aktiv."
+                )
+                ModelDownloadCoordinator.reset()
             }
-            if (destination.exists()) destination.delete()
-            check(partial.renameTo(destination)) { "Das Modell konnte nicht gespeichert werden." }
-        } finally {
-            connection.disconnect()
-            if (partial.exists()) partial.delete()
+            is ModelDownloadState.Failed -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    progress = null,
+                    downloadingModel = null,
+                    downloadedBytes = downloadState.downloadedBytes,
+                    downloadTotalBytes = downloadState.totalBytes,
+                    error = downloadState.message,
+                    status = if (downloadState.downloadedBytes > 0L) {
+                        "Download unterbrochen. Beim nächsten Start wird er fortgesetzt."
+                    } else {
+                        "Modelldownload fehlgeschlagen."
+                    }
+                )
+                ModelDownloadCoordinator.reset()
+            }
         }
     }
 
@@ -665,7 +665,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
             }
         }
-        return uri.lastPathSegment ?: "Audiodatei"
+        return uri.lastPathSegment ?: "Mediendatei"
     }
 
     private fun fail(throwable: Throwable) {
