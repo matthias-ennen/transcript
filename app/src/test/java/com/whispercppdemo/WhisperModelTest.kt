@@ -31,4 +31,16 @@ class WhisperModelTest {
     fun unknownStoredModelFallsBackToBase() {
         assertEquals(WhisperModel.BASE, WhisperModel.fromId("does-not-exist"))
     }
+
+    @Test
+    fun modelInstallationCountsInstalledAndPartialStorage() {
+        val installation = ModelInstallation(
+            model = WhisperModel.BASE,
+            isInstalled = true,
+            installedBytes = 140_000_000L,
+            partialBytes = 8_000_000L
+        )
+
+        assertEquals(148_000_000L, installation.storedBytes)
+    }
 }
