@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,9 +37,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -223,7 +226,7 @@ private fun MainContent(
             ModelSelector(
                 selected = state.selectedModel,
                 installations = state.modelInstallations,
-                enabled = !state.isBusy && !state.isRecording,
+                enabled = state.isModelSelectionEnabled,
                 onSelected = viewModel::selectModel
             )
 
@@ -334,9 +337,8 @@ private fun MainContent(
             TranscriptList(state.segments)
         }
     }
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelSelector(
+internal fun ModelSelector(
     selected: WhisperModel,
     installations: List<ModelInstallation>,
     enabled: Boolean,
@@ -344,20 +346,34 @@ private fun ModelSelector(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = !expanded }
-    ) {
-        OutlinedTextField(
-            value = selected.qualityLabel,
-            onValueChange = {},
-            readOnly = true,
+    LaunchedEffect(enabled) {
+        if (!enabled) expanded = false
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val selectorWidth = maxWidth
+        OutlinedButton(
+            onClick = { expanded = true },
             enabled = enabled,
-            label = { Text("Qualitätsstufe") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth()
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.Start
+            ) {
+                Text("Qualitätsstufe", style = MaterialTheme.typography.labelSmall)
+                Text(selected.qualityLabel, style = MaterialTheme.typography.bodyLarge)
+            }
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = if (expanded) "Modellliste schließen" else "Modellliste öffnen"
+            )
+        }
+        androidx.compose.material3.DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.width(selectorWidth)
+        ) {
             installations.forEach { installation ->
                 val model = installation.model
                 DropdownMenuItem(
@@ -371,6 +387,9 @@ private fun ModelSelector(
         }
     }
 }
+
+internal val TranscriptUiState.isModelSelectionEnabled: Boolean
+    get() = !isBusy && !isRecording
 
 @Composable
 private fun ModelManagerCard(
