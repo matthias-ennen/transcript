@@ -334,8 +334,6 @@ private fun MainContent(
             TranscriptList(state.segments)
         }
     }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelSelector(
