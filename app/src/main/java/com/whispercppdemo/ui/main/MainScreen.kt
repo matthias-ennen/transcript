@@ -41,8 +41,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.export.ExportFormat
+import de.matthiasennen.transcript.export.TranscriptExportMetadata
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.export.formatTimestamp
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 private val languages = listOf(
     "auto" to "Automatisch – empfohlen",
@@ -398,7 +401,13 @@ private fun rememberExporter(
                 exportTranscript(
                     segments = state.segments,
                     format = format,
-                    whisperModel = state.completedModel?.modelLabel ?: state.selectedModel.modelLabel
+                    metadata = TranscriptExportMetadata(
+                        whisperModel = state.completedModel?.modelLabel
+                            ?: state.selectedModel.modelLabel,
+                        detectedLanguage = state.detectedLanguage ?: "unknown",
+                        transcriptionDurationSeconds = state.transcriptionDurationSeconds ?: 0L,
+                        createdAt = ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                    )
                 )
             )
         }
