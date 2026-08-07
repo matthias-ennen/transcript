@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -64,6 +65,12 @@ private val languages = listOf(
     "en" to "Englisch",
     "de" to "Deutsch"
 )
+
+private enum class PendingTranscriptAction {
+    SELECT_AUDIO,
+    START_RECORDING,
+    TRANSCRIBE
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -210,6 +217,42 @@ private fun MainContent(
     srtExporter: () -> Unit,
     jsonExporter: () -> Unit
 ) {
+        var pendingTranscriptAction by remember {
+            mutableStateOf<PendingTranscriptAction?>(null)
+        }
+
+        pendingTranscriptAction?.let { pendingAction ->
+            AlertDialog(
+                onDismissRequest = { pendingTranscriptAction = null },
+                title = { Text("Änderungen noch nicht übernommen") },
+                text = {
+                    Text(
+                        "Die Textkorrekturen würden bei dieser Aktion verworfen. " +
+                            "Möchtest du trotzdem fortfahren?"
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            pendingTranscriptAction = null
+                            when (pendingAction) {
+                                PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
+                                PendingTranscriptAction.START_RECORDING -> requestRecording()
+                                PendingTranscriptAction.TRANSCRIBE -> viewModel.transcribe()
+                            }
+                        }
+                    ) {
+                        Text("Verwerfen und fortfahren")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { pendingTranscriptAction = null }) {
+                        Text("Zurück")
+                    }
+                }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -236,7 +279,13 @@ private fun MainContent(
             )
 
             OutlinedButton(
-                onClick = audioPicker,
+                onClick = {
+                    if (state.hasUnsavedTranscriptChanges) {
+                        pendingTranscriptAction = PendingTranscriptAction.SELECT_AUDIO
+                    } else {
+                        audioPicker()
+                    }
+                },
                 enabled = !state.isBusy && !state.isRecording,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -245,7 +294,13 @@ private fun MainContent(
 
             AudioControls(
                 state = state,
-                onRecordClick = requestRecording,
+                onRecordClick = {
+                    if (!state.isRecording && state.hasUnsavedTranscriptChanges) {
+                        pendingTranscriptAction = PendingTranscriptAction.START_RECORDING
+                    } else {
+                        requestRecording()
+                    }
+                },
                 onPlayPauseClick = viewModel::togglePlayback,
                 onSeek = viewModel::seekPlayback
             )
@@ -259,7 +314,11 @@ private fun MainContent(
             Button(
                 onClick = {
                     if (state.isTranscribing) viewModel.cancelTranscription()
-                    else viewModel.transcribe()
+                    else if (state.hasUnsavedTranscriptChanges) {
+                        pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
+                    } else {
+                        viewModel.transcribe()
+                    }
                 },
                 enabled = if (state.isTranscribing) {
                     !state.isCancellationRequested
@@ -314,27 +373,41 @@ private fun MainContent(
                 }
             }
 
+            TranscriptList(
+                segments = if (state.isEditingTranscript) state.draftSegments else state.segments,
+                isEditing = state.isEditingTranscript,
+                onTextChanged = viewModel::updateTranscriptText
+            )
+
             if (state.segments.isNotEmpty()) {
+                TranscriptEditorActions(
+                    state = state,
+                    onEdit = viewModel::startTranscriptEditing,
+                    onCancel = viewModel::cancelTranscriptEditing,
+                    onApply = viewModel::applyTranscriptEdits
+                )
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedButton(
                         onClick = textExporter,
+                        enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("TXT") }
                     OutlinedButton(
                         onClick = srtExporter,
+                        enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("SRT") }
                     OutlinedButton(
                         onClick = jsonExporter,
+                        enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("JSON") }
                 }
             }
-
-            TranscriptList(state.segments)
         }
     }
 @Composable
@@ -495,24 +568,88 @@ private fun LanguageSelector(
 }
 
 @Composable
-private fun TranscriptList(segments: List<WhisperSegment>, modifier: Modifier = Modifier) {
+private fun TranscriptList(
+    segments: List<WhisperSegment>,
+    isEditing: Boolean,
+    onTextChanged: (Int, String) -> Unit,
+    modifier: Modifier = Modifier
+) {
     if (segments.isEmpty()) {
         return
     }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        segments.forEach { segment ->
+        segments.forEachIndexed { index, segment ->
             Card(modifier = Modifier.fillMaxWidth()) {
-                SelectionContainer {
+                if (isEditing) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
                             "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
                             style = MaterialTheme.typography.labelMedium
                         )
                         Spacer(Modifier.height(4.dp))
-                        Text(segment.text)
+                        OutlinedTextField(
+                            value = segment.text,
+                            onValueChange = { onTextChanged(index, it) },
+                            label = { Text("Text") },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                } else {
+                    SelectionContainer {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(segment.text)
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TranscriptEditorActions(
+    state: TranscriptUiState,
+    onEdit: () -> Unit,
+    onCancel: () -> Unit,
+    onApply: () -> Unit
+) {
+    if (!state.isEditingTranscript) {
+        OutlinedButton(
+            onClick = onEdit,
+            enabled = !state.isBusy,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Bearbeiten")
+        }
+        return
+    }
+
+    Text(
+        "Alle Textabschnitte sind editierbar. Die Zeitstempel bleiben unverändert.",
+        style = MaterialTheme.typography.bodySmall
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("Abbrechen")
+        }
+        Button(
+            onClick = onApply,
+            enabled = state.hasUnsavedTranscriptChanges,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("Änderungen übernehmen")
         }
     }
 }
