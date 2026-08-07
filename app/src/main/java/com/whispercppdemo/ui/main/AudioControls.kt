@@ -10,13 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,9 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import de.matthiasennen.transcript.R
 
 @Composable
 fun AudioControls(
@@ -57,7 +52,9 @@ fun AudioControls(
             modifier = Modifier.size(52.dp)
         ) {
             Icon(
-                imageVector = if (state.isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                painter = painterResource(
+                    if (state.isRecording) R.drawable.ic_stop else R.drawable.ic_mic
+                ),
                 contentDescription = if (state.isRecording) "Aufnahme beenden" else "Aufnahme starten"
             )
         }
@@ -68,7 +65,9 @@ fun AudioControls(
             modifier = Modifier.size(52.dp)
         ) {
             Icon(
-                imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                painter = painterResource(
+                    if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play
+                ),
                 contentDescription = if (state.isPlaying) "Wiedergabe pausieren" else "Wiedergabe starten"
             )
         }
