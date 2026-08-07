@@ -11,13 +11,23 @@ enum class ExportFormat(val extension: String, val mimeType: String) {
     JSON("json", "application/json")
 }
 
+data class TranscriptExportMetadata(
+    val whisperModel: String,
+    val detectedLanguage: String,
+    val transcriptionDurationSeconds: Long,
+    val createdAt: String
+)
+
 fun exportTranscript(
     segments: List<WhisperSegment>,
     format: ExportFormat,
-    whisperModel: String
+    metadata: TranscriptExportMetadata
 ): String = when (format) {
     ExportFormat.TEXT -> buildString {
-        appendLine("Whisper-Modell: $whisperModel")
+        appendLine("Whisper-Modell: ${metadata.whisperModel}")
+        appendLine("Erkannte Sprache: ${metadata.detectedLanguage}")
+        appendLine("Transkriptionsdauer: ${formatDuration(metadata.transcriptionDurationSeconds)}")
+        appendLine("Erstellt am: ${metadata.createdAt}")
         appendLine()
         append(segments.joinToString("\n") { it.text })
     }
@@ -32,7 +42,10 @@ fun exportTranscript(
     }.joinToString("\n")
 
     ExportFormat.JSON -> JSONObject()
-        .put("whisper_model", whisperModel)
+        .put("whisper_model", metadata.whisperModel)
+        .put("detected_language", metadata.detectedLanguage)
+        .put("transcription_duration_seconds", metadata.transcriptionDurationSeconds)
+        .put("created_at", metadata.createdAt)
         .put(
             "segments",
             JSONArray().apply {
@@ -47,6 +60,14 @@ fun exportTranscript(
             }
         )
         .toString(2)
+}
+
+fun formatDuration(seconds: Long): String {
+    val safe = seconds.coerceAtLeast(0L)
+    val hours = safe / 3_600L
+    val minutes = safe % 3_600L / 60L
+    val remainingSeconds = safe % 60L
+    return String.format(Locale.ROOT, "%02d:%02d:%02d", hours, minutes, remainingSeconds)
 }
 
 fun formatTimestamp(milliseconds: Long, comma: Boolean = false): String {
