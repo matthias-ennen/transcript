@@ -11,8 +11,16 @@ enum class ExportFormat(val extension: String, val mimeType: String) {
     JSON("json", "application/json")
 }
 
-fun exportTranscript(segments: List<WhisperSegment>, format: ExportFormat): String = when (format) {
-    ExportFormat.TEXT -> segments.joinToString("\n") { it.text }
+fun exportTranscript(
+    segments: List<WhisperSegment>,
+    format: ExportFormat,
+    whisperModel: String
+): String = when (format) {
+    ExportFormat.TEXT -> buildString {
+        appendLine("Whisper-Modell: $whisperModel")
+        appendLine()
+        append(segments.joinToString("\n") { it.text })
+    }
     ExportFormat.SUBRIP -> segments.mapIndexed { index, segment ->
         buildString {
             appendLine(index + 1)
@@ -23,16 +31,22 @@ fun exportTranscript(segments: List<WhisperSegment>, format: ExportFormat): Stri
         }
     }.joinToString("\n")
 
-    ExportFormat.JSON -> JSONArray().apply {
-        segments.forEach { segment ->
-            put(
-                JSONObject()
-                    .put("start_ms", segment.startMs)
-                    .put("end_ms", segment.endMs)
-                    .put("text", segment.text)
-            )
-        }
-    }.toString(2)
+    ExportFormat.JSON -> JSONObject()
+        .put("whisper_model", whisperModel)
+        .put(
+            "segments",
+            JSONArray().apply {
+                segments.forEach { segment ->
+                    put(
+                        JSONObject()
+                            .put("start_ms", segment.startMs)
+                            .put("end_ms", segment.endMs)
+                            .put("text", segment.text)
+                    )
+                }
+            }
+        )
+        .toString(2)
 }
 
 fun formatTimestamp(milliseconds: Long, comma: Boolean = false): String {

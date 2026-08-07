@@ -216,7 +216,7 @@ private fun ModelSelector(
         onExpandedChange = { if (enabled) expanded = !expanded }
     ) {
         OutlinedTextField(
-            value = "${selected.qualityLabel} · ${selected.modelLabel}",
+            value = selected.qualityLabel,
             onValueChange = {},
             readOnly = true,
             enabled = enabled,
@@ -228,16 +228,7 @@ private fun ModelSelector(
             installations.forEach { installation ->
                 val model = installation.model
                 DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(model.qualityLabel)
-                            Text(
-                                "${model.modelLabel} · ${model.downloadSizeLabel}" +
-                                    if (installation.isInstalled) " · Installiert" else "",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    },
+                    text = { Text(model.qualityLabel) },
                     onClick = {
                         onSelected(model)
                         expanded = false
@@ -390,7 +381,13 @@ private fun rememberExporter(
 ) = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(format.mimeType)) { uri: Uri? ->
     uri?.let {
         context.contentResolver.openOutputStream(it)?.bufferedWriter()?.use { writer ->
-            writer.write(exportTranscript(state.segments, format))
+            writer.write(
+                exportTranscript(
+                    segments = state.segments,
+                    format = format,
+                    whisperModel = state.completedModel?.modelLabel ?: state.selectedModel.modelLabel
+                )
+            )
         }
     }
 }
