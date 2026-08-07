@@ -18,6 +18,7 @@ Transkriptionsdienst benötigt.
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
+- gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
   als Metadaten in TXT- und JSON-Exporten
@@ -49,6 +50,16 @@ Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
 abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
 durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
 Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel.
+
+## Transkript korrigieren
+
+Nach einer Transkription schaltet **Bearbeiten** alle erkannten Textabschnitte
+gemeinsam in den Korrekturmodus. Die zugehörigen Zeitstempel bleiben sichtbar
+und unveränderbar. **Abbrechen** verwirft den Entwurf; **Änderungen übernehmen**
+aktualisiert das Ergebnis, das anschließend einheitlich für TXT, SRT und JSON
+verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
+Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
+App, wenn dadurch ein geänderter Entwurf verloren ginge.
 
 ## Diagnose während der Transkription
 

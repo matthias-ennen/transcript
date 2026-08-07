@@ -61,6 +61,8 @@ data class TranscriptUiState(
     val activityDetail: String? = null,
     val diagnostics: List<String> = emptyList(),
     val segments: List<WhisperSegment> = emptyList(),
+    val isEditingTranscript: Boolean = false,
+    val draftSegments: List<WhisperSegment> = emptyList(),
     val detectedLanguage: String? = null,
     val completedModel: WhisperModel? = null,
     val transcriptionDurationSeconds: Long? = null,
@@ -134,6 +136,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isRecording = true,
                     liveWaveform = emptyList(),
                     segments = emptyList(),
+                    isEditingTranscript = false,
+                    draftSegments = emptyList(),
                     error = null,
                     status = "Aufnahme läuft … Zum Beenden erneut tippen."
                 )
@@ -220,6 +224,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             waveform = emptyList(),
             isWaveformLoading = true,
             segments = emptyList(),
+            isEditingTranscript = false,
+            draftSegments = emptyList(),
             error = null,
             elapsedSeconds = 0L,
             activityDetail = null,
@@ -270,6 +276,41 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (uiState.isBusy) return
         preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
         refreshModelInstallations(model)
+    }
+
+    fun startTranscriptEditing() {
+        if (uiState.isBusy || uiState.segments.isEmpty()) return
+        uiState = uiState.copy(
+            isEditingTranscript = true,
+            draftSegments = uiState.segments
+        )
+    }
+
+    fun updateTranscriptText(index: Int, text: String) {
+        if (!uiState.isEditingTranscript) return
+        uiState = uiState.copy(
+            draftSegments = uiState.draftSegments.withUpdatedTranscriptText(index, text)
+        )
+    }
+
+    fun cancelTranscriptEditing() {
+        if (!uiState.isEditingTranscript) return
+        uiState = uiState.copy(
+            isEditingTranscript = false,
+            draftSegments = emptyList()
+        )
+    }
+
+    fun applyTranscriptEdits() {
+        if (!uiState.isEditingTranscript || uiState.draftSegments.size != uiState.segments.size) {
+            return
+        }
+        uiState = uiState.copy(
+            segments = uiState.draftSegments,
+            isEditingTranscript = false,
+            draftSegments = emptyList(),
+            status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert."
+        )
     }
 
     fun downloadModel(model: WhisperModel = uiState.selectedModel) {
@@ -367,6 +408,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 isCancellationRequested = false,
                 progress = 0f,
                 segments = emptyList(),
+                isEditingTranscript = false,
+                draftSegments = emptyList(),
                 error = null,
                 status = "1/4 · Audiodatei wird dekodiert …"
             )
@@ -464,6 +507,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     activityDetail = null,
                     segments = segments,
+                    isEditingTranscript = false,
+                    draftSegments = emptyList(),
                     detectedLanguage = result.detectedLanguage,
                     completedModel = selectedModel,
                     transcriptionDurationSeconds = elapsed,
@@ -517,6 +562,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             progress = null,
             activityDetail = null,
             segments = emptyList(),
+            isEditingTranscript = false,
+            draftSegments = emptyList(),
             detectedLanguage = null,
             completedModel = null,
             transcriptionDurationSeconds = null,
