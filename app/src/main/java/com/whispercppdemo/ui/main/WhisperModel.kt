@@ -62,5 +62,9 @@ enum class WhisperModel(
 data class ModelInstallation(
     val model: WhisperModel,
     val isInstalled: Boolean,
-    val installedBytes: Long = 0L
-)
+    val installedBytes: Long = 0L,
+    val partialBytes: Long = 0L
+) {
+    val storedBytes: Long
+        get() = installedBytes + partialBytes
+}

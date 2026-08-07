@@ -13,6 +13,7 @@ Transkriptionsdienst benötigt.
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
 - lokale Modellverwaltung mit vier Qualitätsstufen
+- eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
@@ -30,6 +31,9 @@ Transkriptionsdienst benötigt.
 - Wellenform mit mitlaufender und per Finger verschiebbarer Positionsmarke
 - Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
 - Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
+- kompakte Kopfzeile mit Einstellungen und App-Informationen
+- App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
+- sichtbarer, noch nicht aktiver Bereich „Entwickler unterstützen“ für einen späteren Store-Ausbau
 
 ## Aufnahme und Vorhören
 

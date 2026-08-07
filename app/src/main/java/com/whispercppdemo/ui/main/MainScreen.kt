@@ -27,11 +27,17 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +67,7 @@ private val languages = listOf(
 fun MainScreen(viewModel: MainScreenViewModel) {
     val state = viewModel.uiState
     val context = LocalContext.current
+    var page by remember { mutableStateOf(AppPage.MAIN) }
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::selectAudio)
@@ -83,17 +90,123 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Transcript")
-                        Spacer(Modifier.width(8.dp))
-                        CannaBotTitleAnimation(state)
-                    }
-                }
+            TranscriptTopBar(
+                state = state,
+                page = page,
+                onNavigate = { page = it }
             )
         }
     ) { innerPadding ->
+        when (page) {
+            AppPage.SETTINGS -> SettingsScreen(
+                state = state,
+                onDeleteModel = viewModel::deleteModel,
+                onDeleteAllModels = viewModel::deleteAllModels,
+                modifier = Modifier.padding(innerPadding)
+            )
+            AppPage.ABOUT -> AboutScreen(
+                modifier = Modifier.padding(innerPadding)
+            )
+            AppPage.MAIN -> MainContent(
+                viewModel = viewModel,
+                state = state,
+                innerPadding = innerPadding,
+                audioPicker = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
+                requestModelDownload = {
+                    val model = state.selectedModel
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingModelDownload = model
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.downloadModel(model)
+                    }
+                },
+                requestRecording = {
+                    if (state.isRecording) {
+                        viewModel.stopRecording()
+                    } else if (
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        viewModel.startRecording()
+                    } else {
+                        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                textExporter = { textExporter.launch(defaultName(state, "txt")) },
+                srtExporter = { srtExporter.launch(defaultName(state, "srt")) },
+                jsonExporter = { jsonExporter.launch(defaultName(state, "json")) }
+            )
+        }
+    }
+}
+
+private enum class AppPage { MAIN, SETTINGS, ABOUT }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TranscriptTopBar(
+    state: TranscriptUiState,
+    page: AppPage,
+    onNavigate: (AppPage) -> Unit
+) {
+    TopAppBar(
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (page == AppPage.MAIN) "Transcript" else page.title)
+                if (page == AppPage.MAIN) {
+                    Spacer(Modifier.width(8.dp))
+                    CannaBotTitleAnimation(state)
+                }
+            }
+        },
+        navigationIcon = {
+            if (page != AppPage.MAIN) {
+                IconButton(onClick = { onNavigate(AppPage.MAIN) }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
+                }
+            }
+        },
+        actions = {
+            if (page == AppPage.MAIN) {
+                IconButton(onClick = { onNavigate(AppPage.SETTINGS) }) {
+                    Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
+                }
+                IconButton(onClick = { onNavigate(AppPage.ABOUT) }) {
+                    Icon(Icons.Default.Info, contentDescription = "Über die App")
+                }
+            }
+        }
+    )
+}
+
+private val AppPage.title: String
+    get() = when (this) {
+        AppPage.MAIN -> "Transcript"
+        AppPage.SETTINGS -> "Einstellungen"
+        AppPage.ABOUT -> "Über die App"
+    }
+
+@Composable
+private fun MainContent(
+    viewModel: MainScreenViewModel,
+    state: TranscriptUiState,
+    innerPadding: androidx.compose.foundation.layout.PaddingValues,
+    audioPicker: () -> Unit,
+    requestModelDownload: () -> Unit,
+    requestRecording: () -> Unit,
+    textExporter: () -> Unit,
+    srtExporter: () -> Unit,
+    jsonExporter: () -> Unit
+) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -116,26 +229,11 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 
             ModelManagerCard(
                 state = state,
-                onDownload = {
-                    val model = state.selectedModel
-                    if (
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.POST_NOTIFICATIONS
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        pendingModelDownload = model
-                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    } else {
-                        viewModel.downloadModel(model)
-                    }
-                },
-                onDelete = { viewModel.deleteModel(state.selectedModel) }
+                onDownload = requestModelDownload
             )
 
             OutlinedButton(
-                onClick = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
+                onClick = audioPicker,
                 enabled = !state.isBusy && !state.isRecording,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -144,20 +242,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 
             AudioControls(
                 state = state,
-                onRecordClick = {
-                    if (state.isRecording) {
-                        viewModel.stopRecording()
-                    } else if (
-                        ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        viewModel.startRecording()
-                    } else {
-                        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                },
+                onRecordClick = requestRecording,
                 onPlayPauseClick = viewModel::togglePlayback,
                 onSeek = viewModel::seekPlayback
             )
@@ -232,15 +317,15 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedButton(
-                        onClick = { textExporter.launch(defaultName(state, "txt")) },
+                        onClick = textExporter,
                         modifier = Modifier.weight(1f)
                     ) { Text("TXT") }
                     OutlinedButton(
-                        onClick = { srtExporter.launch(defaultName(state, "srt")) },
+                        onClick = srtExporter,
                         modifier = Modifier.weight(1f)
                     ) { Text("SRT") }
                     OutlinedButton(
-                        onClick = { jsonExporter.launch(defaultName(state, "json")) },
+                        onClick = jsonExporter,
                         modifier = Modifier.weight(1f)
                     ) { Text("JSON") }
                 }
@@ -292,8 +377,7 @@ private fun ModelSelector(
 @Composable
 private fun ModelManagerCard(
     state: TranscriptUiState,
-    onDownload: () -> Unit,
-    onDelete: () -> Unit
+    onDownload: () -> Unit
 ) {
     val model = state.selectedModel
     val installation = state.modelInstallations.firstOrNull { it.model == model }
@@ -325,13 +409,6 @@ private fun ModelManagerCard(
                         "Aktiv · Installiert (${formatDownloadSize(installation?.installedBytes ?: 0L)})",
                         color = MaterialTheme.colorScheme.primary
                     )
-                    OutlinedButton(
-                        onClick = onDelete,
-                        enabled = !state.isBusy && !state.isRecording,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Modell löschen")
-                    }
                 }
                 else -> {
                     Text("Noch nicht installiert · Download ${model.downloadSizeLabel}")
@@ -462,7 +539,7 @@ private fun languageDisplayName(code: String): String = when (code) {
     else -> code.ifBlank { "Unbekannt" }
 }
 
-private fun formatDownloadSize(bytes: Long): String = when {
+internal fun formatDownloadSize(bytes: Long): String = when {
     bytes >= 1_000_000_000L -> "%.2f GB".format(bytes / 1_000_000_000.0)
     else -> "%.1f MB".format(bytes / 1_000_000.0)
 }

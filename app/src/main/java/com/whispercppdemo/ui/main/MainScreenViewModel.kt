@@ -303,12 +303,49 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     check(!file.exists() || file.delete()) {
                         "Das Modell konnte nicht gelöscht werden."
                     }
+                    val partial = partialModelFile(model)
+                    check(!partial.exists() || partial.delete()) {
+                        "Der unvollständige Download konnte nicht gelöscht werden."
+                    }
                 }
             }.onSuccess {
                 refreshModelInstallations(uiState.selectedModel)
                 uiState = uiState.copy(
                     isBusy = false,
                     status = "${model.modelLabel} wurde gelöscht."
+                )
+            }.onFailure { throwable -> fail(throwable) }
+        }
+    }
+
+    fun deleteAllModels() {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "Alle Whisper-Modelle werden gelöscht …"
+            )
+            runCatching {
+                releaseWhisperContext()
+                withContext(Dispatchers.IO) {
+                    WhisperModel.entries.forEach { model ->
+                        val file = modelFile(model)
+                        check(!file.exists() || file.delete()) {
+                            "${model.modelLabel} konnte nicht gelöscht werden."
+                        }
+                        val partial = partialModelFile(model)
+                        check(!partial.exists() || partial.delete()) {
+                            "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
+                        }
+                    }
+                }
+            }.onSuccess {
+                refreshModelInstallations(uiState.selectedModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "Alle Whisper-Modelle wurden gelöscht."
                 )
             }.onFailure { throwable -> fail(throwable) }
         }
@@ -629,13 +666,17 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     private fun modelFile(model: WhisperModel): File = File(modelsDirectory, model.fileName)
 
+    private fun partialModelFile(model: WhisperModel): File =
+        File(modelsDirectory, "${model.fileName}.part")
+
     private fun refreshModelInstallations(selectedModel: WhisperModel) {
         val installations = WhisperModel.entries.map { model ->
             val file = modelFile(model)
             ModelInstallation(
                 model = model,
                 isInstalled = file.isFile && file.length() >= model.minimumBytes,
-                installedBytes = file.takeIf { it.isFile }?.length() ?: 0L
+                installedBytes = file.takeIf { it.isFile }?.length() ?: 0L,
+                partialBytes = partialModelFile(model).takeIf { it.isFile }?.length() ?: 0L
             )
         }
         val selectedInstallation = installations.first { it.model == selectedModel }
