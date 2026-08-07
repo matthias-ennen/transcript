@@ -13,6 +13,7 @@ Transkriptionsdienst benötigt.
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
 - lokale Modellverwaltung mit vier Qualitätsstufen
+- robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
@@ -34,6 +35,7 @@ Transkriptionsdienst benötigt.
 - kompakte Kopfzeile mit Einstellungen und App-Informationen
 - App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
 - sichtbarer, noch nicht aktiver Bereich „Entwickler unterstützen“ für einen späteren Store-Ausbau
+- adaptives CannaBot-App-Symbol mit klassischen, runden und Android-13-Themenvarianten
 
 ## Aufnahme und Vorhören
 
