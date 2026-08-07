@@ -18,6 +18,23 @@ Transkriptionsdienst benötigt.
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
 - laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
+- direkte Mikrofonaufnahme mit automatischer Speicherung im App-Bereich
+- Play/Pause für ausgewählte Dateien und eigene Aufnahmen
+- Wellenform mit mitlaufender und per Finger verschiebbarer Positionsmarke
+- Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
+
+## Aufnahme und Vorhören
+
+Unter der Dateiauswahl kann eine Aufnahme direkt über die Mikrofontaste
+gestartet werden. Während der Aufnahme wird dieselbe Taste zum Stopp-Symbol.
+Die fertige AAC-/M4A-Datei wird unter `files/recordings` im privaten
+App-Speicher abgelegt und sofort als aktuelle Audiodatei ausgewählt. Ihr Name
+enthält Datum und Uhrzeit.
+
+Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
+abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
+durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
+Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel.
 
 ## Diagnose während der Transkription
 

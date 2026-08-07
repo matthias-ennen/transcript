@@ -16,7 +16,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.whispercpp.whisper.WhisperCpuConfig
 import com.whispercpp.whisper.WhisperContext
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.media.AudioPlayerController
+import de.matthiasennen.transcript.media.AudioRecorder
 import de.matthiasennen.transcript.media.decodeAudio
+import de.matthiasennen.transcript.media.generateWaveform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,6 +37,13 @@ private const val MINIMUM_MODEL_BYTES = 100L * 1024L * 1024L
 data class TranscriptUiState(
     val selectedAudio: Uri? = null,
     val selectedFileName: String? = null,
+    val isRecording: Boolean = false,
+    val isPlaying: Boolean = false,
+    val playbackPositionMs: Long = 0L,
+    val audioDurationMs: Long = 0L,
+    val waveform: List<Float> = emptyList(),
+    val liveWaveform: List<Float> = emptyList(),
+    val isWaveformLoading: Boolean = false,
     val language: String = "auto",
     val modelReady: Boolean = false,
     val isBusy: Boolean = false,
@@ -51,8 +61,28 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         private set
 
     private val modelFile = File(application.filesDir, "models/ggml-base.bin")
+    private val audioRecorder = AudioRecorder(application)
+    private val audioPlayer = AudioPlayerController(
+        context = application,
+        onPrepared = { durationMs ->
+            uiState = uiState.copy(audioDurationMs = durationMs)
+        },
+        onCompletion = {
+            playbackTimer?.cancel()
+            playbackTimer = null
+            uiState = uiState.copy(isPlaying = false, playbackPositionMs = 0L)
+        },
+        onError = { message ->
+            playbackTimer?.cancel()
+            playbackTimer = null
+            uiState = uiState.copy(isPlaying = false, error = message)
+        }
+    )
     private var whisperContext: WhisperContext? = null
     private var diagnosticTimer: Job? = null
+    private var recordingMeter: Job? = null
+    private var playbackTimer: Job? = null
+    private var waveformJob: Job? = null
     private var operationStartedAtMs = 0L
     private var lastNativeProgressAtMs = 0L
     private var lastProgressBucket = -1
@@ -72,16 +102,145 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
+        selectAudioInternal(
+            uri = uri,
+            fileName = displayName(uri),
+            status = "Audiodatei ausgewählt."
+        )
+    }
+
+    fun startRecording() {
+        if (uiState.isBusy || uiState.isRecording) return
+        stopPlayback(release = true)
+        runCatching { audioRecorder.start() }
+            .onSuccess {
+                uiState = uiState.copy(
+                    isRecording = true,
+                    liveWaveform = emptyList(),
+                    segments = emptyList(),
+                    error = null,
+                    status = "Aufnahme läuft … Zum Beenden erneut tippen."
+                )
+                recordingMeter?.cancel()
+                recordingMeter = viewModelScope.launch {
+                    while (uiState.isRecording) {
+                        delay(100L)
+                        val amplitude = audioRecorder.currentAmplitude()
+                        uiState = uiState.copy(
+                            liveWaveform = (uiState.liveWaveform + amplitude).takeLast(72)
+                        )
+                    }
+                }
+            }
+            .onFailure { throwable ->
+                uiState = uiState.copy(
+                    error = throwable.localizedMessage ?: "Die Aufnahme konnte nicht gestartet werden.",
+                    status = "Aufnahme fehlgeschlagen."
+                )
+            }
+    }
+
+    fun reportMicrophonePermissionDenied() {
+        uiState = uiState.copy(
+            error = "Für eine Aufnahme benötigt Transcript die Mikrofonberechtigung.",
+            status = "Mikrofonberechtigung fehlt."
+        )
+    }
+
+    fun stopRecording() {
+        if (!uiState.isRecording) return
+        recordingMeter?.cancel()
+        recordingMeter = null
+        val file = audioRecorder.stop()
+        uiState = uiState.copy(isRecording = false, liveWaveform = emptyList())
+        if (file == null || !file.isFile || file.length() == 0L) {
+            uiState = uiState.copy(
+                error = "Die Aufnahme war zu kurz oder konnte nicht gespeichert werden.",
+                status = "Aufnahme fehlgeschlagen."
+            )
+            return
+        }
+        selectAudioInternal(
+            uri = Uri.fromFile(file),
+            fileName = file.name,
+            status = "Aufnahme gespeichert und ausgewählt."
+        )
+    }
+
+    fun togglePlayback() {
+        val uri = uiState.selectedAudio ?: return
+        if (uiState.isRecording || uiState.isBusy) return
+        runCatching { audioPlayer.toggle(uri) }
+            .onSuccess { playing ->
+                uiState = uiState.copy(isPlaying = playing, error = null)
+                if (playing) startPlaybackTimer() else stopPlaybackTimer()
+            }
+            .onFailure { throwable ->
+                stopPlaybackTimer()
+                uiState = uiState.copy(
+                    isPlaying = false,
+                    error = throwable.localizedMessage ?: "Die Audiodatei konnte nicht abgespielt werden."
+                )
+            }
+    }
+
+    fun seekPlayback(fraction: Float) {
+        val duration = uiState.audioDurationMs
+        if (duration <= 0L) return
+        val position = (duration * fraction.coerceIn(0f, 1f)).toLong()
+        audioPlayer.seekTo(position)
+        uiState = uiState.copy(playbackPositionMs = position)
+    }
+
+    private fun selectAudioInternal(uri: Uri, fileName: String, status: String) {
+        stopPlayback(release = true)
+        waveformJob?.cancel()
         uiState = uiState.copy(
             selectedAudio = uri,
-            selectedFileName = displayName(uri),
+            selectedFileName = fileName,
+            isPlaying = false,
+            playbackPositionMs = 0L,
+            audioDurationMs = 0L,
+            waveform = emptyList(),
+            isWaveformLoading = true,
             segments = emptyList(),
             error = null,
             elapsedSeconds = 0L,
             activityDetail = null,
             diagnostics = emptyList(),
-            status = "Audiodatei ausgewählt."
+            status = status
         )
+        runCatching { audioPlayer.prepare(uri) }
+            .onFailure { throwable ->
+                uiState = uiState.copy(
+                    error = throwable.localizedMessage ?: "Die Audiodatei konnte nicht geöffnet werden."
+                )
+            }
+        waveformJob = viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { generateWaveform(application, uri) } }
+                .onSuccess { (waveform, durationMs) ->
+                    if (uiState.selectedAudio == uri) {
+                        uiState = uiState.copy(
+                            waveform = waveform,
+                            audioDurationMs = if (uiState.audioDurationMs > 0L) {
+                                uiState.audioDurationMs
+                            } else {
+                                durationMs
+                            },
+                            isWaveformLoading = false
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    if (uiState.selectedAudio == uri) {
+                        uiState = uiState.copy(
+                            isWaveformLoading = false,
+                            error = "Wellenform konnte nicht erstellt werden: " +
+                                (throwable.localizedMessage ?: throwable.javaClass.simpleName)
+                        )
+                    }
+                }
+        }
     }
 
     fun setLanguage(language: String) {
@@ -114,6 +273,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
 
+        stopPlayback(release = false)
         viewModelScope.launch {
             startDiagnostics()
             uiState = uiState.copy(
@@ -253,6 +413,32 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         diagnosticTimer = null
     }
 
+    private fun startPlaybackTimer() {
+        playbackTimer?.cancel()
+        playbackTimer = viewModelScope.launch {
+            while (uiState.isPlaying) {
+                uiState = uiState.copy(
+                    playbackPositionMs = audioPlayer.positionMs(),
+                    audioDurationMs = audioPlayer.durationMs().takeIf { it > 0L }
+                        ?: uiState.audioDurationMs
+                )
+                delay(100L)
+            }
+        }
+    }
+
+    private fun stopPlaybackTimer() {
+        playbackTimer?.cancel()
+        playbackTimer = null
+    }
+
+    private fun stopPlayback(release: Boolean) {
+        stopPlaybackTimer()
+        audioPlayer.pause()
+        if (release) audioPlayer.release()
+        uiState = uiState.copy(isPlaying = false)
+    }
+
     private fun addDiagnostic(message: String) {
         val elapsed = if (operationStartedAtMs == 0L) 0L else {
             (SystemClock.elapsedRealtime() - operationStartedAtMs) / 1_000L
@@ -307,9 +493,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun displayName(uri: Uri): String {
-        application.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
+        runCatching {
+            application.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
+            }
         }
         return uri.lastPathSegment ?: "Audiodatei"
     }
@@ -327,6 +515,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     override fun onCleared() {
         stopDiagnosticTimer()
+        recordingMeter?.cancel()
+        waveformJob?.cancel()
+        stopPlaybackTimer()
+        audioRecorder.release()
+        audioPlayer.release()
         runBlocking { whisperContext?.release() }
         whisperContext = null
     }

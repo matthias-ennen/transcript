@@ -1,6 +1,8 @@
 package de.matthiasennen.transcript.ui.main
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.exportTranscript
@@ -55,6 +58,11 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::selectAudio)
+    }
+    val microphonePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.startRecording() else viewModel.reportMicrophonePermissionDenied()
     }
     val textExporter = rememberExporter(context, state, ExportFormat.TEXT)
     val srtExporter = rememberExporter(context, state, ExportFormat.SUBRIP)
@@ -87,21 +95,42 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 
             OutlinedButton(
                 onClick = { audioPicker.launch(arrayOf("audio/*")) },
-                enabled = !state.isBusy,
+                enabled = !state.isBusy && !state.isRecording,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(state.selectedFileName ?: "MP3 oder Audiodatei auswählen")
             }
 
+            AudioControls(
+                state = state,
+                onRecordClick = {
+                    if (state.isRecording) {
+                        viewModel.stopRecording()
+                    } else if (
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        viewModel.startRecording()
+                    } else {
+                        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onPlayPauseClick = viewModel::togglePlayback,
+                onSeek = viewModel::seekPlayback
+            )
+
             LanguageSelector(
                 selected = state.language,
-                enabled = !state.isBusy,
+                enabled = !state.isBusy && !state.isRecording,
                 onSelected = viewModel::setLanguage
             )
 
             Button(
                 onClick = viewModel::transcribe,
-                enabled = state.modelReady && state.selectedAudio != null && !state.isBusy,
+                enabled = state.modelReady && state.selectedAudio != null &&
+                    !state.isBusy && !state.isRecording,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Transkribieren")
