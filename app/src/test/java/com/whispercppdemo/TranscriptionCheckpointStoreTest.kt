@@ -53,4 +53,3 @@ class TranscriptionCheckpointStoreTest {
         assertFalse(file.exists())
     }
 }
-

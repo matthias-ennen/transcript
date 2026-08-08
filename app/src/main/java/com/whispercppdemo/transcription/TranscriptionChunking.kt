@@ -95,4 +95,3 @@ fun mergeCommittedSegments(
 ): List<WhisperSegment> = (committed + next)
     .filter { it.text.isNotBlank() }
     .sortedWith(compareBy(WhisperSegment::startMs, WhisperSegment::endMs))
-

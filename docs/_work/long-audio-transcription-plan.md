@@ -39,4 +39,3 @@ und bleibt von diesem Umbau getrennt.
 - Teilergebnisse bleiben bei einer Prozessunterbrechung erhalten.
 - Wellenformfehler beeinflussen den Transkriptionsdienst nicht.
 - README und Architekturübersicht beschreiben den tatsächlichen Stand.
-

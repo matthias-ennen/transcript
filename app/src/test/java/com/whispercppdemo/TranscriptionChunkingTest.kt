@@ -73,4 +73,3 @@ class TranscriptionChunkingTest {
         assertFalse(absolute.single().text.isBlank())
     }
 }
-
