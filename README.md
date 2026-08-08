@@ -9,6 +9,19 @@ Innerhalb der App lautet der Produktname **Simple Transcript**. Unter dem
 App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
 **Transcript** angezeigt.
 
+## Aktueller Entwicklungsstand
+
+Die App benötigt mindestens **Android 8.0 (API 26)**. Sie transkribiert lokal
+auf dem Android-Gerät und bietet inzwischen fünf Qualitätsstufen von
+**Whisper Tiny („Sehr schnell“)** bis **Whisper Large V3 („Maximale Qualität“)**.
+Die Modelle werden bei Bedarf einzeln heruntergeladen und sind nicht Bestandteil
+der APK.
+
+Der Schalter mit deutscher und britischer Flagge ist bereits in der Kopfzeile
+vorbereitet und speichert die Auswahl dauerhaft. Die vollständige Übersetzung
+der Bedienoberfläche, Statusmeldungen, Dialoge und Systembenachrichtigungen ist
+noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
+
 ## Funktionsumfang
 
 - Android-Dateiauswahl für unterstützte Audio- und Videoformate
@@ -22,7 +35,7 @@ App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
-- automatische, deutsche oder englische Spracherkennung
+- Transkriptionssprache wahlweise automatisch erkannt, Deutsch oder Englisch
 - Ausgabe mit Segmentzeitstempeln
 - fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
   die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
@@ -183,11 +196,13 @@ Upload zusätzlich die APK-Signatur.
 Die App bietet fünf mehrsprachige Modelle für automatische, deutsche und
 englische Transkriptionen:
 
-- **Sehr schnell:** `ggml-tiny.bin` (ca. 77,7 MB)
-- **Schnell:** `ggml-base.bin` (ca. 148 MB)
-- **Ausgewogen:** `ggml-small-q5_1.bin` (ca. 190 MB)
-- **Sehr genau:** `ggml-large-v3-turbo-q5_0.bin` (ca. 574 MB)
-- **Maximale Qualität:** `ggml-large-v3-q5_0.bin` (ca. 1,08 GB)
+| Qualitätsstufe | Whisper-Modell | Modelldatei | Downloadgröße |
+| --- | --- | --- | ---: |
+| Sehr schnell | Whisper Tiny | `ggml-tiny.bin` | ca. 77,7 MB |
+| Schnell | Whisper Base | `ggml-base.bin` | ca. 148 MB |
+| Ausgewogen | Whisper Small Q5_1 | `ggml-small-q5_1.bin` | ca. 190 MB |
+| Sehr genau | Whisper Large V3 Turbo Q5_0 | `ggml-large-v3-turbo-q5_0.bin` | ca. 574 MB |
+| Maximale Qualität | Whisper Large V3 Q5_0 | `ggml-large-v3-q5_0.bin` | ca. 1,08 GB |
 
 Jedes Modell kann einzeln heruntergeladen, ausgewählt und gelöscht werden. Die
 App merkt sich die zuletzt verwendete Qualitätsstufe. Nach dem Download wird
@@ -199,6 +214,22 @@ Der Modelldownload läuft als Android-Foreground-Dienst weiter, wenn die App in
 den Hintergrund wechselt. Eine Systembenachrichtigung zeigt den Fortschritt.
 Unterbrochene `.part`-Downloads bleiben erhalten und werden beim nächsten
 Versuch per HTTP-Range fortgesetzt, sofern der Downloadserver dies unterstützt.
+
+## Sprachen
+
+Die App unterscheidet zwei voneinander unabhängige Spracheinstellungen:
+
+- **Transkriptionssprache:** automatische Erkennung, Deutsch oder Englisch.
+  Bei automatischer Erkennung zeigt die App den von Whisper gelieferten
+  Sprachcode als vollständige deutsche Sprachbezeichnung an, zum Beispiel
+  **Dänisch** statt `da`.
+- **GUI-Sprache:** Deutsch oder Englisch über den Flaggenumschalter. Die Auswahl
+  wird bereits gespeichert; die vollständige englische Oberfläche folgt in
+  einem späteren Arbeitsschritt.
+
+Die angezeigte voraussichtliche Transkriptionsdauer wird aus Mediendauer und
+gewähltem Whisper-Modell berechnet. Sie ist eine bewusst grobe Erstschätzung
+und soll anhand praktischer Messwerte auf dem Zielgerät kalibriert werden.
 
 ## Datenschutz
 
