@@ -409,7 +409,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             uiState = uiState.copy(
                 status = when {
                     stateBeforeSelection.isWaveformLoading -> stateBeforeSelection.status
-                    uiState.mediaReadyStatus != null -> uiState.mediaReadyStatus
+                    uiState.mediaReadyStatus != null ->
+                        uiState.mediaReadyStatus ?: uiState.status
                     else -> uiState.status
                 },
                 activityDetail = if (stateBeforeSelection.isWaveformLoading) {
