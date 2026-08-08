@@ -56,13 +56,13 @@ jobs:
           fi
           printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/transcript-signing.jks"
 
-      - name: Build permanently signed debug APK
+      - name: Run unit tests and build permanently signed debug APK
         env:
           ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/transcript-signing.jks
           ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
 
       - name: Verify APK signature
         run: |

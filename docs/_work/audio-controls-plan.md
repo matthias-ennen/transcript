@@ -2,6 +2,8 @@
 
 Stand: 7. August 2026
 
+Status: umgesetzt; die Datei bleibt als nachvollziehbarer Arbeitsplan erhalten.
+
 ## Ziel
 
 Die vorhandene Dateiauswahl wird um eine vollständig lokale Aufnahme- und

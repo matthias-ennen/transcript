@@ -27,7 +27,10 @@ private enum class CannaBotAnimation(
     val frameDurationMs: Long
 ) {
     IDLE(row = 0, frameCount = 6, frameDurationMs = 180L),
+    RUNNING_RIGHT(row = 1, frameCount = 8, frameDurationMs = 110L),
+    RUNNING_LEFT(row = 2, frameCount = 8, frameDurationMs = 110L),
     WAVING(row = 3, frameCount = 4, frameDurationMs = 150L),
+    JUMPING(row = 4, frameCount = 5, frameDurationMs = 130L),
     FAILED(row = 5, frameCount = 8, frameDurationMs = 150L),
     WAITING(row = 6, frameCount = 6, frameDurationMs = 180L),
     RUNNING(row = 7, frameCount = 6, frameDurationMs = 100L),
@@ -35,21 +38,41 @@ private enum class CannaBotAnimation(
 }
 
 @Composable
-fun CannaBotTitleAnimation(
+fun CannaBotStatusAnimation(
     state: TranscriptUiState,
     modifier: Modifier = Modifier
 ) {
-    val animation = when {
-        state.error != null -> CannaBotAnimation.FAILED
-        state.isCancellationRequested -> CannaBotAnimation.WAITING
-        state.isTranscribing || state.isRecording -> CannaBotAnimation.RUNNING
-        state.downloadingModel != null || state.isWaveformLoading -> CannaBotAnimation.WAITING
-        state.segments.isNotEmpty() -> CannaBotAnimation.WAVING
-        state.selectedAudio != null -> CannaBotAnimation.REVIEW
-        else -> CannaBotAnimation.IDLE
+    val baseAnimation = when (state.cannaBotMode) {
+        CannaBotMode.IDLE -> CannaBotAnimation.IDLE
+        CannaBotMode.WAITING -> CannaBotAnimation.WAITING
+        CannaBotMode.REVIEW -> CannaBotAnimation.REVIEW
+        CannaBotMode.RUNNING -> CannaBotAnimation.RUNNING
     }
     val spriteSheet = ImageBitmap.imageResource(R.drawable.cannabot_spritesheet)
+    var eventAnimation by remember { mutableStateOf<CannaBotAnimation?>(null) }
+    val animation = eventAnimation ?: baseAnimation
     var frame by remember(animation) { mutableStateOf(0) }
+
+    LaunchedEffect(state.cannaBotCueId) {
+        suspend fun playOnce(value: CannaBotAnimation) {
+            eventAnimation = value
+            delay(value.frameCount * value.frameDurationMs)
+        }
+
+        when (state.cannaBotCue) {
+            CannaBotCue.RUNNING_RIGHT -> playOnce(CannaBotAnimation.RUNNING_RIGHT)
+            CannaBotCue.RUNNING_LEFT -> playOnce(CannaBotAnimation.RUNNING_LEFT)
+            CannaBotCue.JUMPING -> playOnce(CannaBotAnimation.JUMPING)
+            CannaBotCue.WAVING -> playOnce(CannaBotAnimation.WAVING)
+            CannaBotCue.SUCCESS -> {
+                playOnce(CannaBotAnimation.JUMPING)
+                playOnce(CannaBotAnimation.WAVING)
+            }
+            CannaBotCue.FAILED -> playOnce(CannaBotAnimation.FAILED)
+            CannaBotCue.NONE -> Unit
+        }
+        eventAnimation = null
+    }
 
     LaunchedEffect(animation) {
         frame = 0

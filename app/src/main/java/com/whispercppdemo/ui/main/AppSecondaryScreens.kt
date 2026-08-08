@@ -161,7 +161,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Transcript", style = MaterialTheme.typography.headlineSmall)
+        Text("Simple Transcript", style = MaterialTheme.typography.headlineSmall)
         Text(
             "Lokale Transkription von Audio- und Videodateien mit Whisper.",
             style = MaterialTheme.typography.bodyLarge

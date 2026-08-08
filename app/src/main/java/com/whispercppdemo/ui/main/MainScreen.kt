@@ -7,7 +7,14 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,9 +22,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -50,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
@@ -101,7 +112,6 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     Scaffold(
         topBar = {
             TranscriptTopBar(
-                state = state,
                 page = page,
                 onNavigate = { page = it }
             )
@@ -164,18 +174,13 @@ private enum class AppPage { MAIN, SETTINGS, ABOUT }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TranscriptTopBar(
-    state: TranscriptUiState,
     page: AppPage,
     onNavigate: (AppPage) -> Unit
 ) {
     TopAppBar(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (page == AppPage.MAIN) "Transcript" else page.title)
-                if (page == AppPage.MAIN) {
-                    Spacer(Modifier.width(8.dp))
-                    CannaBotTitleAnimation(state)
-                }
+                Text(if (page == AppPage.MAIN) "Simple Transcript" else page.title)
             }
         },
         navigationIcon = {
@@ -200,7 +205,7 @@ private fun TranscriptTopBar(
 
 private val AppPage.title: String
     get() = when (this) {
-        AppPage.MAIN -> "Transcript"
+        AppPage.MAIN -> "Simple Transcript"
         AppPage.SETTINGS -> "Einstellungen"
         AppPage.ABOUT -> "Über die App"
     }
@@ -343,7 +348,7 @@ private fun MainContent(
                 } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            Text(state.status, style = MaterialTheme.typography.bodyMedium)
+            LiveStatusLine(state)
             if (state.isBusy && state.downloadingModel == null) {
                 Text(
                     "Laufzeit: ${formatClock(state.elapsedSeconds)}",
@@ -465,6 +470,41 @@ internal val TranscriptUiState.isModelSelectionEnabled: Boolean
     get() = !isBusy && !isRecording
 
 @Composable
+private fun LiveStatusLine(state: TranscriptUiState) {
+    val isActive = state.isBusy || state.isRecording || state.isPlaying || state.isWaveformLoading
+    val transition = rememberInfiniteTransition(label = "status-pulse")
+    val alpha = if (isActive) {
+        transition.animateFloat(
+            initialValue = 0.52f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1_800),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "status-alpha"
+        ).value
+    } else {
+        1f
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        CannaBotStatusAnimation(state)
+        Text(
+            text = state.status,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun ModelManagerCard(
     state: TranscriptUiState,
     onDownload: () -> Unit
@@ -526,6 +566,7 @@ private fun TranscriptResultSummary(state: TranscriptUiState) {
             state.completedModel?.let { Text("Modell: ${it.modelLabel}") }
             state.detectedLanguage?.let { Text("Erkannte Sprache: ${languageDisplayName(it)}") }
             state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
+            Text("Textabschnitte: ${state.segments.size}")
         }
     }
 }
@@ -579,35 +620,84 @@ private fun TranscriptList(
     }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segments.forEachIndexed { index, segment ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                if (isEditing) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = segment.text,
-                            onValueChange = { onTextChanged(index, it) },
-                            label = { Text("Text") },
-                            minLines = 2,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                } else {
-                    SelectionContainer {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(segment.text)
-                        }
-                    }
+            TranscriptSegmentCard(
+                number = index + 1,
+                segment = segment,
+                isEditing = isEditing,
+                onTextChanged = { onTextChanged(index, it) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranscriptSegmentCard(
+    number: Int,
+    segment: WhisperSegment,
+    isEditing: Boolean,
+    onTextChanged: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, end = 4.dp)
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            if (isEditing) {
+                TranscriptSegmentBody(
+                    segment = segment,
+                    isEditing = true,
+                    onTextChanged = onTextChanged
+                )
+            } else {
+                SelectionContainer {
+                    TranscriptSegmentBody(segment = segment)
                 }
             }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 8.dp, y = (-8).dp)
+                .size(32.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = number.toString(),
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = MaterialTheme.typography.labelMedium.fontSize * 1.2f
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranscriptSegmentBody(
+    segment: WhisperSegment,
+    isEditing: Boolean = false,
+    onTextChanged: (String) -> Unit = {}
+) {
+    Column(modifier = Modifier.padding(12.dp)) {
+        Text(
+            "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
+            style = MaterialTheme.typography.labelMedium
+        )
+        Spacer(Modifier.height(4.dp))
+        if (isEditing) {
+            OutlinedTextField(
+                value = segment.text,
+                onValueChange = onTextChanged,
+                label = { Text("Text") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Text(segment.text)
         }
     }
 }

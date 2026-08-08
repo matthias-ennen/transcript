@@ -35,6 +35,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 private const val PREFERENCES_NAME = "transcript_preferences"
 private const val SELECTED_MODEL_KEY = "selected_model"
 
+enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
+
+enum class CannaBotCue { NONE, RUNNING_RIGHT, RUNNING_LEFT, JUMPING, WAVING, SUCCESS, FAILED }
+
 data class TranscriptUiState(
     val selectedAudio: Uri? = null,
     val selectedFileName: String? = null,
@@ -66,7 +70,10 @@ data class TranscriptUiState(
     val detectedLanguage: String? = null,
     val completedModel: WhisperModel? = null,
     val transcriptionDurationSeconds: Long? = null,
-    val error: String? = null
+    val error: String? = null,
+    val cannaBotMode: CannaBotMode = CannaBotMode.IDLE,
+    val cannaBotCue: CannaBotCue = CannaBotCue.NONE,
+    val cannaBotCueId: Long = 0L
 )
 
 class MainScreenViewModel(private val application: Application) : ViewModel() {
@@ -84,12 +91,24 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         onCompletion = {
             playbackTimer?.cancel()
             playbackTimer = null
-            uiState = uiState.copy(isPlaying = false, playbackPositionMs = 0L)
+            uiState = uiState.copy(
+                isPlaying = false,
+                playbackPositionMs = 0L,
+                status = "Wiedergabe beendet.",
+                cannaBotMode = CannaBotMode.IDLE
+            )
+            cue(CannaBotCue.WAVING)
         },
         onError = { message ->
             playbackTimer?.cancel()
             playbackTimer = null
-            uiState = uiState.copy(isPlaying = false, error = message)
+            uiState = uiState.copy(
+                isPlaying = false,
+                error = message,
+                status = "Wiedergabe fehlgeschlagen.",
+                cannaBotMode = CannaBotMode.IDLE
+            )
+            cue(CannaBotCue.FAILED)
         }
     )
     private var whisperContext: WhisperContext? = null
@@ -103,6 +122,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private var operationStartedAtMs = 0L
     private var lastNativeProgressAtMs = 0L
     private var lastProgressBucket = -1
+    private var lastCannaBotProgressStage = -1
+    private var lastDownloadAnimationBucket = -1
+
+    private fun cue(cue: CannaBotCue) {
+        uiState = uiState.copy(cannaBotCue = cue, cannaBotCueId = uiState.cannaBotCueId + 1L)
+    }
 
     init {
         modelsDirectory.mkdirs()
@@ -139,7 +164,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isEditingTranscript = false,
                     draftSegments = emptyList(),
                     error = null,
-                    status = "Aufnahme läuft … Zum Beenden erneut tippen."
+                    status = "Aufnahme läuft … Zum Beenden erneut tippen.",
+                    cannaBotMode = CannaBotMode.RUNNING
                 )
                 recordingMeter?.cancel()
                 recordingMeter = viewModelScope.launch {
@@ -155,16 +181,20 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             .onFailure { throwable ->
                 uiState = uiState.copy(
                     error = throwable.localizedMessage ?: "Die Aufnahme konnte nicht gestartet werden.",
-                    status = "Aufnahme fehlgeschlagen."
+                    status = "Aufnahme fehlgeschlagen.",
+                    cannaBotMode = CannaBotMode.IDLE
                 )
+                cue(CannaBotCue.FAILED)
             }
     }
 
     fun reportMicrophonePermissionDenied() {
         uiState = uiState.copy(
             error = "Für eine Aufnahme benötigt Transcript die Mikrofonberechtigung.",
-            status = "Mikrofonberechtigung fehlt."
+            status = "Mikrofonberechtigung fehlt.",
+            cannaBotMode = CannaBotMode.IDLE
         )
+        cue(CannaBotCue.FAILED)
     }
 
     fun stopRecording() {
@@ -176,8 +206,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (file == null || !file.isFile || file.length() == 0L) {
             uiState = uiState.copy(
                 error = "Die Aufnahme war zu kurz oder konnte nicht gespeichert werden.",
-                status = "Aufnahme fehlgeschlagen."
+                status = "Aufnahme fehlgeschlagen.",
+                cannaBotMode = CannaBotMode.IDLE
             )
+            cue(CannaBotCue.FAILED)
             return
         }
         selectAudioInternal(
@@ -192,15 +224,24 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (uiState.isRecording || uiState.isBusy) return
         runCatching { audioPlayer.toggle(uri) }
             .onSuccess { playing ->
-                uiState = uiState.copy(isPlaying = playing, error = null)
+                uiState = uiState.copy(
+                    isPlaying = playing,
+                    error = null,
+                    status = if (playing) "Song wird wiedergegeben …" else "Wiedergabe pausiert.",
+                    cannaBotMode = if (playing) CannaBotMode.RUNNING else CannaBotMode.IDLE
+                )
+                if (playing) cue(CannaBotCue.RUNNING_RIGHT)
                 if (playing) startPlaybackTimer() else stopPlaybackTimer()
             }
             .onFailure { throwable ->
                 stopPlaybackTimer()
                 uiState = uiState.copy(
                     isPlaying = false,
-                    error = throwable.localizedMessage ?: "Die Mediendatei konnte nicht abgespielt werden."
+                    error = throwable.localizedMessage ?: "Die Mediendatei konnte nicht abgespielt werden.",
+                    status = "Wiedergabe fehlgeschlagen.",
+                    cannaBotMode = CannaBotMode.IDLE
                 )
+                cue(CannaBotCue.FAILED)
             }
     }
 
@@ -233,7 +274,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             detectedLanguage = null,
             completedModel = null,
             transcriptionDurationSeconds = null,
-            status = status
+            status = "Wellenform wird erstellt …",
+            cannaBotMode = CannaBotMode.WAITING
         )
         runCatching { audioPlayer.prepare(uri) }
             .onFailure { throwable ->
@@ -252,7 +294,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                             } else {
                                 durationMs
                             },
-                            isWaveformLoading = false
+                            isWaveformLoading = false,
+                            status = status,
+                            cannaBotMode = CannaBotMode.REVIEW
                         )
                     }
                 }
@@ -261,8 +305,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         uiState = uiState.copy(
                             isWaveformLoading = false,
                             error = "Wellenform konnte nicht erstellt werden: " +
-                                (throwable.localizedMessage ?: throwable.javaClass.simpleName)
+                                (throwable.localizedMessage ?: throwable.javaClass.simpleName),
+                            status = "Wellenform konnte nicht erstellt werden.",
+                            cannaBotMode = CannaBotMode.IDLE
                         )
+                        cue(CannaBotCue.FAILED)
                     }
                 }
         }
@@ -309,8 +356,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             segments = uiState.draftSegments,
             isEditingTranscript = false,
             draftSegments = emptyList(),
-            status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert."
+            status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert.",
+            cannaBotMode = CannaBotMode.IDLE
         )
+        cue(CannaBotCue.WAVING)
     }
 
     fun downloadModel(model: WhisperModel = uiState.selectedModel) {
@@ -323,8 +372,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             downloadedBytes = 0L,
             downloadTotalBytes = 0L,
             error = null,
-            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …"
+            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …",
+            cannaBotMode = CannaBotMode.RUNNING
         )
+        lastDownloadAnimationBucket = -1
+        cue(CannaBotCue.RUNNING_RIGHT)
         ModelDownloadService.start(application, model)
     }
 
@@ -335,7 +387,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 isBusy = true,
                 progress = null,
                 error = null,
-                status = "${model.modelLabel} wird gelöscht …"
+                status = "${model.modelLabel} wird gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
             )
             runCatching {
                 if (activeContextModel == model) releaseWhisperContext()
@@ -353,7 +406,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 refreshModelInstallations(uiState.selectedModel)
                 uiState = uiState.copy(
                     isBusy = false,
-                    status = "${model.modelLabel} wurde gelöscht."
+                    status = "${model.modelLabel} wurde gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
                 )
             }.onFailure { throwable -> fail(throwable) }
         }
@@ -366,7 +420,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 isBusy = true,
                 progress = null,
                 error = null,
-                status = "Alle Whisper-Modelle werden gelöscht …"
+                status = "Alle Whisper-Modelle werden gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
             )
             runCatching {
                 releaseWhisperContext()
@@ -386,7 +441,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 refreshModelInstallations(uiState.selectedModel)
                 uiState = uiState.copy(
                     isBusy = false,
-                    status = "Alle Whisper-Modelle wurden gelöscht."
+                    status = "Alle Whisper-Modelle wurden gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
                 )
             }.onFailure { throwable -> fail(throwable) }
         }
@@ -411,8 +467,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 isEditingTranscript = false,
                 draftSegments = emptyList(),
                 error = null,
-                status = "1/4 · Audiodatei wird dekodiert …"
+                status = "1/4 · Audiodatei wird dekodiert …",
+                cannaBotMode = CannaBotMode.RUNNING
             )
+            lastCannaBotProgressStage = -1
+            cue(CannaBotCue.RUNNING_RIGHT)
             addDiagnostic("1/4 · Audio-/Video-Dekodierung gestartet.")
 
             try {
@@ -441,7 +500,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 )
                 uiState = uiState.copy(
                     progress = null,
-                    status = "2/4 · Whisper-Modell wird in den Speicher geladen …"
+                    status = "2/4 · Whisper-Modell wird in den Speicher geladen …",
+                    cannaBotMode = CannaBotMode.WAITING
                 )
                 val contextWasCached = whisperContext != null && activeContextModel == selectedModel
                 val context = withContext(Dispatchers.IO) {
@@ -467,8 +527,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 uiState = uiState.copy(
                     progress = null,
                     status = "3/4 · Native Whisper-Engine wird gestartet …",
-                    activityDetail = "Warte auf die erste Rückmeldung aus whisper.cpp."
+                    activityDetail = "Warte auf die erste Rückmeldung aus whisper.cpp.",
+                    cannaBotMode = CannaBotMode.RUNNING
                 )
+                cue(CannaBotCue.JUMPING)
                 addDiagnostic(
                     "3/4 · Start mit $threadCount CPU-Threads, Sprache ${languageLabel(selectedLanguage)}, " +
                         "${decodedAudio.samples.size} PCM-Samples."
@@ -491,8 +553,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         uiState = uiState.copy(
                             progress = percent / 100f,
                             status = "4/4 · Whisper verarbeitet das Audio: $percent %",
-                            activityDetail = "Native Engine aktiv; letzte Rückmeldung gerade eben."
+                            activityDetail = "Native Engine aktiv; letzte Rückmeldung gerade eben.",
+                            cannaBotMode = CannaBotMode.RUNNING
                         )
+                        val animationStage = when {
+                            percent >= 85 -> 3
+                            percent >= 50 -> 2
+                            percent >= 20 -> 1
+                            else -> 0
+                        }
+                        if (animationStage > lastCannaBotProgressStage) {
+                            lastCannaBotProgressStage = animationStage
+                            when (animationStage) {
+                                1 -> cue(CannaBotCue.RUNNING_RIGHT)
+                                2 -> cue(CannaBotCue.RUNNING_LEFT)
+                            }
+                        }
                     }
                 }
                 ensureTranscriptionContinues()
@@ -512,12 +588,14 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     detectedLanguage = result.detectedLanguage,
                     completedModel = selectedModel,
                     transcriptionDurationSeconds = elapsed,
+                    cannaBotMode = CannaBotMode.IDLE,
                     status = if (segments.isEmpty()) {
                         "Es wurde kein Text erkannt."
                     } else {
                         "Fertig: ${segments.size} Textabschnitte erkannt."
                     }
                 )
+                cue(CannaBotCue.SUCCESS)
             } catch (throwable: Throwable) {
                 if (transcriptionCancellationRequested.get()) {
                     finishCancelledTranscription()
@@ -541,7 +619,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isCancellationRequested = true,
             progress = null,
             status = "Transkription wird abgebrochen …",
-            activityDetail = "Das Abbruchsignal wurde an die laufende Verarbeitung gesendet."
+            activityDetail = "Das Abbruchsignal wurde an die laufende Verarbeitung gesendet.",
+            cannaBotMode = CannaBotMode.WAITING
         )
         addDiagnostic("Abbruch durch den Benutzer angefordert.")
         whisperContext?.requestAbort()
@@ -568,7 +647,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             completedModel = null,
             transcriptionDurationSeconds = null,
             error = null,
-            status = "Transkription abgebrochen. Du kannst ein anderes Modell wählen."
+            status = "Transkription abgebrochen. Du kannst ein anderes Modell wählen.",
+            cannaBotMode = CannaBotMode.IDLE
         )
         transcriptionCancellationRequested.set(false)
     }
@@ -667,8 +747,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         "${downloadState.model.modelLabel}: Download wird im Hintergrund fortgesetzt …"
                     } else {
                         "${downloadState.model.modelLabel} wird im Hintergrund heruntergeladen …"
-                    }
+                    },
+                    cannaBotMode = CannaBotMode.RUNNING
                 )
+                if (total > 0L) {
+                    val animationBucket =
+                        ((downloadState.downloadedBytes * 4L) / total).toInt().coerceIn(0, 4)
+                    if (animationBucket > lastDownloadAnimationBucket) {
+                        lastDownloadAnimationBucket = animationBucket
+                        if (animationBucket > 0) {
+                            cue(
+                                if (animationBucket % 2 == 0) CannaBotCue.RUNNING_RIGHT
+                                else CannaBotCue.RUNNING_LEFT
+                            )
+                        }
+                    }
+                }
             }
             is ModelDownloadState.Verifying -> {
                 uiState = uiState.copy(
@@ -677,7 +771,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     downloadedBytes = downloadState.downloadedBytes,
                     downloadTotalBytes = downloadState.downloadedBytes,
                     progress = null,
-                    status = "Download vollständig · Prüfsumme wird kontrolliert …"
+                    status = "Download vollständig · Prüfsumme wird kontrolliert …",
+                    cannaBotMode = CannaBotMode.WAITING
                 )
             }
             is ModelDownloadState.Completed -> {
@@ -688,8 +783,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     downloadingModel = null,
                     error = null,
-                    status = "${downloadState.model.modelLabel} ist installiert und aktiv."
+                    status = "${downloadState.model.modelLabel} ist installiert und aktiv.",
+                    cannaBotMode = CannaBotMode.IDLE
                 )
+                cue(CannaBotCue.SUCCESS)
                 ModelDownloadCoordinator.reset()
             }
             is ModelDownloadState.Failed -> {
@@ -704,8 +801,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         "Download unterbrochen. Beim nächsten Start wird er fortgesetzt."
                     } else {
                         "Modelldownload fehlgeschlagen."
-                    }
+                    },
+                    cannaBotMode = CannaBotMode.IDLE
                 )
+                cue(CannaBotCue.FAILED)
                 ModelDownloadCoordinator.reset()
             }
         }
@@ -732,10 +831,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             modelInstallations = installations,
             modelReady = selectedInstallation.isInstalled,
             status = if (selectedInstallation.isInstalled) {
-                "${selectedModel.modelLabel} ist bereit."
+                "${selectedModel.modelLabel} bereit."
             } else {
                 "Bitte ${selectedModel.modelLabel} herunterladen."
-            }
+            },
+            cannaBotMode = CannaBotMode.IDLE
         )
     }
 
@@ -766,8 +866,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             downloadingModel = null,
             activityDetail = null,
             error = throwable.localizedMessage ?: throwable.javaClass.simpleName,
-            status = "Vorgang fehlgeschlagen."
+            status = "Vorgang fehlgeschlagen.",
+            cannaBotMode = CannaBotMode.IDLE
         )
+        cue(CannaBotCue.FAILED)
     }
 
     override fun onCleared() {

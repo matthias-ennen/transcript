@@ -1,13 +1,15 @@
-# Transcript für Android
-
-Die kompakte CannaBot-Animation in der Titelzeile spiegelt den aktuellen App-Zustand wider, ohne die Höhe der App-Leiste zu verändern.
+# Simple Transcript für Android
 
 Eine lokale Android-App, die Audio- und Videodateien über ihre Audiospur mit
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) transkribiert.
 Die Mediendatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
 Transkriptionsdienst benötigt.
 
-## Stand der ersten Ausbaustufe
+Innerhalb der App lautet der Produktname **Simple Transcript**. Unter dem
+App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
+**Transcript** angezeigt.
+
+## Funktionsumfang
 
 - Android-Dateiauswahl für unterstützte Audio- und Videoformate
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
@@ -18,6 +20,7 @@ Transkriptionsdienst benötigt.
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
+- fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus
 - gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
@@ -27,6 +30,8 @@ Transkriptionsdienst benötigt.
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
 - laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
+- einzeilige, nur bei aktiven Vorgängen pulsierende Statusanzeige mit CannaBot
+- gezielte Dauer- und Einmalanimationen über alle neun Sprite-Sheet-Zustände
 - laufende Transkription direkt über die Hauptschaltfläche abbrechen
 - direkte Mikrofonaufnahme mit automatischer Speicherung im App-Bereich
 - Play/Pause für ausgewählte Dateien und eigene Aufnahmen
@@ -61,20 +66,25 @@ verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
 Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
 App, wenn dadurch ein geänderter Entwurf verloren ginge.
 
-## Diagnose während der Transkription
+## Status und Diagnose während der Transkription
 
-Version `0.2.0-diagnostic` zeigt, welchen Verarbeitungsschritt die App gerade
-ausführt. Die native Whisper-Engine meldet ihren tatsächlichen Fortschritt in
-Prozent an die Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die
-App außerdem an, seit wann kein neuer Fortschrittswert empfangen wurde.
+Die App zeigt, welchen Verarbeitungsschritt sie gerade ausführt. Die native
+Whisper-Engine meldet ihren tatsächlichen Fortschritt in Prozent an die
+Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die App außerdem
+an, seit wann kein neuer Fortschrittswert empfangen wurde.
+
+CannaBot nutzt alle neun Zeilen des Sprite-Sheets. Dauerzustände laufen ruhig
+weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
+werden einmal abgespielt und kehren anschließend automatisch zum passenden
+Grundzustand zurück. Der Statustext pulsiert nur, solange die App tatsächlich
+arbeitet, aufnimmt oder wiedergibt.
 
 Die Debug-APK baut den rechenintensiven nativen Whisper-Code mit
 Release-Optimierungen. Die Optimierung muss im `lib`-Modul gesetzt sein, weil
 dort der CMake-/NDK-Build stattfindet.
 
-Die erste Version dient als technisches Fundament. Gesangstrennung,
-Wortzeitstempel und die Synchronisierung eines bereits bekannten Songtexts
-sind für spätere Ausbaustufen vorgesehen.
+Gesangstrennung, Wortzeitstempel und die Synchronisierung eines bereits
+bekannten Songtexts gehören nicht zum aktuellen Funktionsumfang.
 
 ## APK bauen
 
@@ -90,8 +100,13 @@ cd transcript
 Die APK liegt anschließend unter
 `app/build/outputs/apk/debug/app-debug.apk`.
 
-Alternativ kann der Workflow **Build Android APK** in GitHub Actions gestartet
-und die APK als Build-Artefakt heruntergeladen werden.
+Alternativ baut der Workflow **Build Android APK** bei jedem Push und Pull
+Request eine APK. Zum Herunterladen auf GitHub:
+
+1. Im Repository den Bereich **Actions** öffnen.
+2. Den neuesten erfolgreichen Lauf **Build Android APK** auswählen.
+3. Unten unter **Artifacts** die Datei `transcript-signed-apk-…` herunterladen.
+4. Das ZIP entpacken und `app-debug.apk` auf dem Android-Gerät installieren.
 
 ## APK-Updates und Signierung
 
@@ -113,7 +128,8 @@ Benötigte GitHub-Actions-Secrets:
 - `ANDROID_SIGNING_KEY_ALIAS`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 
-Build-Test der dauerhaft signierten APK: 6. August 2026.
+Der Workflow führt vor dem APK-Build die JVM-Unit-Tests aus und prüft vor dem
+Upload zusätzlich die APK-Signatur.
 
 ## Modelle und Speicherbedarf
 
@@ -146,4 +162,5 @@ Modelldownload benötigt Internetzugriff.
 `whisper.cpp` steht unter der MIT-Lizenz. Der vollständige Lizenztext befindet
 sich unter [`licenses/whisper.cpp-MIT.txt`](licenses/whisper.cpp-MIT.txt).
 
-Build-Auslöser: 3
+Die technische Struktur und der Datenfluss sind in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) beschrieben.
