@@ -53,7 +53,10 @@ internal fun TranscriptList(
         }
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = modifier.padding(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
         Text(
             text = "Transkript",
             style = MaterialTheme.typography.labelLarge.copy(

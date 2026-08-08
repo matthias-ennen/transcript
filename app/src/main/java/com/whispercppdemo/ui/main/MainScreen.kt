@@ -371,7 +371,16 @@ private fun MainContent(
                 enabled = !state.isBusy && !state.isRecording,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(state.selectedFileName ?: "Audio- oder Videodatei auswählen")
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text("Datei", style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        state.selectedFileName ?: "Audio- oder Videodatei auswählen",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
             }
 
             AudioControls(
