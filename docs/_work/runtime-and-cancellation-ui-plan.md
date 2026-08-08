@@ -12,7 +12,9 @@ Stand: 8. August 2026
    `Laufzeit: 03:42 (≈ 05:00)`.
 4. Die Hauptschaltfläche bricht nicht mehr unmittelbar ab, sondern öffnet eine
    abgerundete Bestätigung mit CannaBot, pulsierender Frage sowie den
-   Kapselschaltflächen **Weiter** und **Abbrechen**.
+   Kapselschaltflächen **Weiter** und **Abbrechen**. Diese zusätzliche Abfrage
+   gilt für **Ausgewogen**, **Sehr genau** und **Maximale Qualität**. Bei
+   **Sehr schnell** und **Schnell** wird weiterhin direkt abgebrochen.
 
 ## Prüfpunkte
 
@@ -22,3 +24,5 @@ Stand: 8. August 2026
 - Die Schätzung bleibt während eines Laufs unverändert.
 - Nur **Abbrechen** sendet das Abbruchsignal; **Weiter** und Schließen des
   Dialogs lassen die Transkription weiterlaufen.
+- Die Modellregel ist durch einen Unit-Test für alle fünf Qualitätsstufen
+  abgesichert.

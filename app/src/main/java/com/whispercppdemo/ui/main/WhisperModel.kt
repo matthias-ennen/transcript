@@ -64,6 +64,9 @@ enum class WhisperModel(
     val downloadUrl: String
         get() = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$fileName"
 
+    val requiresCancellationConfirmation: Boolean
+        get() = this != TINY && this != BASE
+
     companion object {
         fun fromId(id: String?): WhisperModel = entries.firstOrNull { it.id == id } ?: BASE
     }

@@ -1,10 +1,20 @@
 package de.matthiasennen.transcript.ui.main
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WhisperModelTest {
+    @Test
+    fun onlySlowerModelsRequireCancellationConfirmation() {
+        assertFalse(WhisperModel.TINY.requiresCancellationConfirmation)
+        assertFalse(WhisperModel.BASE.requiresCancellationConfirmation)
+        assertTrue(WhisperModel.SMALL_Q5_1.requiresCancellationConfirmation)
+        assertTrue(WhisperModel.LARGE_V3_TURBO_Q5_0.requiresCancellationConfirmation)
+        assertTrue(WhisperModel.LARGE_V3_Q5_0.requiresCancellationConfirmation)
+    }
+
     @Test
     fun catalogContainsTheFiveRequestedQualityLevelsInOrder() {
         assertEquals(

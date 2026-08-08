@@ -395,8 +395,13 @@ private fun MainContent(
 
             Button(
                 onClick = {
-                    if (state.isTranscribing) confirmTranscriptionCancellation = true
-                    else if (state.hasUnsavedTranscriptChanges) {
+                    if (state.isTranscribing) {
+                        if (state.selectedModel.requiresCancellationConfirmation) {
+                            confirmTranscriptionCancellation = true
+                        } else {
+                            viewModel.cancelTranscription()
+                        }
+                    } else if (state.hasUnsavedTranscriptChanges) {
                         pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
                     } else {
                         viewModel.transcribe()
