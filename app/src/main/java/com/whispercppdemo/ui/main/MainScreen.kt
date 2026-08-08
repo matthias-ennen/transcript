@@ -395,17 +395,17 @@ private fun MainContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(
+                    Button(
                         onClick = textExporter,
                         enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("TXT") }
-                    OutlinedButton(
+                    Button(
                         onClick = srtExporter,
                         enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("SRT") }
-                    OutlinedButton(
+                    Button(
                         onClick = jsonExporter,
                         enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
