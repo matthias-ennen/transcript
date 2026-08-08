@@ -126,12 +126,14 @@ Whisper-Segments genau einem Hauptabschnitt zugeordnet. Auf die lokalen
 Whisper-Zeitstempel wird die absolute Startposition des Decoderabschnitts
 addiert; dadurch bleiben auch Zeitstempel über einer Stunde korrekt.
 
-Scheitert ein Fünf-Minuten-Abschnitt, wird dieser einmal in zwei
-2,5-Minuten-Sicherheitsabschnitte geteilt. Nach jedem fertigen Abschnitt werden
-Textsegmente, erkannte Sprache und nächste Audioposition atomar im privaten
-App-Speicher gesichert. Eine erneute Transkription derselben Datei mit demselben
-Modell und derselben Sprache setzt dort fort. Ein bewusster Abbruch entfernt
-den Zwischenstand.
+Der Decoder toleriert einen kleinen, fest begrenzten Codec-Überhang und schneidet
+das Ergebnis vor Whisper wieder auf die angeforderte Abschnittslänge zu.
+Scheitert ein Fünf-Minuten-Abschnitt aus einem anderen Grund, wird dieser einmal
+in zwei 2,5-Minuten-Sicherheitsabschnitte geteilt. Nach jedem fertigen Abschnitt
+werden Textsegmente, erkannte Sprache und nächste Audioposition atomar im
+privaten App-Speicher gesichert. Eine erneute Transkription derselben Datei mit
+demselben Modell und derselben Sprache setzt dort fort. Ein bewusster Abbruch
+entfernt den Zwischenstand.
 
 Der Foreground-Service läuft auch bei ausgeschaltetem Bildschirm oder
 geschlossener Oberfläche weiter. Seine Systemmeldung zeigt Gesamtfortschritt

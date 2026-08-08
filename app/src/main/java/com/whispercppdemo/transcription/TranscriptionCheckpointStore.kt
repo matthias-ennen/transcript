@@ -34,6 +34,8 @@ data class TranscriptionCheckpoint(
     fun isCompatibleWith(request: TranscriptionRequest, actualDurationMs: Long): Boolean =
         this.request == request && durationMs == actualDurationMs &&
             nextStartMs in 0L..actualDurationMs
+
+    fun hasMeaningfulProgress(): Boolean = nextStartMs > 0L
 }
 
 class TranscriptionCheckpointStore(private val checkpointFile: File) {

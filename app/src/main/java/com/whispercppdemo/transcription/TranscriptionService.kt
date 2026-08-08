@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperContext
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
+import de.matthiasennen.transcript.media.AudioDecoderOutputOverflowException
 import de.matthiasennen.transcript.media.decodeAudioChunk
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.ui.main.WhisperModel
@@ -159,7 +160,11 @@ class TranscriptionService : Service() {
                     sectionIndex++
                 } catch (throwable: Throwable) {
                     if (throwable is CancellationException || stopRequested.get()) throw throwable
-                    if (section.usedFallbackSize) throw throwable
+                    if (section.usedFallbackSize ||
+                        throwable is AudioDecoderOutputOverflowException
+                    ) {
+                        throw throwable
+                    }
 
                     val fallbackSections = splitIntoFallbackSections(section, audioInfo.durationMs)
                     check(fallbackSections.isNotEmpty()) { "Der Abschnitt konnte nicht aufgeteilt werden." }
@@ -197,12 +202,14 @@ class TranscriptionService : Service() {
                 TranscriptionCoordinator.update(TranscriptionState.Cancelled(request.fileName))
                 finishWithNotification("Transkription abgebrochen", request.fileName)
             } else if (!stopRequested.get()) {
-                val message = userFacingError(throwable)
+                val canResume = checkpoint?.hasMeaningfulProgress() == true
+                if (!canResume) checkpointStore.clear()
+                val message = userFacingError(throwable, canResume)
                 TranscriptionCoordinator.update(
                     TranscriptionState.Failed(
                         fileName = request.fileName,
                         message = message,
-                        canResume = checkpoint != null,
+                        canResume = canResume,
                         committedSegments = checkpoint?.segments.orEmpty()
                     )
                 )
@@ -258,8 +265,16 @@ class TranscriptionService : Service() {
         }
         ensureContinues()
         addDiagnostic(
-            "Abschnitt $sectionNumber dekodiert: ${chunk.samples.size} 16-kHz-Samples."
+            "Abschnitt $sectionNumber dekodiert: ${chunk.samples.size} 16-kHz-Samples aus " +
+                "${chunk.mimeType}, ${chunk.sourceSampleRate} Hz, " +
+                "${chunk.sourceChannelCount} Kanal/Kanäle."
         )
+        if (chunk.discardedTrailingSamples > 0) {
+            addDiagnostic(
+                "Decoder-Überhang sicher entfernt: " +
+                    "${chunk.discardedTrailingSamples} zusätzliche Samples."
+            )
+        }
 
         val language = if (request.language == "auto") {
             checkpoint.detectedLanguage?.takeIf(String::isNotBlank) ?: "auto"
@@ -472,18 +487,24 @@ private fun completedSectionCount(positionMs: Long): Int =
         ((positionMs + STANDARD_SECTION_DURATION_MS - 1L) / STANDARD_SECTION_DURATION_MS).toInt()
     }
 
-private fun userFacingError(throwable: Throwable): String = when (throwable) {
-    is OutOfMemoryError ->
-        "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß. Der Zwischenstand bleibt erhalten."
-    else -> throwable.localizedMessage?.takeIf(String::isNotBlank)?.let { message ->
-        if (message.contains("allocate", ignoreCase = true) ||
-            message.contains("outofmemory", ignoreCase = true)
-        ) {
-            "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß. Der Zwischenstand bleibt erhalten."
-        } else {
-            message
-        }
-    } ?: "Die Transkription wurde unerwartet unterbrochen. Der Zwischenstand bleibt erhalten."
+private fun userFacingError(throwable: Throwable, canResume: Boolean): String {
+    val checkpointSuffix = if (canResume) " Der Zwischenstand bleibt erhalten." else ""
+    return when (throwable) {
+        is AudioDecoderOutputOverflowException ->
+            "Der Audiodecoder hat ungewöhnlich viele zusätzliche Audiodaten geliefert." +
+                checkpointSuffix
+        is OutOfMemoryError ->
+            "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß.$checkpointSuffix"
+        else -> throwable.localizedMessage?.takeIf(String::isNotBlank)?.let { message ->
+            if (message.contains("allocate", ignoreCase = true) ||
+                message.contains("outofmemory", ignoreCase = true)
+            ) {
+                "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß.$checkpointSuffix"
+            } else {
+                message
+            }
+        } ?: "Die Transkription wurde unerwartet unterbrochen.$checkpointSuffix"
+    }
 }
 
 private fun formatClock(totalSeconds: Long): String {

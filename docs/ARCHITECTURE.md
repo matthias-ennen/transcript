@@ -24,7 +24,10 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
    Sekunden Kontextüberlappung und arbeitet unabhängig von der Activity.
 4. `AndroidAudioDecoder` dekodiert ausschließlich den aktuellen Bereich und
    resampelt MediaCodec-Ausgabepuffer unmittelbar auf 16-kHz-Mono-PCM. PCM in
-   der ursprünglichen Abtastrate wird nicht gesammelt.
+   der ursprünglichen Abtastrate wird nicht gesammelt. Ein fester
+   Fünf-Sekunden-Sicherheitsspielraum fängt Codec-Vorlauf, Padding und
+   Zeitstempelrundungen auf; vor Whisper wird der Abschnitt wieder exakt auf
+   seine Sollgröße begrenzt.
 5. `WhisperContext` verarbeitet den aktuellen Abschnitt. Bei automatischer
    Auswahl wird eine anhand eines brauchbaren Textabschnitts erkannte Sprache
    für die folgenden Abschnitte festgehalten.

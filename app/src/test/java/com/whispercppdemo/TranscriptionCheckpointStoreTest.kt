@@ -41,6 +41,26 @@ class TranscriptionCheckpointStoreTest {
         assertEquals(checkpoint, store.read())
         assertTrue(checkpoint.isCompatibleWith(request, 4_145_000L))
         assertFalse(checkpoint.isCompatibleWith(request.copy(language = "en"), 4_145_000L))
+        assertTrue(checkpoint.hasMeaningfulProgress())
+    }
+
+    @Test
+    fun `checkpoint at zero is not offered as resumable progress`() {
+        val checkpoint = TranscriptionCheckpoint(
+            request = TranscriptionRequest(
+                uri = "content://audio/recording",
+                fileName = "Aufnahme.m4a",
+                modelId = "tiny",
+                language = "auto"
+            ),
+            durationMs = 60_000L,
+            nextStartMs = 0L,
+            detectedLanguage = null,
+            startedAtEpochMs = 1_700_000_000_000L,
+            segments = emptyList()
+        )
+
+        assertFalse(checkpoint.hasMeaningfulProgress())
     }
 
     @Test

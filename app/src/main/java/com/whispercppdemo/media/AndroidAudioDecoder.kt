@@ -9,9 +9,6 @@ import android.net.Uri
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CancellationException
-import kotlin.math.ceil
-
-private const val TARGET_SAMPLE_RATE = 16_000
 private const val DECODER_TIMEOUT_US = 10_000L
 
 data class AudioTrackInfo(
@@ -27,7 +24,8 @@ data class DecodedAudioChunk(
     val decodeEndMs: Long,
     val sourceSampleRate: Int,
     val sourceChannelCount: Int,
-    val mimeType: String
+    val mimeType: String,
+    val discardedTrailingSamples: Int
 )
 
 fun inspectAudioTrack(context: Context, uri: Uri): AudioTrackInfo {
@@ -90,10 +88,11 @@ fun decodeAudioChunk(
         decoder.start()
         codecStarted = true
 
-        val maxOutputSamples = ceil((endMs - startMs) * TARGET_SAMPLE_RATE / 1_000.0)
-            .toInt()
-            .coerceAtLeast(1) + 4
-        val samples = BoundedFloatArrayBuilder(maxOutputSamples)
+        val requestedOutputSamples = targetSampleCount(endMs - startMs)
+        val samples = BoundedFloatArrayBuilder(
+            capacity = decoderOutputCapacity(requestedOutputSamples),
+            requestedSamples = requestedOutputSamples
+        )
         val bufferInfo = MediaCodec.BufferInfo()
         var inputEnded = false
         var outputEnded = false
@@ -175,13 +174,15 @@ fun decodeAudioChunk(
 
         if (shouldCancel()) throw CancellationException("Audiodekodierung abgebrochen.")
         onProgress(1f)
+        val trimmedSamples = trimDecoderSamples(samples.toArray(), requestedOutputSamples)
         return DecodedAudioChunk(
-            samples = samples.toArray(),
+            samples = trimmedSamples.samples,
             decodeStartMs = startMs,
             decodeEndMs = endMs,
             sourceSampleRate = sampleRate,
             sourceChannelCount = channelCount,
-            mimeType = mime
+            mimeType = mime,
+            discardedTrailingSamples = trimmedSamples.discardedTrailingSamples
         )
     } finally {
         if (codecStarted) runCatching { codec?.stop() }
@@ -271,12 +272,17 @@ private class StreamingMonoResampler(
     }
 }
 
-private class BoundedFloatArrayBuilder(capacity: Int) {
+private class BoundedFloatArrayBuilder(
+    capacity: Int,
+    private val requestedSamples: Int
+) {
     private val values = FloatArray(capacity)
     private var size = 0
 
     fun add(value: Float) {
-        check(size < values.size) { "Der dekodierte Audioabschnitt ist länger als erwartet." }
+        if (size >= values.size) {
+            throw AudioDecoderOutputOverflowException(requestedSamples, values.size)
+        }
         values[size++] = value
     }
 
