@@ -41,6 +41,7 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
   die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
 - gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
+- Teilen von TXT, SRT und JSON einzeln oder gemeinsam über das Android-Teilen-Menü
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
   als Metadaten in TXT- und JSON-Exporten
 - automatischer Debug-APK-Build mit GitHub Actions

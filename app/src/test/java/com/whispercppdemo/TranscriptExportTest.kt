@@ -6,7 +6,12 @@ import de.matthiasennen.transcript.export.TranscriptExportMetadata
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.export.formatDuration
 import de.matthiasennen.transcript.export.formatTimestamp
+import de.matthiasennen.transcript.ui.main.TranscriptUiState
+import de.matthiasennen.transcript.ui.main.WhisperModel
+import de.matthiasennen.transcript.ui.main.exportMetadata
 import de.matthiasennen.transcript.ui.main.formatClock
+import de.matthiasennen.transcript.ui.main.orderedShareFormats
+import de.matthiasennen.transcript.ui.main.transcriptExportFileName
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -84,5 +89,46 @@ class TranscriptExportTest {
         assertEquals("00:00", formatClock(0))
         assertEquals("03:40", formatClock(220))
         assertEquals("1:02:03", formatClock(3_723))
+    }
+
+    @Test
+    fun ordersSelectedShareFormatsLikeTheExportButtons() {
+        assertEquals(
+            listOf(ExportFormat.TEXT, ExportFormat.SUBRIP, ExportFormat.JSON),
+            orderedShareFormats(setOf(ExportFormat.JSON, ExportFormat.TEXT, ExportFormat.SUBRIP))
+        )
+        assertEquals(
+            listOf(ExportFormat.SUBRIP, ExportFormat.JSON),
+            orderedShareFormats(setOf(ExportFormat.JSON, ExportFormat.SUBRIP))
+        )
+    }
+
+    @Test
+    fun usesTheSameSafeFileNamesForExportAndShare() {
+        val state = TranscriptUiState(selectedFileName = "Interview: Teil 1.mp3")
+
+        assertEquals(
+            "Interview_ Teil 1 Transcript.txt",
+            transcriptExportFileName(state, ExportFormat.TEXT)
+        )
+        assertEquals(
+            "Transcript Transcript.json",
+            transcriptExportFileName(TranscriptUiState(), ExportFormat.JSON)
+        )
+    }
+
+    @Test
+    fun createsOneMetadataSnapshotForAllSharedFormats() {
+        val metadata = TranscriptUiState(
+            selectedModel = WhisperModel.SMALL_Q5_1,
+            completedModel = WhisperModel.BASE,
+            detectedLanguage = "de",
+            transcriptionDurationSeconds = 42L
+        ).exportMetadata(createdAt = "2026-08-08T22:30:00Z")
+
+        assertEquals(WhisperModel.BASE.modelLabel, metadata.whisperModel)
+        assertEquals("de", metadata.detectedLanguage)
+        assertEquals(42L, metadata.transcriptionDurationSeconds)
+        assertEquals("2026-08-08T22:30:00Z", metadata.createdAt)
     }
 }

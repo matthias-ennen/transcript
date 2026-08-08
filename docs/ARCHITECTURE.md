@@ -46,6 +46,11 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
    **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
    Reihenfolge bleiben erhalten.
 11. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
+12. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
+    Cache-Unterordner. Ein nicht exportierter `FileProvider` gibt ausschließlich
+    diese Dateien mit zeitlich begrenztem Leserecht an das Android-Teilen-Menü
+    weiter. Ein Format verwendet `ACTION_SEND`, mehrere Formate verwenden
+    `ACTION_SEND_MULTIPLE`.
 
 ## GUI-Sprache
 

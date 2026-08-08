@@ -45,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,11 +59,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import de.matthiasennen.transcript.export.ExportFormat
-import de.matthiasennen.transcript.export.TranscriptExportMetadata
 import de.matthiasennen.transcript.export.exportTranscript
 import kotlinx.coroutines.delay
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 
 private val languages = listOf(
     "auto" to "Automatisch – empfohlen",
@@ -162,9 +160,15 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                         microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                textExporter = { textExporter.launch(defaultName(state, "txt")) },
-                srtExporter = { srtExporter.launch(defaultName(state, "srt")) },
-                jsonExporter = { jsonExporter.launch(defaultName(state, "json")) }
+                textExporter = {
+                    textExporter.launch(transcriptExportFileName(state, ExportFormat.TEXT))
+                },
+                srtExporter = {
+                    srtExporter.launch(transcriptExportFileName(state, ExportFormat.SUBRIP))
+                },
+                jsonExporter = {
+                    jsonExporter.launch(transcriptExportFileName(state, ExportFormat.JSON))
+                }
             )
         }
     }
@@ -283,10 +287,12 @@ private fun MainContent(
     srtExporter: () -> Unit,
     jsonExporter: () -> Unit
 ) {
+        val context = LocalContext.current
         var pendingTranscriptAction by remember {
             mutableStateOf<PendingTranscriptAction?>(null)
         }
         var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
+        var showTranscriptShareDialog by remember { mutableStateOf(false) }
 
         LaunchedEffect(state.isTranscribing) {
             if (!state.isTranscribing) confirmTranscriptionCancellation = false
@@ -300,6 +306,14 @@ private fun MainContent(
                     confirmTranscriptionCancellation = false
                     viewModel.cancelTranscription()
                 }
+            )
+        }
+
+        if (showTranscriptShareDialog) {
+            TranscriptShareDialog(
+                state = state,
+                onDismiss = { showTranscriptShareDialog = false },
+                onShare = { formats -> shareTranscript(context, state, formats) }
             )
         }
 
@@ -469,35 +483,60 @@ private fun MainContent(
                 }
             }
 
-            TranscriptList(
-                state = state,
-                segments = if (state.isEditingTranscript) state.draftSegments else state.segments,
-                onTextChanged = viewModel::updateTranscriptText,
-                onEditGroup = viewModel::startTranscriptEditing,
-                onCancelEditing = viewModel::cancelTranscriptEditing,
-                onApplyEdits = viewModel::applyTranscriptEdits
-            )
-
             if (state.segments.isNotEmpty()) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Card(
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
                 ) {
-                    Button(
-                        onClick = textExporter,
-                        enabled = !state.isEditingTranscript,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("TXT") }
-                    Button(
-                        onClick = srtExporter,
-                        enabled = !state.isEditingTranscript,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("SRT") }
-                    Button(
-                        onClick = jsonExporter,
-                        enabled = !state.isEditingTranscript,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("JSON") }
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Transkript", style = MaterialTheme.typography.titleSmall)
+                        TranscriptList(
+                            state = state,
+                            segments = if (state.isEditingTranscript) {
+                                state.draftSegments
+                            } else {
+                                state.segments
+                            },
+                            onTextChanged = viewModel::updateTranscriptText,
+                            onEditGroup = viewModel::startTranscriptEditing,
+                            onCancelEditing = viewModel::cancelTranscriptEditing,
+                            onApplyEdits = viewModel::applyTranscriptEdits
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = textExporter,
+                                enabled = !state.isEditingTranscript,
+                                modifier = Modifier.weight(1f)
+                            ) { Text("TXT") }
+                            Button(
+                                onClick = srtExporter,
+                                enabled = !state.isEditingTranscript,
+                                modifier = Modifier.weight(1f)
+                            ) { Text("SRT") }
+                            Button(
+                                onClick = jsonExporter,
+                                enabled = !state.isEditingTranscript,
+                                modifier = Modifier.weight(1f)
+                            ) { Text("JSON") }
+                            Button(
+                                onClick = { showTranscriptShareDialog = true },
+                                enabled = !state.isEditingTranscript,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Transkript teilen"
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -836,25 +875,11 @@ private fun rememberExporter(
                 exportTranscript(
                     segments = state.segments,
                     format = format,
-                    metadata = TranscriptExportMetadata(
-                        whisperModel = state.completedModel?.modelLabel
-                            ?: state.selectedModel.modelLabel,
-                        detectedLanguage = state.detectedLanguage ?: "unknown",
-                        transcriptionDurationSeconds = state.transcriptionDurationSeconds ?: 0L,
-                        createdAt = ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-                    )
+                    metadata = state.exportMetadata()
                 )
             )
         }
     }
-}
-
-private fun defaultName(state: TranscriptUiState, extension: String): String {
-    val base = state.selectedFileName
-        ?.substringBeforeLast('.')
-        ?.ifBlank { "Transcript" }
-        ?: "Transcript"
-    return "$base Transcript.$extension"
 }
 
 internal fun formatDownloadSize(bytes: Long): String = when {
