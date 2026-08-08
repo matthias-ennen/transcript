@@ -37,3 +37,23 @@ gleich gestalteter Symbol-Button zum Teilen bereit.
 - Manifest, `FileProvider`-Pfad und URI-Leserecht stimmen überein.
 - JVM-Tests, Kotlin-/Compose-Build, nativer Build und Signaturprüfung laufen im
   APK-Workflow erfolgreich durch.
+
+## UI-Nachpolitur
+
+- **Alle einklappen** und **Alle ausklappen** verwenden gleich große, blaue
+  Kapselschaltflächen im Stil der Exportaktionen.
+- TXT, SRT und JSON bleiben durch kompakte, einheitliche Innenabstände auch bei
+  vier gleich breiten Aktionen einzeilig; insbesondere wird JSON nicht mehr
+  umgebrochen.
+- **Abbrechen** und **Änderungen übernehmen** erhalten dieselbe Höhe. Mehrzeiliger
+  Text wird innerhalb der Kapsel horizontal und vertikal mittig ausgerichtet.
+
+## Dialoganimation und Navigation
+
+- Beim Öffnen des Teilen-Dialogs zeigt CannaBot mit ruhigen Zwischenpausen die
+  Folge **nach rechts laufen**, **springen** und **Arm heben/winken**. Danach
+  kehrt er in den Idle-Zustand zurück.
+- Bei Transkripten mit mindestens 20 Segmenten erscheint nach deutlichem
+  Herunterscrollen unten rechts eine kompakte Pfeil-nach-oben-Kapsel.
+- Die Kapsel verwendet einen zu 38 Prozent transparenten Primärfarb-Hintergrund,
+  liegt über dem Inhalt und scrollt die gesamte Hauptansicht bis ganz nach oben.

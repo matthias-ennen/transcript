@@ -4,8 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -24,12 +27,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.export.formatTimestamp
@@ -61,17 +64,33 @@ internal fun TranscriptList(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            TextButton(
+            Button(
                 onClick = { groups.forEach { expandedGroups[it.startMs] = false } },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(50),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
             ) {
-                Text("Alle einklappen")
+                Text(
+                    text = "Alle einklappen",
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.Center
+                )
             }
-            TextButton(
+            Button(
                 onClick = { groups.forEach { expandedGroups[it.startMs] = true } },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(50),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
             ) {
-                Text("Alle ausklappen")
+                Text(
+                    text = "Alle ausklappen",
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 1,
+                    softWrap = false,
+                    textAlign = TextAlign.Center
+                )
             }
         }
 
@@ -230,20 +249,38 @@ private fun TranscriptGroupEditorActions(
     )
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
     ) {
         OutlinedButton(
             onClick = onCancel,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            shape = RoundedCornerShape(50),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Text("Abbrechen")
+            Text(
+                text = "Abbrechen",
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
         }
         Button(
             onClick = onApply,
             enabled = state.hasUnsavedChangesInGroup(groupStartMs),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            shape = RoundedCornerShape(50),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Text("Änderungen übernehmen")
+            Text(
+                text = "Änderungen übernehmen",
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

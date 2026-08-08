@@ -51,6 +51,9 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
     diese Dateien mit zeitlich begrenztem Leserecht an das Android-Teilen-Menü
     weiter. Ein Format verwendet `ACTION_SEND`, mehrere Formate verwenden
     `ACTION_SEND_MULTIPLE`.
+13. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
+    schwebende Navigationskapsel ein. Sie verwendet denselben Scrollzustand wie
+    die gesamte Hauptansicht und führt deshalb bis an den Anfang der App zurück.
 
 ## GUI-Sprache
 
@@ -73,6 +76,10 @@ Die sichtbare Statuszeile verbindet Text und CannaBot. Dauerzustände sind
 Erfolgssequenz spielt Springen und Winken nacheinander ab und kehrt anschließend
 zum Grundzustand zurück. Fortschrittsereignisse werden nur an festgelegten
 Meilensteinen ausgelöst.
+
+Der Teilen-Dialog besitzt eine eigene, nur beim Öffnen gestartete Sequenz aus
+Rechtslauf, Sprung und Winken. Kurze Idle-Pausen trennen die Gesten; anschließend
+bleibt CannaBot ruhig im Idle-Zustand.
 
 Im Zustand `REVIEW` ergänzt `TranscriptionTimeEstimate` die unveränderte
 Bereitschaftsmeldung um eine kalibrierte Laufzeitschätzung. Die Statuszeile

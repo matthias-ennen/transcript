@@ -40,7 +40,6 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TranscriptShareDialog(
-    state: TranscriptUiState,
     onDismiss: () -> Unit,
     onShare: (Set<ExportFormat>) -> Result<Unit>
 ) {
@@ -66,7 +65,7 @@ internal fun TranscriptShareDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    CannaBotStatusAnimation(state)
+                    CannaBotSharePromptAnimation()
                     Text(
                         text = "Welche Formate möchten Sie teilen?",
                         modifier = Modifier.weight(1f),

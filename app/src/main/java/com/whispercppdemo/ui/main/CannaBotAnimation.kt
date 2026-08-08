@@ -48,10 +48,8 @@ fun CannaBotStatusAnimation(
         CannaBotMode.REVIEW -> CannaBotAnimation.REVIEW
         CannaBotMode.RUNNING -> CannaBotAnimation.RUNNING
     }
-    val spriteSheet = ImageBitmap.imageResource(R.drawable.cannabot_spritesheet)
     var eventAnimation by remember { mutableStateOf<CannaBotAnimation?>(null) }
     val animation = eventAnimation ?: baseAnimation
-    var frame by remember(animation) { mutableStateOf(0) }
 
     LaunchedEffect(state.cannaBotCueId) {
         suspend fun playOnce(value: CannaBotAnimation) {
@@ -73,6 +71,51 @@ fun CannaBotStatusAnimation(
         }
         eventAnimation = null
     }
+
+    CannaBotSprite(animation = animation, modifier = modifier)
+}
+
+/**
+ * Plays one calm prompt sequence whenever the share dialog opens. Short idle
+ * pauses keep the three gestures distinct before CannaBot settles down again.
+ */
+@Composable
+internal fun CannaBotSharePromptAnimation(
+    modifier: Modifier = Modifier
+) {
+    var animation by remember { mutableStateOf(CannaBotAnimation.IDLE) }
+
+    LaunchedEffect(Unit) {
+        delay(650L)
+        animation = CannaBotAnimation.RUNNING_RIGHT
+        delay(CannaBotAnimation.RUNNING_RIGHT.playbackDurationMs)
+
+        animation = CannaBotAnimation.IDLE
+        delay(650L)
+        animation = CannaBotAnimation.JUMPING
+        delay(CannaBotAnimation.JUMPING.playbackDurationMs)
+
+        animation = CannaBotAnimation.IDLE
+        delay(650L)
+        animation = CannaBotAnimation.WAVING
+        delay(CannaBotAnimation.WAVING.playbackDurationMs * 2)
+
+        animation = CannaBotAnimation.IDLE
+    }
+
+    CannaBotSprite(animation = animation, modifier = modifier)
+}
+
+private val CannaBotAnimation.playbackDurationMs: Long
+    get() = frameCount * frameDurationMs
+
+@Composable
+private fun CannaBotSprite(
+    animation: CannaBotAnimation,
+    modifier: Modifier = Modifier
+) {
+    val spriteSheet = ImageBitmap.imageResource(R.drawable.cannabot_spritesheet)
+    var frame by remember(animation) { mutableStateOf(0) }
 
     LaunchedEffect(animation) {
         frame = 0

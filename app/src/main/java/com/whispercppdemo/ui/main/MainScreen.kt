@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -37,6 +38,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -45,22 +47,28 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.exportTranscript
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val languages = listOf(
     "auto" to "Automatisch – empfohlen",
@@ -293,9 +301,28 @@ private fun MainContent(
         }
         var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
         var showTranscriptShareDialog by remember { mutableStateOf(false) }
+        val scrollState = rememberScrollState()
+        val scrollScope = rememberCoroutineScope()
+        val density = LocalDensity.current
+        val scrollToTopThresholdPx = remember(density) {
+            with(density) { 720.dp.roundToPx() }
+        }
+        val showScrollToTop by remember(state.segments.size, scrollToTopThresholdPx) {
+            derivedStateOf {
+                shouldShowScrollToTop(
+                    segmentCount = state.segments.size,
+                    scrollOffsetPx = scrollState.value,
+                    thresholdPx = scrollToTopThresholdPx
+                )
+            }
+        }
 
         LaunchedEffect(state.isTranscribing) {
             if (!state.isTranscribing) confirmTranscriptionCancellation = false
+        }
+
+        LaunchedEffect(state.selectedAudio) {
+            scrollState.scrollTo(0)
         }
 
         if (confirmTranscriptionCancellation) {
@@ -311,7 +338,6 @@ private fun MainContent(
 
         if (showTranscriptShareDialog) {
             TranscriptShareDialog(
-                state = state,
                 onDismiss = { showTranscriptShareDialog = false },
                 onShare = { formats -> shareTranscript(context, state, formats) }
             )
@@ -349,14 +375,18 @@ private fun MainContent(
             )
         }
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             Text(
                 "Audio- und Videodateien vollständig offline mit Whisper transkribieren.",
                 style = MaterialTheme.typography.bodyMedium
@@ -513,22 +543,50 @@ private fun MainContent(
                             Button(
                                 onClick = textExporter,
                                 enabled = !state.isEditingTranscript,
-                                modifier = Modifier.weight(1f)
-                            ) { Text("TXT") }
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = "TXT",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             Button(
                                 onClick = srtExporter,
                                 enabled = !state.isEditingTranscript,
-                                modifier = Modifier.weight(1f)
-                            ) { Text("SRT") }
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = "SRT",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             Button(
                                 onClick = jsonExporter,
                                 enabled = !state.isEditingTranscript,
-                                modifier = Modifier.weight(1f)
-                            ) { Text("JSON") }
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = "JSON",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             Button(
                                 onClick = { showTranscriptShareDialog = true },
                                 enabled = !state.isEditingTranscript,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Share,
@@ -539,8 +597,43 @@ private fun MainContent(
                     }
                 }
             }
+            }
+
+            AnimatedVisibility(
+                visible = showScrollToTop,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 20.dp, bottom = 20.dp)
+            ) {
+                Button(
+                    onClick = {
+                        scrollScope.launch { scrollState.animateScrollTo(0) }
+                    },
+                    modifier = Modifier
+                        .width(58.dp)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.62f),
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Zum Anfang der App"
+                    )
+                }
+            }
         }
     }
+
+internal fun shouldShowScrollToTop(
+    segmentCount: Int,
+    scrollOffsetPx: Int,
+    thresholdPx: Int
+): Boolean = segmentCount >= 20 && scrollOffsetPx >= thresholdPx
+
 @Composable
 internal fun ModelSelector(
     selected: WhisperModel,

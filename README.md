@@ -42,6 +42,8 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
 - Teilen von TXT, SRT und JSON einzeln oder gemeinsam über das Android-Teilen-Menü
+- ruhige CannaBot-Hinweissequenz im Teilen-Dialog
+- halbtransparente Pfeilkapsel zum schnellen Sprung an den App-Anfang bei langen Transkripten
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
   als Metadaten in TXT- und JSON-Exporten
 - automatischer Debug-APK-Build mit GitHub Actions
