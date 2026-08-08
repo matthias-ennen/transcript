@@ -1,7 +1,5 @@
 # Transcript für Android
 
-Die kompakte CannaBot-Animation in der Titelzeile spiegelt den aktuellen App-Zustand wider, ohne die Höhe der App-Leiste zu verändern.
-
 Eine lokale Android-App, die Audio- und Videodateien über ihre Audiospur mit
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) transkribiert.
 Die Mediendatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
