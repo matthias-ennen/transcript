@@ -36,7 +36,7 @@ Transkriptionsdienst benötigt.
 - kompakte Kopfzeile mit Einstellungen und App-Informationen
 - App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
 - sichtbarer, noch nicht aktiver Bereich „Entwickler unterstützen“ für einen späteren Store-Ausbau
-- adaptives CannaBot-App-Symbol mit klassischen, runden und Android-13-Themenvarianten
+- modernes adaptives Transcript-App-Symbol mit klassischen, runden und Android-13-Themenvarianten
 
 ## Aufnahme und Vorhören
 
