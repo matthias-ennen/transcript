@@ -359,6 +359,7 @@ class TranscriptionService : Service() {
                 progress = progress,
                 sectionNumber = sectionNumber,
                 sectionCount = sectionCount,
+                startedAtEpochMs = startedAtEpochMs,
                 elapsedSeconds = ((System.currentTimeMillis() - startedAtEpochMs) / 1_000L)
                     .coerceAtLeast(0L),
                 status = status,

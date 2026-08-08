@@ -16,6 +16,7 @@ sealed interface TranscriptionState {
         val progress: Float,
         val sectionNumber: Int,
         val sectionCount: Int,
+        val startedAtEpochMs: Long,
         val elapsedSeconds: Long,
         val status: String,
         val activityDetail: String,

@@ -123,6 +123,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private var recordingMeter: Job? = null
     private var playbackTimer: Job? = null
     private var waveformJob: Job? = null
+    private var transcriptionElapsedTimer: Job? = null
+    private var transcriptionStartedAtEpochMs = 0L
     private var lastDownloadAnimationBucket = -1
     private var lastTranscriptionAnimationSection = -1
 
@@ -575,6 +577,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isTranscribing = true,
             isCancellationRequested = false,
             progress = 0f,
+            elapsedSeconds = 0L,
             runtimeEstimateAnnouncementId = 0L,
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
@@ -584,6 +587,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             status = "Transkription wird im Hintergrund vorbereitet …",
             cannaBotMode = CannaBotMode.RUNNING
         )
+        ensureTranscriptionElapsedTimer(System.currentTimeMillis())
         cue(CannaBotCue.RUNNING_RIGHT)
         TranscriptionService.start(
             context = application,
@@ -623,6 +627,38 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private fun stopPlaybackTimer() {
         playbackTimer?.cancel()
         playbackTimer = null
+    }
+
+    private fun ensureTranscriptionElapsedTimer(startedAtEpochMs: Long) {
+        val safeStartedAtEpochMs = startedAtEpochMs.takeIf { it > 0L }
+            ?: (System.currentTimeMillis() - uiState.elapsedSeconds * 1_000L)
+        if (
+            transcriptionElapsedTimer?.isActive == true &&
+            transcriptionStartedAtEpochMs == safeStartedAtEpochMs
+        ) {
+            return
+        }
+
+        transcriptionElapsedTimer?.cancel()
+        transcriptionStartedAtEpochMs = safeStartedAtEpochMs
+        transcriptionElapsedTimer = viewModelScope.launch {
+            while (isActive && uiState.isTranscribing) {
+                val elapsed = elapsedSecondsSince(
+                    startedAtEpochMs = transcriptionStartedAtEpochMs,
+                    nowEpochMs = System.currentTimeMillis()
+                )
+                if (uiState.elapsedSeconds != elapsed) {
+                    uiState = uiState.copy(elapsedSeconds = elapsed)
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun stopTranscriptionElapsedTimer() {
+        transcriptionElapsedTimer?.cancel()
+        transcriptionElapsedTimer = null
+        transcriptionStartedAtEpochMs = 0L
     }
 
     private fun stopPlayback(release: Boolean) {
@@ -741,6 +777,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     activityDetail = state.fileName,
                     cannaBotMode = CannaBotMode.WAITING
                 )
+                ensureTranscriptionElapsedTimer(
+                    System.currentTimeMillis() - uiState.elapsedSeconds * 1_000L
+                )
             }
             is TranscriptionState.Running -> {
                 uiState = uiState.copy(
@@ -748,7 +787,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isTranscribing = true,
                     isCancellationRequested = false,
                     progress = state.progress,
-                    elapsedSeconds = state.elapsedSeconds,
+                    elapsedSeconds = maxOf(
+                        state.elapsedSeconds,
+                        elapsedSecondsSince(state.startedAtEpochMs, System.currentTimeMillis())
+                    ),
                     status = state.status,
                     activityDetail = state.activityDetail,
                     diagnostics = state.diagnostics,
@@ -757,6 +799,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     error = null,
                     cannaBotMode = CannaBotMode.RUNNING
                 )
+                ensureTranscriptionElapsedTimer(state.startedAtEpochMs)
                 if (state.sectionNumber != lastTranscriptionAnimationSection) {
                     lastTranscriptionAnimationSection = state.sectionNumber
                     cue(
@@ -766,6 +809,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 }
             }
             is TranscriptionState.Completed -> {
+                stopTranscriptionElapsedTimer()
                 uiState = uiState.copy(
                     isBusy = false,
                     isTranscribing = false,
@@ -790,6 +834,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 cue(CannaBotCue.SUCCESS)
             }
             is TranscriptionState.Cancelled -> {
+                stopTranscriptionElapsedTimer()
                 uiState = uiState.copy(
                     isBusy = false,
                     isTranscribing = false,
@@ -809,6 +854,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 )
             }
             is TranscriptionState.Failed -> {
+                stopTranscriptionElapsedTimer()
                 uiState = uiState.copy(
                     isBusy = false,
                     isTranscribing = false,
@@ -903,6 +949,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun fail(throwable: Throwable) {
+        stopTranscriptionElapsedTimer()
         uiState = uiState.copy(
             isBusy = false,
             isTranscribing = false,
@@ -921,6 +968,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         recordingMeter?.cancel()
         waveformJob?.cancel()
         stopPlaybackTimer()
+        stopTranscriptionElapsedTimer()
         audioRecorder.release()
         audioPlayer.release()
     }
@@ -947,3 +995,6 @@ internal fun formatClock(totalSeconds: Long): String {
         "%02d:%02d".format(minutes, seconds)
     }
 }
+
+internal fun elapsedSecondsSince(startedAtEpochMs: Long, nowEpochMs: Long): Long =
+    ((nowEpochMs - startedAtEpochMs).coerceAtLeast(0L) / 1_000L)

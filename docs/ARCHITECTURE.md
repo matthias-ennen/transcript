@@ -70,10 +70,17 @@ zum Grundzustand zurück. Fortschrittsereignisse werden nur an festgelegten
 Meilensteinen ausgelöst.
 
 Im Zustand `REVIEW` ergänzt `TranscriptionTimeEstimate` die unveränderte
-Bereitschaftsmeldung um eine vorläufige Laufzeitschätzung. Die Statuszeile
+Bereitschaftsmeldung um eine kalibrierte Laufzeitschätzung. Die Statuszeile
 wechselt am 20-Prozent-Punkt der Pulsation zwischen beiden Texten. Pro
-Whisper-Modell liegt ein zentraler Echtzeitfaktor vor, der später anhand
-gemessener Transkriptionen angepasst werden kann.
+Whisper-Modell liegt ein zentraler, anhand der Messreihen auf dem Zielgerät
+festgelegter Echtzeitfaktor vor.
+
+Während einer Transkription liefert `TranscriptionService` die verbindliche
+Startzeit. `MainScreenViewModel` berechnet daraus in einem eigenen Sekundentakt
+die sichtbare Laufzeit. Dieser Takt ist unabhängig von Decoder- und
+Whisper-Fortschrittsmeldungen und wird nach einem erneuten Öffnen anhand der
+Startzeit wieder aufgenommen. Neben der echten Laufzeit bleibt die vor dem Lauf
+berechnete Gesamtschätzung sichtbar.
 
 ## Modelle und Speicherung
 

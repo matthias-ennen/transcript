@@ -59,7 +59,7 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
 - Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
 - vollständige deutsche Bezeichnung aller von Whisper erkannten Sprachen
-- vorläufige, modellabhängige Laufzeitschätzung für eine bereitstehende Datei
+- kalibrierte, modellabhängige Laufzeitschätzung für eine bereitstehende Datei
 - kompakte Kopfzeile mit vorbereitetem Deutsch-/Englisch-Umschalter,
   Einstellungen und App-Informationen
 - App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
@@ -106,9 +106,9 @@ werden einmal abgespielt und kehren anschließend automatisch zum passenden
 Grundzustand zurück. Der Statustext pulsiert, solange die App arbeitet,
 aufnimmt oder wiedergibt, und blendet dabei deutlich zwischen 20 und 100
 Prozent Deckkraft. Ist eine Datei bereit, wechselt die pulsierende Statuszeile
-am schwächsten Punkt zwischen der Bereitschaftsmeldung und einer ersten,
-modellabhängigen Schätzung der Transkriptionsdauer. Die Schätzfaktoren sind
-vorläufig und werden später anhand echter Laufzeitmessungen kalibriert.
+am schwächsten Punkt zwischen der Bereitschaftsmeldung und einer
+modellabhängigen Schätzung der Transkriptionsdauer. Die Schätzfaktoren wurden
+anhand praktischer Laufzeitmessungen auf dem Zielgerät festgelegt.
 
 Kurze Statusmeldungen bleiben einzeilig. Längere Status- und Fehlermeldungen
 werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit

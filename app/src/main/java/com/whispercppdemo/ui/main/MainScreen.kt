@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -285,6 +286,22 @@ private fun MainContent(
         var pendingTranscriptAction by remember {
             mutableStateOf<PendingTranscriptAction?>(null)
         }
+        var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
+
+        LaunchedEffect(state.isTranscribing) {
+            if (!state.isTranscribing) confirmTranscriptionCancellation = false
+        }
+
+        if (confirmTranscriptionCancellation) {
+            CancelTranscriptionDialog(
+                state = state,
+                onContinue = { confirmTranscriptionCancellation = false },
+                onConfirmCancellation = {
+                    confirmTranscriptionCancellation = false
+                    viewModel.cancelTranscription()
+                }
+            )
+        }
 
         pendingTranscriptAction?.let { pendingAction ->
             AlertDialog(
@@ -378,7 +395,7 @@ private fun MainContent(
 
             Button(
                 onClick = {
-                    if (state.isTranscribing) viewModel.cancelTranscription()
+                    if (state.isTranscribing) confirmTranscriptionCancellation = true
                     else if (state.hasUnsavedTranscriptChanges) {
                         pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
                     } else {
@@ -409,9 +426,13 @@ private fun MainContent(
             }
 
             LiveStatusLine(state)
-            if (state.isBusy && state.downloadingModel == null) {
+            if (state.isTranscribing) {
                 Text(
-                    "Laufzeit: ${formatClock(state.elapsedSeconds)}",
+                    transcriptionRuntimeDisplay(
+                        elapsedSeconds = state.elapsedSeconds,
+                        audioDurationMs = state.audioDurationMs,
+                        model = state.selectedModel
+                    ),
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -507,6 +528,59 @@ internal fun ModelSelector(
             }
         }
     }
+}
+
+@Composable
+private fun CancelTranscriptionDialog(
+    state: TranscriptUiState,
+    onContinue: () -> Unit,
+    onConfirmCancellation: () -> Unit
+) {
+    val transition = rememberInfiniteTransition(label = "cancel-question-pulse")
+    val alpha = transition.animateFloat(
+        initialValue = 0.20f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_800),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cancel-question-alpha"
+    ).value
+
+    AlertDialog(
+        onDismissRequest = onContinue,
+        shape = RoundedCornerShape(28.dp),
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CannaBotStatusAnimation(state)
+                Text(
+                    text = "Möchtest du die Transkription wirklich abbrechen?",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirmCancellation,
+                shape = RoundedCornerShape(50)
+            ) {
+                Text("Okay, abbrechen")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onContinue,
+                shape = RoundedCornerShape(50)
+            ) {
+                Text("Weiter")
+            }
+        }
+    )
 }
 
 internal val TranscriptUiState.isModelSelectionEnabled: Boolean
