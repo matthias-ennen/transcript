@@ -12,7 +12,7 @@ Stand: 8. August 2026
    `Laufzeit: 03:42 (≈ 05:00)`.
 4. Die Hauptschaltfläche bricht nicht mehr unmittelbar ab, sondern öffnet eine
    abgerundete Bestätigung mit CannaBot, pulsierender Frage sowie den
-   Kapselschaltflächen **Weiter** und **Okay, abbrechen**.
+   Kapselschaltflächen **Weiter** und **Abbrechen**.
 
 ## Prüfpunkte
 
@@ -20,5 +20,5 @@ Stand: 8. August 2026
 - Eine ausbleibende Whisper-Rückmeldung kann die Laufzeituhr nicht anhalten.
 - Nach erneutem Öffnen wird die Uhr aus der Startzeit korrekt fortgeführt.
 - Die Schätzung bleibt während eines Laufs unverändert.
-- Nur **Okay, abbrechen** sendet das Abbruchsignal; **Weiter** und Schließen des
+- Nur **Abbrechen** sendet das Abbruchsignal; **Weiter** und Schließen des
   Dialogs lassen die Transkription weiterlaufen.

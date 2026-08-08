@@ -569,7 +569,7 @@ private fun CancelTranscriptionDialog(
                 onClick = onConfirmCancellation,
                 shape = RoundedCornerShape(50)
             ) {
-                Text("Okay, abbrechen")
+                Text("Abbrechen")
             }
         },
         dismissButton = {
