@@ -106,7 +106,8 @@ class TranscriptionService : Service() {
             addDiagnostic("Audiospur wird geprüft.")
             val audioInfo = inspectAudioTrack(this, uri)
             val saved = checkpointStore.read()?.takeIf {
-                it.isCompatibleWith(request, audioInfo.durationMs)
+                it.isCompatibleWith(request, audioInfo.durationMs) &&
+                    it.hasMeaningfulProgress()
             }
             if (saved == null) checkpointStore.clear()
             var checkpoint = saved ?: TranscriptionCheckpoint(

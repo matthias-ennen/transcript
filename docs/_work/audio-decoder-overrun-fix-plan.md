@@ -24,7 +24,8 @@ anschließend wirkungslos mit kleineren Abschnitten wiederholt.
 5. Ein Überschreiten auch des Sicherheitsspielraums erhält einen eigenen
    Fehlertyp und löst keine wirkungslose 2,5-Minuten-Wiederholung aus.
 6. Ein Zwischenstand gilt nur dann als fortsetzbar, wenn bereits eine
-   Audioposition größer als `00:00` abgeschlossen wurde.
+   Audioposition größer als `00:00` abgeschlossen wurde. Leere ältere
+   Zwischenstände werden schon beim Laden verworfen.
 
 ## Prüfpunkte
 
