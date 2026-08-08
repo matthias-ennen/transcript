@@ -42,6 +42,14 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
    Reihenfolge bleiben erhalten.
 11. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
 
+## GUI-Sprache
+
+`AppLanguage` hält die von der Whisper-Transkriptionssprache unabhängige
+GUI-Sprachauswahl. Der Umschalter in der Kopfleiste bietet Deutsch und Englisch
+an; `AppLanguagePreference` speichert die Auswahl dauerhaft. Die vollständige
+Umstellung aller sichtbaren Texte auf Android-Stringressourcen erfolgt in einem
+separaten Lokalisierungsschritt.
+
 ## Status- und Animationssteuerung
 
 Die sichtbare Statuszeile verbindet Text und CannaBot. Dauerzustände sind

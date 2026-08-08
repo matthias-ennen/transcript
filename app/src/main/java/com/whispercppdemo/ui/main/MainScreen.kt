@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -88,6 +90,9 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     val state = viewModel.uiState
     val context = LocalContext.current
     var page by remember { mutableStateOf(AppPage.MAIN) }
+    var appLanguage by remember {
+        mutableStateOf(AppLanguagePreference.load(context))
+    }
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::selectAudio)
@@ -112,6 +117,11 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         topBar = {
             TranscriptTopBar(
                 page = page,
+                appLanguage = appLanguage,
+                onAppLanguageSelected = { language ->
+                    appLanguage = language
+                    AppLanguagePreference.save(context, language)
+                },
                 onNavigate = { page = it }
             )
         }
@@ -174,6 +184,8 @@ private enum class AppPage { MAIN, SETTINGS, ABOUT }
 @Composable
 private fun TranscriptTopBar(
     page: AppPage,
+    appLanguage: AppLanguage,
+    onAppLanguageSelected: (AppLanguage) -> Unit,
     onNavigate: (AppPage) -> Unit
 ) {
     TopAppBar(
@@ -191,15 +203,68 @@ private fun TranscriptTopBar(
         },
         actions = {
             if (page == AppPage.MAIN) {
-                IconButton(onClick = { onNavigate(AppPage.SETTINGS) }) {
-                    Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
-                }
-                IconButton(onClick = { onNavigate(AppPage.ABOUT) }) {
-                    Icon(Icons.Default.Info, contentDescription = "Über die App")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    AppLanguageSelector(
+                        selected = appLanguage,
+                        onSelected = onAppLanguageSelected
+                    )
+                    IconButton(
+                        onClick = { onNavigate(AppPage.SETTINGS) },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
+                    }
+                    IconButton(
+                        onClick = { onNavigate(AppPage.ABOUT) },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = "Über die App")
+                    }
                 }
             }
         }
     )
+}
+
+@Composable
+private fun AppLanguageSelector(
+    selected: AppLanguage,
+    onSelected: (AppLanguage) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 6.dp),
+            modifier = Modifier
+                .width(58.dp)
+                .height(44.dp)
+        ) {
+            Text(selected.flag)
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = "GUI-Sprache auswählen"
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            AppLanguage.entries.forEach { language ->
+                DropdownMenuItem(
+                    text = { Text("${language.flag}  ${language.displayName}") },
+                    onClick = {
+                        onSelected(language)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
 }
 
 private val AppPage.title: String
