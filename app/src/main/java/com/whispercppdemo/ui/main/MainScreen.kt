@@ -420,9 +420,6 @@ private fun MainContent(
                     style = MaterialTheme.typography.labelLarge
                 )
             }
-            state.activityDetail?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall)
-            }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
             if (state.segments.isNotEmpty()) {
@@ -546,21 +543,35 @@ private fun LiveStatusLine(state: TranscriptUiState) {
             state.segments.isEmpty() &&
             state.error == null &&
             estimateStatus != null
-    var showEstimate by remember(state.selectedAudio, state.selectedModel, estimateStatus) {
+    val isActiveOperation = state.isBusy || state.isRecording || state.isPlaying ||
+        state.isWaveformLoading
+    val primaryStatus = if (alternatesReadyStatus) {
+        state.mediaReadyStatus ?: state.status
+    } else {
+        state.status
+    }
+    val activityStatus = state.activityDetail
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it != primaryStatus }
+    val alternateStatus = when {
+        alternatesReadyStatus -> estimateStatus
+        isActiveOperation -> activityStatus
+        else -> null
+    }
+    var showAlternate by remember(primaryStatus, alternateStatus) {
         mutableStateOf(false)
     }
-    LaunchedEffect(alternatesReadyStatus, estimateStatus) {
-        if (!alternatesReadyStatus) {
-            showEstimate = false
+    LaunchedEffect(primaryStatus, alternateStatus) {
+        if (alternateStatus == null) {
+            showAlternate = false
             return@LaunchedEffect
         }
         while (true) {
             delay(3_600L)
-            showEstimate = !showEstimate
+            showAlternate = !showAlternate
         }
     }
-    val isActive = state.isBusy || state.isRecording || state.isPlaying ||
-        state.isWaveformLoading || alternatesReadyStatus
+    val isActive = isActiveOperation || alternatesReadyStatus
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(
@@ -583,13 +594,7 @@ private fun LiveStatusLine(state: TranscriptUiState) {
     ) {
         CannaBotStatusAnimation(state)
         Text(
-            text = if (alternatesReadyStatus && showEstimate) {
-                estimateStatus.orEmpty()
-            } else if (alternatesReadyStatus) {
-                state.mediaReadyStatus ?: state.status
-            } else {
-                state.status
-            },
+            text = if (showAlternate) alternateStatus.orEmpty() else primaryStatus,
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
