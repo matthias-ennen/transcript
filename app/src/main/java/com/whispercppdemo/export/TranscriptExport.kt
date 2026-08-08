@@ -1,8 +1,6 @@
 package de.matthiasennen.transcript.export
 
 import com.whispercpp.whisper.WhisperSegment
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.Locale
 
 enum class ExportFormat(val extension: String, val mimeType: String) {
@@ -41,25 +39,52 @@ fun exportTranscript(
         }
     }.joinToString("\n")
 
-    ExportFormat.JSON -> JSONObject()
-        .put("whisper_model", metadata.whisperModel)
-        .put("detected_language", metadata.detectedLanguage)
-        .put("transcription_duration_seconds", metadata.transcriptionDurationSeconds)
-        .put("created_at", metadata.createdAt)
-        .put(
-            "segments",
-            JSONArray().apply {
-                segments.forEach { segment ->
-                    put(
-                        JSONObject()
-                            .put("start_ms", segment.startMs)
-                            .put("end_ms", segment.endMs)
-                            .put("text", segment.text)
-                    )
-                }
+    ExportFormat.JSON -> buildJsonExport(segments, metadata)
+}
+
+private fun buildJsonExport(
+    segments: List<WhisperSegment>,
+    metadata: TranscriptExportMetadata
+): String = buildString {
+    appendLine("{")
+    appendLine("  \"whisper_model\": ${metadata.whisperModel.asJsonString()},")
+    appendLine("  \"detected_language\": ${metadata.detectedLanguage.asJsonString()},")
+    appendLine("  \"transcription_duration_seconds\": ${metadata.transcriptionDurationSeconds},")
+    appendLine("  \"created_at\": ${metadata.createdAt.asJsonString()},")
+    appendLine("  \"segments\": [")
+    segments.forEachIndexed { index, segment ->
+        appendLine("    {")
+        appendLine("      \"start_ms\": ${segment.startMs},")
+        appendLine("      \"end_ms\": ${segment.endMs},")
+        appendLine("      \"text\": ${segment.text.asJsonString()}")
+        append("    }")
+        if (index < segments.lastIndex) append(',')
+        appendLine()
+    }
+    appendLine("  ]")
+    append('}')
+}
+
+private fun String.asJsonString(): String = buildString(length + 2) {
+    append('"')
+    this@asJsonString.forEach { character ->
+        when (character) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\b' -> append("\\b")
+            '\u000C' -> append("\\f")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (character.code < 0x20) {
+                append("\\u")
+                append(character.code.toString(16).padStart(4, '0'))
+            } else {
+                append(character)
             }
-        )
-        .toString(2)
+        }
+    }
+    append('"')
 }
 
 fun formatDuration(seconds: Long): String {
