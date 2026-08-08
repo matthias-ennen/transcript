@@ -3,7 +3,6 @@ package de.matthiasennen.transcript.ui.main
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
-import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,24 +12,28 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.whispercpp.whisper.WhisperCpuConfig
-import com.whispercpp.whisper.WhisperContext
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.download.ModelDownloadCoordinator
 import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
 import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.AudioRecorder
-import de.matthiasennen.transcript.media.decodeAudio
+import de.matthiasennen.transcript.media.WAVEFORM_GENERATION_TIMEOUT_MS
 import de.matthiasennen.transcript.media.generateWaveform
+import de.matthiasennen.transcript.transcription.TranscriptionCoordinator
+import de.matthiasennen.transcript.transcription.TranscriptionService
+import de.matthiasennen.transcript.transcription.TranscriptionState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 
 private const val PREFERENCES_NAME = "transcript_preferences"
 private const val SELECTED_MODEL_KEY = "selected_model"
@@ -111,19 +114,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             cue(CannaBotCue.FAILED)
         }
     )
-    private var whisperContext: WhisperContext? = null
-    private var activeContextModel: WhisperModel? = null
-    private var diagnosticTimer: Job? = null
     private var recordingMeter: Job? = null
     private var playbackTimer: Job? = null
     private var waveformJob: Job? = null
-    private var transcriptionJob: Job? = null
-    private val transcriptionCancellationRequested = AtomicBoolean(false)
-    private var operationStartedAtMs = 0L
-    private var lastNativeProgressAtMs = 0L
-    private var lastProgressBucket = -1
-    private var lastCannaBotProgressStage = -1
     private var lastDownloadAnimationBucket = -1
+    private var lastTranscriptionAnimationSection = -1
 
     private fun cue(cue: CannaBotCue) {
         uiState = uiState.copy(cannaBotCue = cue, cannaBotCueId = uiState.cannaBotCueId + 1L)
@@ -135,6 +130,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         refreshModelInstallations(selectedModel)
         viewModelScope.launch {
             ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
+        }
+        viewModelScope.launch {
+            TranscriptionCoordinator.state.collect(::handleTranscriptionState)
         }
     }
 
@@ -227,7 +225,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 uiState = uiState.copy(
                     isPlaying = playing,
                     error = null,
-                    status = if (playing) "Song wird wiedergegeben …" else "Wiedergabe pausiert.",
+                    status = if (playing) "Audio wird wiedergegeben …" else "Wiedergabe pausiert.",
                     cannaBotMode = if (playing) CannaBotMode.RUNNING else CannaBotMode.IDLE
                 )
                 if (playing) cue(CannaBotCue.RUNNING_RIGHT)
@@ -284,35 +282,48 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 )
             }
         waveformJob = viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { generateWaveform(application, uri) } }
-                .onSuccess { (waveform, durationMs) ->
-                    if (uiState.selectedAudio == uri) {
-                        uiState = uiState.copy(
-                            waveform = waveform,
-                            audioDurationMs = if (uiState.audioDurationMs > 0L) {
-                                uiState.audioDurationMs
-                            } else {
-                                durationMs
-                            },
-                            isWaveformLoading = false,
-                            status = status,
-                            cannaBotMode = CannaBotMode.REVIEW
+            try {
+                val (waveform, durationMs) = withTimeout(WAVEFORM_GENERATION_TIMEOUT_MS) {
+                    withContext(Dispatchers.IO) {
+                        val workerContext = currentCoroutineContext()
+                        generateWaveform(
+                            context = application,
+                            uri = uri,
+                            shouldCancel = { !workerContext.isActive }
                         )
                     }
                 }
-                .onFailure { throwable ->
-                    if (uiState.selectedAudio == uri) {
-                        uiState = uiState.copy(
-                            isWaveformLoading = false,
-                            error = "Wellenform konnte nicht erstellt werden: " +
-                                (throwable.localizedMessage ?: throwable.javaClass.simpleName),
-                            status = "Wellenform konnte nicht erstellt werden.",
-                            cannaBotMode = CannaBotMode.IDLE
-                        )
-                        cue(CannaBotCue.FAILED)
-                    }
+                if (uiState.selectedAudio == uri) {
+                    uiState = uiState.copy(
+                        waveform = waveform,
+                        audioDurationMs = if (uiState.audioDurationMs > 0L) {
+                            uiState.audioDurationMs
+                        } else {
+                            durationMs
+                        },
+                        isWaveformLoading = false,
+                        status = status,
+                        cannaBotMode = CannaBotMode.REVIEW
+                    )
                 }
+            } catch (_: TimeoutCancellationException) {
+                finishWaveformWithoutPreview(uri)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                finishWaveformWithoutPreview(uri)
+            }
         }
+    }
+
+    private fun finishWaveformWithoutPreview(uri: Uri) {
+        if (uiState.selectedAudio != uri) return
+        uiState = uiState.copy(
+            waveform = emptyList(),
+            isWaveformLoading = false,
+            status = "Wellenform übersprungen · Datei ist bereit.",
+            cannaBotMode = CannaBotMode.REVIEW
+        )
     }
 
     fun setLanguage(language: String) {
@@ -391,7 +402,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 cannaBotMode = CannaBotMode.WAITING
             )
             runCatching {
-                if (activeContextModel == model) releaseWhisperContext()
                 withContext(Dispatchers.IO) {
                     val file = modelFile(model)
                     check(!file.exists() || file.delete()) {
@@ -424,7 +434,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 cannaBotMode = CannaBotMode.WAITING
             )
             runCatching {
-                releaseWhisperContext()
                 withContext(Dispatchers.IO) {
                     WhisperModel.entries.forEach { model ->
                         val file = modelFile(model)
@@ -451,170 +460,33 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     fun transcribe() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
-        val selectedModel = uiState.selectedModel
-        val selectedModelFile = modelFile(selectedModel)
-
         stopPlayback(release = false)
-        transcriptionCancellationRequested.set(false)
-        transcriptionJob = viewModelScope.launch {
-            startDiagnostics()
-            uiState = uiState.copy(
-                isBusy = true,
-                isTranscribing = true,
-                isCancellationRequested = false,
-                progress = 0f,
-                segments = emptyList(),
-                isEditingTranscript = false,
-                draftSegments = emptyList(),
-                error = null,
-                status = "1/4 · Audiodatei wird dekodiert …",
-                cannaBotMode = CannaBotMode.RUNNING
-            )
-            lastCannaBotProgressStage = -1
-            cue(CannaBotCue.RUNNING_RIGHT)
-            addDiagnostic("1/4 · Audio-/Video-Dekodierung gestartet.")
-
-            try {
-                val decodedAudio = withContext(Dispatchers.IO) {
-                    decodeAudio(
-                        context = application,
-                        uri = uri,
-                        shouldCancel = transcriptionCancellationRequested::get
-                    ) { progress ->
-                        viewModelScope.launch {
-                            if (uiState.isTranscribing && !uiState.isCancellationRequested) {
-                                val percent = (progress * 100).toInt().coerceIn(0, 100)
-                                uiState = uiState.copy(
-                                    progress = progress,
-                                    status = "1/4 · Audiodatei wird dekodiert: $percent %"
-                                )
-                            }
-                        }
-                    }
-                }
-                ensureTranscriptionContinues()
-                addDiagnostic(
-                    "1/4 · Audio dekodiert: ${formatClock(decodedAudio.durationMs / 1_000L)}, " +
-                        "${decodedAudio.sourceSampleRate} Hz, " +
-                        "${decodedAudio.sourceChannelCount} Kanal/Kanäle, ${decodedAudio.mimeType}."
-                )
-                uiState = uiState.copy(
-                    progress = null,
-                    status = "2/4 · Whisper-Modell wird in den Speicher geladen …",
-                    cannaBotMode = CannaBotMode.WAITING
-                )
-                val contextWasCached = whisperContext != null && activeContextModel == selectedModel
-                val context = withContext(Dispatchers.IO) {
-                    if (activeContextModel != selectedModel) releaseWhisperContext()
-                    ensureTranscriptionContinues()
-                    whisperContext ?: WhisperContext.createContextFromFile(selectedModelFile.absolutePath)
-                        .also {
-                            whisperContext = it
-                            activeContextModel = selectedModel
-                        }
-                }
-                ensureTranscriptionContinues()
-                addDiagnostic(
-                    "2/4 · ${selectedModel.modelLabel} " +
-                        "${if (contextWasCached) "war bereits geladen" else "wurde geladen"} " +
-                        "(${formatFileSize(selectedModelFile.length())})."
-                )
-
-                val selectedLanguage = uiState.language
-                val threadCount = WhisperCpuConfig.preferredThreadCount
-                lastNativeProgressAtMs = SystemClock.elapsedRealtime()
-                lastProgressBucket = -1
-                uiState = uiState.copy(
-                    progress = null,
-                    status = "3/4 · Native Whisper-Engine wird gestartet …",
-                    activityDetail = "Warte auf die erste Rückmeldung aus whisper.cpp.",
-                    cannaBotMode = CannaBotMode.RUNNING
-                )
-                cue(CannaBotCue.JUMPING)
-                addDiagnostic(
-                    "3/4 · Start mit $threadCount CPU-Threads, Sprache ${languageLabel(selectedLanguage)}, " +
-                        "${decodedAudio.samples.size} PCM-Samples."
-                )
-
-                val result = context.transcribeSegments(
-                    data = decodedAudio.samples,
-                    language = selectedLanguage,
-                    shouldCancel = transcriptionCancellationRequested::get
-                ) { percent ->
-                    viewModelScope.launch {
-                        if (!uiState.isTranscribing || uiState.isCancellationRequested) return@launch
-                        val now = SystemClock.elapsedRealtime()
-                        lastNativeProgressAtMs = now
-                        val bucket = percent / 10
-                        if (percent == 0 || percent == 100 || bucket > lastProgressBucket) {
-                            lastProgressBucket = bucket
-                            addDiagnostic("4/4 · whisper.cpp meldet $percent % Fortschritt.")
-                        }
-                        uiState = uiState.copy(
-                            progress = percent / 100f,
-                            status = "4/4 · Whisper verarbeitet das Audio: $percent %",
-                            activityDetail = "Native Engine aktiv; letzte Rückmeldung gerade eben.",
-                            cannaBotMode = CannaBotMode.RUNNING
-                        )
-                        val animationStage = when {
-                            percent >= 85 -> 3
-                            percent >= 50 -> 2
-                            percent >= 20 -> 1
-                            else -> 0
-                        }
-                        if (animationStage > lastCannaBotProgressStage) {
-                            lastCannaBotProgressStage = animationStage
-                            when (animationStage) {
-                                1 -> cue(CannaBotCue.RUNNING_RIGHT)
-                                2 -> cue(CannaBotCue.RUNNING_LEFT)
-                            }
-                        }
-                    }
-                }
-                ensureTranscriptionContinues()
-                stopDiagnosticTimer()
-                val elapsed = (SystemClock.elapsedRealtime() - operationStartedAtMs) / 1_000L
-                val segments = result.segments
-                addDiagnostic("Abgeschlossen: ${segments.size} Textabschnitte empfangen.")
-                uiState = uiState.copy(
-                    isBusy = false,
-                    isTranscribing = false,
-                    isCancellationRequested = false,
-                    progress = null,
-                    activityDetail = null,
-                    segments = segments,
-                    isEditingTranscript = false,
-                    draftSegments = emptyList(),
-                    detectedLanguage = result.detectedLanguage,
-                    completedModel = selectedModel,
-                    transcriptionDurationSeconds = elapsed,
-                    cannaBotMode = CannaBotMode.IDLE,
-                    status = if (segments.isEmpty()) {
-                        "Es wurde kein Text erkannt."
-                    } else {
-                        "Fertig: ${segments.size} Textabschnitte erkannt."
-                    }
-                )
-                cue(CannaBotCue.SUCCESS)
-            } catch (throwable: Throwable) {
-                if (transcriptionCancellationRequested.get()) {
-                    finishCancelledTranscription()
-                } else {
-                    addDiagnostic(
-                        "Fehler: ${throwable.localizedMessage ?: throwable.javaClass.simpleName}."
-                    )
-                    fail(throwable)
-                }
-            } finally {
-                transcriptionJob = null
-            }
-        }
+        waveformJob?.cancel()
+        waveformJob = null
+        uiState = uiState.copy(
+            isBusy = true,
+            isTranscribing = true,
+            isWaveformLoading = false,
+            isCancellationRequested = false,
+            progress = 0f,
+            isEditingTranscript = false,
+            draftSegments = emptyList(),
+            error = null,
+            status = "Transkription wird im Hintergrund vorbereitet …",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        cue(CannaBotCue.RUNNING_RIGHT)
+        TranscriptionService.start(
+            context = application,
+            uri = uri,
+            fileName = uiState.selectedFileName ?: displayName(uri),
+            model = uiState.selectedModel,
+            language = uiState.language
+        )
     }
 
     fun cancelTranscription() {
-        if (!uiState.isTranscribing || !transcriptionCancellationRequested.compareAndSet(false, true)) {
-            return
-        }
+        if (!uiState.isTranscribing || uiState.isCancellationRequested) return
         uiState = uiState.copy(
             isCancellationRequested = true,
             progress = null,
@@ -622,76 +494,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             activityDetail = "Das Abbruchsignal wurde an die laufende Verarbeitung gesendet.",
             cannaBotMode = CannaBotMode.WAITING
         )
-        addDiagnostic("Abbruch durch den Benutzer angefordert.")
-        whisperContext?.requestAbort()
-    }
-
-    private fun ensureTranscriptionContinues() {
-        check(!transcriptionCancellationRequested.get()) { "Transkription abgebrochen." }
-    }
-
-    private suspend fun finishCancelledTranscription() {
-        releaseWhisperContext()
-        stopDiagnosticTimer()
-        addDiagnostic("Transkription vollständig abgebrochen; Whisper-Kontext freigegeben.")
-        uiState = uiState.copy(
-            isBusy = false,
-            isTranscribing = false,
-            isCancellationRequested = false,
-            progress = null,
-            activityDetail = null,
-            segments = emptyList(),
-            isEditingTranscript = false,
-            draftSegments = emptyList(),
-            detectedLanguage = null,
-            completedModel = null,
-            transcriptionDurationSeconds = null,
-            error = null,
-            status = "Transkription abgebrochen. Du kannst ein anderes Modell wählen.",
-            cannaBotMode = CannaBotMode.IDLE
-        )
-        transcriptionCancellationRequested.set(false)
-    }
-
-    private fun startDiagnostics() {
-        diagnosticTimer?.cancel()
-        operationStartedAtMs = SystemClock.elapsedRealtime()
-        lastNativeProgressAtMs = 0L
-        lastProgressBucket = -1
-        uiState = uiState.copy(
-            elapsedSeconds = 0L,
-            activityDetail = null,
-            diagnostics = emptyList()
-        )
-        diagnosticTimer = viewModelScope.launch {
-            while (true) {
-                delay(1_000L)
-                if (!uiState.isBusy) continue
-                val now = SystemClock.elapsedRealtime()
-                val elapsedSeconds = (now - operationStartedAtMs) / 1_000L
-                val detail = if (lastNativeProgressAtMs > 0L) {
-                    val silentSeconds = (now - lastNativeProgressAtMs) / 1_000L
-                    when {
-                        silentSeconds >= 120L ->
-                            "Seit ${formatClock(silentSeconds)} keine neue Whisper-Meldung. " +
-                                "Die Engine kann rechnen oder festhängen."
-                        else ->
-                            "Letzte Rückmeldung aus whisper.cpp vor ${formatClock(silentSeconds)}."
-                    }
-                } else {
-                    uiState.activityDetail
-                }
-                uiState = uiState.copy(
-                    elapsedSeconds = elapsedSeconds,
-                    activityDetail = detail
-                )
-            }
-        }
-    }
-
-    private fun stopDiagnosticTimer() {
-        diagnosticTimer?.cancel()
-        diagnosticTimer = null
+        TranscriptionService.cancel(application)
     }
 
     private fun startPlaybackTimer() {
@@ -718,15 +521,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         audioPlayer.pause()
         if (release) audioPlayer.release()
         uiState = uiState.copy(isPlaying = false)
-    }
-
-    private fun addDiagnostic(message: String) {
-        val elapsed = if (operationStartedAtMs == 0L) 0L else {
-            (SystemClock.elapsedRealtime() - operationStartedAtMs) / 1_000L
-        }
-        uiState = uiState.copy(
-            diagnostics = (uiState.diagnostics + "${formatClock(elapsed)} · $message").takeLast(12)
-        )
     }
 
     private fun handleModelDownloadState(downloadState: ModelDownloadState) {
@@ -810,6 +604,109 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     }
 
+    private fun handleTranscriptionState(state: TranscriptionState) {
+        when (state) {
+            TranscriptionState.Idle -> Unit
+            is TranscriptionState.Starting -> {
+                lastTranscriptionAnimationSection = -1
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isTranscribing = true,
+                    isCancellationRequested = false,
+                    progress = 0f,
+                    error = null,
+                    status = "Transkription wird im Hintergrund vorbereitet …",
+                    activityDetail = state.fileName,
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            is TranscriptionState.Running -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isTranscribing = true,
+                    isCancellationRequested = false,
+                    progress = state.progress,
+                    elapsedSeconds = state.elapsedSeconds,
+                    status = state.status,
+                    activityDetail = state.activityDetail,
+                    diagnostics = state.diagnostics,
+                    segments = state.committedSegments,
+                    detectedLanguage = state.detectedLanguage,
+                    error = null,
+                    cannaBotMode = CannaBotMode.RUNNING
+                )
+                if (state.sectionNumber != lastTranscriptionAnimationSection) {
+                    lastTranscriptionAnimationSection = state.sectionNumber
+                    cue(
+                        if (state.sectionNumber % 2 == 0) CannaBotCue.RUNNING_LEFT
+                        else CannaBotCue.RUNNING_RIGHT
+                    )
+                }
+            }
+            is TranscriptionState.Completed -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isTranscribing = false,
+                    isCancellationRequested = false,
+                    progress = null,
+                    activityDetail = null,
+                    segments = state.segments,
+                    isEditingTranscript = false,
+                    draftSegments = emptyList(),
+                    detectedLanguage = state.detectedLanguage,
+                    completedModel = state.model,
+                    transcriptionDurationSeconds = state.transcriptionDurationSeconds,
+                    error = null,
+                    status = if (state.segments.isEmpty()) {
+                        "Es wurde kein Text erkannt."
+                    } else {
+                        "Fertig: ${state.segments.size} Textabschnitte erkannt."
+                    },
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.SUCCESS)
+            }
+            is TranscriptionState.Cancelled -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isTranscribing = false,
+                    isCancellationRequested = false,
+                    progress = null,
+                    activityDetail = null,
+                    segments = emptyList(),
+                    isEditingTranscript = false,
+                    draftSegments = emptyList(),
+                    detectedLanguage = null,
+                    completedModel = null,
+                    transcriptionDurationSeconds = null,
+                    error = null,
+                    status = "Transkription abgebrochen.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }
+            is TranscriptionState.Failed -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isTranscribing = false,
+                    isCancellationRequested = false,
+                    progress = null,
+                    activityDetail = null,
+                    segments = state.committedSegments,
+                    isEditingTranscript = false,
+                    draftSegments = emptyList(),
+                    error = state.message,
+                    status = if (state.canResume) {
+                        "Transkription unterbrochen · Beim nächsten Start wird sie fortgesetzt."
+                    } else {
+                        "Transkription fehlgeschlagen."
+                    },
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+            }
+        }
+    }
+
     private fun modelFile(model: WhisperModel): File = File(modelsDirectory, model.fileName)
 
     private fun partialModelFile(model: WhisperModel): File =
@@ -839,13 +736,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
-    private suspend fun releaseWhisperContext() {
-        val context = whisperContext
-        whisperContext = null
-        activeContextModel = null
-        context?.release()
-    }
-
     private fun displayName(uri: Uri): String {
         runCatching {
             application.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -857,7 +747,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun fail(throwable: Throwable) {
-        stopDiagnosticTimer()
         uiState = uiState.copy(
             isBusy = false,
             isTranscribing = false,
@@ -873,16 +762,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     override fun onCleared() {
-        transcriptionCancellationRequested.set(true)
-        whisperContext?.requestAbort()
-        transcriptionJob?.cancel()
-        stopDiagnosticTimer()
         recordingMeter?.cancel()
         waveformJob?.cancel()
         stopPlaybackTimer()
         audioRecorder.release()
         audioPlayer.release()
-        runBlocking { releaseWhisperContext() }
     }
 
     companion object {
@@ -896,12 +780,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 }
 
-private fun languageLabel(code: String): String = when (code) {
-    "de" -> "Deutsch"
-    "en" -> "Englisch"
-    else -> "automatisch"
-}
-
 internal fun formatClock(totalSeconds: Long): String {
     val safeSeconds = totalSeconds.coerceAtLeast(0L)
     val hours = safeSeconds / 3_600L
@@ -913,6 +791,3 @@ internal fun formatClock(totalSeconds: Long): String {
         "%02d:%02d".format(minutes, seconds)
     }
 }
-
-private fun formatFileSize(bytes: Long): String =
-    "%.1f MB".format(bytes / (1024.0 * 1024.0))

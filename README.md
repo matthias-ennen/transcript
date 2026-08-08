@@ -14,6 +14,10 @@ App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
 - Android-Dateiauswahl für unterstützte Audio- und Videoformate
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
+- abschnittsweise Transkription langer Aufnahmen mit konstant begrenztem Speicherbedarf
+- Fünf-Minuten-Abschnitte mit zwei Sekunden Kontextüberlappung und absoluten Zeitstempeln
+- automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
+- Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
 - lokale Modellverwaltung mit vier Qualitätsstufen
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
@@ -30,12 +34,14 @@ App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
 - laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
-- einzeilige, nur bei aktiven Vorgängen pulsierende Statusanzeige mit CannaBot
+- nur bei aktiven Vorgängen pulsierende Statusanzeige mit CannaBot
+- vollständig umbrechende Statusmeldungen neben CannaBot ohne abgeschnittenen Text
 - gezielte Dauer- und Einmalanimationen über alle neun Sprite-Sheet-Zustände
 - laufende Transkription direkt über die Hauptschaltfläche abbrechen
 - direkte Mikrofonaufnahme mit automatischer Speicherung im App-Bereich
 - Play/Pause für ausgewählte Dateien und eigene Aufnahmen
-- Wellenform mit mitlaufender und per Finger verschiebbarer Positionsmarke
+- speicherschonend gestreamte Wellenform mit mitlaufender und per Finger
+  verschiebbarer Positionsmarke
 - Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
 - Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
 - kompakte Kopfzeile mit Einstellungen und App-Informationen
@@ -54,7 +60,11 @@ enthält Datum und Uhrzeit.
 Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
 abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
 durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
-Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel.
+Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel. Für die
+Wellenform wird die Audiospur blockweise dekodiert und sofort auf 180 Werte
+verdichtet; vollständige PCM-Daten werden dafür nicht im Arbeitsspeicher
+gehalten. Nach spätestens 60 Sekunden wird nur diese optionale Vorschau
+übersprungen. Wiedergabe und Transkription bleiben weiterhin verfügbar.
 
 ## Transkript korrigieren
 
@@ -78,6 +88,35 @@ weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
 werden einmal abgespielt und kehren anschließend automatisch zum passenden
 Grundzustand zurück. Der Statustext pulsiert nur, solange die App tatsächlich
 arbeitet, aufnimmt oder wiedergibt.
+
+Kurze Statusmeldungen bleiben einzeilig. Längere Status- und Fehlermeldungen
+werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit
+Auslassungspunkten abgeschnitten. Bei der Wiedergabe verwendet die Oberfläche
+bewusst den allgemeinen Text **Audio wird wiedergegeben …**.
+
+## Lange Aufnahmen und Hintergrundbetrieb
+
+Die Transkription lädt nicht mehr die vollständige Aufnahme als PCM in den
+Arbeitsspeicher. `TranscriptionService` verarbeitet nacheinander
+Fünf-Minuten-Hauptabschnitte. Jeder Abschnitt enthält an den Grenzen zwei
+Sekunden zusätzlichen Audiokontext, damit Wörter und Sätze nicht abgeschnitten
+werden. Die Überlappung wird anschließend anhand der zeitlichen Mitte jedes
+Whisper-Segments genau einem Hauptabschnitt zugeordnet. Auf die lokalen
+Whisper-Zeitstempel wird die absolute Startposition des Decoderabschnitts
+addiert; dadurch bleiben auch Zeitstempel über einer Stunde korrekt.
+
+Scheitert ein Fünf-Minuten-Abschnitt, wird dieser einmal in zwei
+2,5-Minuten-Sicherheitsabschnitte geteilt. Nach jedem fertigen Abschnitt werden
+Textsegmente, erkannte Sprache und nächste Audioposition atomar im privaten
+App-Speicher gesichert. Eine erneute Transkription derselben Datei mit demselben
+Modell und derselben Sprache setzt dort fort. Ein bewusster Abbruch entfernt
+den Zwischenstand.
+
+Der Foreground-Service läuft auch bei ausgeschaltetem Bildschirm oder
+geschlossener Oberfläche weiter. Seine Systemmeldung zeigt Gesamtfortschritt
+und Abschnittsnummer und bietet einen Abbruchknopf. Bei automatischer
+Spracherkennung wird die Sprache erst nach einem Abschnitt mit erkanntem Text
+festgehalten und für alle folgenden Abschnitte wiederverwendet.
 
 Die Debug-APK baut den rechenintensiven nativen Whisper-Code mit
 Release-Optimierungen. Die Optimierung muss im `lib`-Modul gesetzt sein, weil

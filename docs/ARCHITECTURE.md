@@ -16,15 +16,31 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
 ## Datenfluss
 
 1. `MainScreenViewModel` hält den zentralen `TranscriptUiState`.
-2. `AndroidAudioDecoder` wandelt die gewählte Mediendatei in 16-kHz-Mono-PCM um.
-3. `WhisperContext` übergibt die Samples an die native Whisper-Engine.
-4. Fortschritt, Diagnosemeldungen und erkannte `WhisperSegment`-Einträge werden
-   in den UI-Zustand übernommen.
-5. Die Ergebnisansicht stellt jedes Segment mit Zeitstempel und GUI-Nummer dar.
-6. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
+2. `WaveformGenerator` dekodiert die Audiospur blockweise und verdichtet die
+   gelesenen Puffer unmittelbar auf 180 Spitzenwerte. Die vollständigen PCM-
+   Daten werden dabei nie im Speicher gehalten. Nach 60 Sekunden wird nur die
+   optionale Wellenform abgebrochen; die Datei bleibt nutzbar.
+3. `TranscriptionService` plant Fünf-Minuten-Hauptabschnitte mit je zwei
+   Sekunden Kontextüberlappung und arbeitet unabhängig von der Activity.
+4. `AndroidAudioDecoder` dekodiert ausschließlich den aktuellen Bereich und
+   resampelt MediaCodec-Ausgabepuffer unmittelbar auf 16-kHz-Mono-PCM. PCM in
+   der ursprünglichen Abtastrate wird nicht gesammelt.
+5. `WhisperContext` verarbeitet den aktuellen Abschnitt. Bei automatischer
+   Auswahl wird eine anhand eines brauchbaren Textabschnitts erkannte Sprache
+   für die folgenden Abschnitte festgehalten.
+6. `TranscriptionChunking` verschiebt lokale Segmentzeiten auf die absolute
+   Audioposition und ordnet Überlappungssegmente über ihren Mittelpunkt genau
+   einem Hauptbereich zu. Ein fehlgeschlagener Hauptabschnitt wird einmal in
+   2,5-Minuten-Bereiche geteilt.
+7. `TranscriptionCheckpointStore` schreibt Segmente, Sprache und nächste
+   Position nach jedem fertigen Abschnitt atomar in den privaten App-Speicher.
+8. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
+   an jedes aktive `MainScreenViewModel`.
+9. Die Ergebnisansicht stellt jedes Segment mit Zeitstempel und GUI-Nummer dar.
+10. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
    **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
    Reihenfolge bleiben erhalten.
-7. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
+11. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
 
 ## Status- und Animationssteuerung
 
@@ -37,10 +53,13 @@ Meilensteinen ausgelöst.
 
 ## Modelle und Speicherung
 
-Modelle und Aufnahmen liegen im privaten App-Speicher. Downloads werden über
-einen Foreground-Service ausgeführt, können über `.part`-Dateien fortgesetzt
-werden und werden vor der Aktivierung per SHA-256 geprüft. Modelle werden nicht
-in die APK aufgenommen.
+Modelle, Aufnahmen und Transkriptionszwischenstände liegen im privaten
+App-Speicher. Modelldownload und Transkription besitzen getrennte
+Foreground-Services, getrennte Zustandskoordinatoren und getrennte
+Fehlerbehandlung. Downloads können über `.part`-Dateien fortgesetzt werden und
+werden vor der Aktivierung per SHA-256 geprüft. Modelle werden nicht in die APK
+aufgenommen. Ein bewusster Transkriptionsabbruch entfernt den Zwischenstand;
+eine Prozessunterbrechung lässt ihn für die Wiederaufnahme bestehen.
 
 ## Build und Veröffentlichung
 
