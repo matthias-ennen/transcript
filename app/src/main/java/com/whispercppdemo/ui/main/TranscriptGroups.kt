@@ -53,7 +53,13 @@ internal fun TranscriptList(
         }
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Transkript",
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = MaterialTheme.typography.labelLarge.fontSize * 1.12f
+            )
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -26,6 +26,13 @@ internal fun estimateTranscriptionDurationSeconds(
     return ceil(estimateSeconds / 60.0).toLong().coerceAtLeast(1L) * 60L
 }
 
+internal fun TranscriptUiState.withRecalculatedTranscriptionEstimate(): TranscriptUiState = copy(
+    transcriptionEstimateSeconds = estimateTranscriptionDurationSeconds(
+        audioDurationMs = audioDurationMs,
+        model = selectedModel
+    )
+)
+
 internal fun formatTranscriptionEstimate(seconds: Long): String {
     val totalMinutes = ceil(seconds.coerceAtLeast(1L) / 60.0).toLong().coerceAtLeast(1L)
     if (totalMinutes < 60L) {
@@ -39,19 +46,16 @@ internal fun formatTranscriptionEstimate(seconds: Long): String {
 }
 
 internal fun transcriptionEstimateStatus(
-    audioDurationMs: Long,
-    model: WhisperModel
-): String? = estimateTranscriptionDurationSeconds(audioDurationMs, model)?.let { seconds ->
+    estimateSeconds: Long?
+): String? = estimateSeconds?.let { seconds ->
     "Voraussichtliche Transkriptionsdauer: ${formatTranscriptionEstimate(seconds)}"
 }
 
 internal fun transcriptionRuntimeDisplay(
     elapsedSeconds: Long,
-    audioDurationMs: Long,
-    model: WhisperModel
+    estimateSeconds: Long?
 ): String {
     val elapsed = formatClock(elapsedSeconds)
-    val estimate = estimateTranscriptionDurationSeconds(audioDurationMs, model)
-        ?.let(::formatClock)
+    val estimate = estimateSeconds?.let(::formatClock)
     return if (estimate == null) "Laufzeit: $elapsed" else "Laufzeit: $elapsed (≈ $estimate)"
 }

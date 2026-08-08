@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript
 
+import de.matthiasennen.transcript.ui.main.TranscriptUiState
 import de.matthiasennen.transcript.ui.main.WhisperModel
 import de.matthiasennen.transcript.ui.main.estimateTranscriptionDurationSeconds
 import de.matthiasennen.transcript.ui.main.elapsedSecondsSince
@@ -7,6 +8,7 @@ import de.matthiasennen.transcript.ui.main.formatTranscriptionEstimate
 import de.matthiasennen.transcript.ui.main.transcriptionRealtimeFactor
 import de.matthiasennen.transcript.ui.main.transcriptionEstimateStatus
 import de.matthiasennen.transcript.ui.main.transcriptionRuntimeDisplay
+import de.matthiasennen.transcript.ui.main.withRecalculatedTranscriptionEstimate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -57,7 +59,12 @@ class TranscriptionTimeEstimateTest {
     fun `ready status contains the selected model estimate`() {
         assertEquals(
             "Voraussichtliche Transkriptionsdauer: ca. 4 Minuten",
-            transcriptionEstimateStatus(3L * 60L * 1_000L, WhisperModel.BASE)
+            transcriptionEstimateStatus(
+                estimateTranscriptionDurationSeconds(
+                    3L * 60L * 1_000L,
+                    WhisperModel.BASE
+                )
+            )
         )
     }
 
@@ -65,8 +72,12 @@ class TranscriptionTimeEstimateTest {
     fun `changing the selected model immediately changes the ready estimate`() {
         val durationMs = 10L * 60L * 1_000L
 
-        val tiny = transcriptionEstimateStatus(durationMs, WhisperModel.TINY)
-        val base = transcriptionEstimateStatus(durationMs, WhisperModel.BASE)
+        val tiny = transcriptionEstimateStatus(
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.TINY)
+        )
+        val base = transcriptionEstimateStatus(
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.BASE)
+        )
 
         assertEquals("Voraussichtliche Transkriptionsdauer: ca. 8 Minuten", tiny)
         assertEquals("Voraussichtliche Transkriptionsdauer: ca. 11 Minuten", base)
@@ -78,10 +89,33 @@ class TranscriptionTimeEstimateTest {
             "Laufzeit: 03:42 (≈ 05:00)",
             transcriptionRuntimeDisplay(
                 elapsedSeconds = 3L * 60L + 42L,
-                audioDurationMs = 4L * 60L * 1_000L,
-                model = WhisperModel.BASE
+                estimateSeconds = estimateTranscriptionDurationSeconds(
+                    4L * 60L * 1_000L,
+                    WhisperModel.BASE
+                )
             )
         )
+    }
+
+    @Test
+    fun `stored estimate is recalculated from current duration and model`() {
+        val loadedFile = TranscriptUiState(
+            audioDurationMs = 10L * 60L * 1_000L,
+            selectedModel = WhisperModel.TINY
+        ).withRecalculatedTranscriptionEstimate()
+        assertEquals(8L * 60L, loadedFile.transcriptionEstimateSeconds)
+
+        val changedQuality = loadedFile.copy(selectedModel = WhisperModel.BASE)
+            .withRecalculatedTranscriptionEstimate()
+        assertEquals(11L * 60L, changedQuality.transcriptionEstimateSeconds)
+
+        val stoppedRecording = changedQuality.copy(audioDurationMs = 3L * 60L * 1_000L)
+            .withRecalculatedTranscriptionEstimate()
+        assertEquals(4L * 60L, stoppedRecording.transcriptionEstimateSeconds)
+
+        val clearedFile = stoppedRecording.copy(audioDurationMs = 0L)
+            .withRecalculatedTranscriptionEstimate()
+        assertNull(clearedFile.transcriptionEstimateSeconds)
     }
 
     @Test

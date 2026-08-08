@@ -15,6 +15,12 @@ Stand: 8. August 2026
    Kapselschaltflächen **Weiter** und **Abbrechen**. Diese zusätzliche Abfrage
    gilt für **Ausgewogen**, **Sehr genau** und **Maximale Qualität**. Bei
    **Sehr schnell** und **Schnell** wird weiterhin direkt abgebrochen.
+5. Oberhalb der gemeinsamen Ein-/Ausklappschaltflächen grenzt die kompakte
+   Zwischenüberschrift **Transkript** den Ergebnisbereich optisch ab.
+6. Die Schätzung wird als eigener Zustandswert aus der bereits bekannten
+   Audiodauer neu gesetzt: beim Laden einer Datei, nach dem Beenden einer
+   Aufnahme, beim Qualitätswechsel und unmittelbar vor dem Start. Eine erneute
+   Analyse der Audiodatei ist dafür nicht erforderlich.
 
 ## Prüfpunkte
 
@@ -26,3 +32,5 @@ Stand: 8. August 2026
   Dialogs lassen die Transkription weiterlaufen.
 - Die Modellregel ist durch einen Unit-Test für alle fünf Qualitätsstufen
   abgesichert.
+- Der gespeicherte Schätzwert folgt der aktuellen Audiodauer und Qualitätsstufe
+  und wird ohne geladene Dauer zurückgesetzt.

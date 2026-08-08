@@ -68,6 +68,7 @@ data class TranscriptUiState(
     val progress: Float? = null,
     val status: String = "Bitte zuerst das Whisper-Modell herunterladen.",
     val runtimeEstimateAnnouncementId: Long = 0L,
+    val transcriptionEstimateSeconds: Long? = null,
     val elapsedSeconds: Long = 0L,
     val activityDetail: String? = null,
     val diagnostics: List<String> = emptyList(),
@@ -96,6 +97,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         context = application,
         onPrepared = { durationMs ->
             uiState = uiState.copy(audioDurationMs = durationMs)
+                .withRecalculatedTranscriptionEstimate()
         },
         onCompletion = {
             playbackTimer?.cancel()
@@ -287,7 +289,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             runtimeEstimateAnnouncementId = 0L,
             activityDetail = "Wellenform wird erstellt · 0 %",
             cannaBotMode = CannaBotMode.WAITING
-        )
+        ).withRecalculatedTranscriptionEstimate()
         runCatching { audioPlayer.prepare(uri) }
             .onFailure { throwable ->
                 uiState = uiState.copy(
@@ -301,6 +303,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 }
                 if (uiState.selectedAudio == uri && uiState.audioDurationMs <= 0L) {
                     uiState = uiState.copy(audioDurationMs = metadataDurationMs)
+                        .withRecalculatedTranscriptionEstimate()
                 }
                 val cacheKey = withContext(Dispatchers.IO) {
                     waveformCache.key(
@@ -375,7 +378,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             status = if (operationOwnsStatus) uiState.status else readyStatus,
             activityDetail = if (operationOwnsStatus) uiState.activityDetail else null,
             cannaBotMode = if (operationOwnsStatus) uiState.cannaBotMode else CannaBotMode.REVIEW
-        )
+        ).withRecalculatedTranscriptionEstimate()
     }
 
     private fun finishWaveformWithoutPreview(uri: Uri) {
@@ -572,6 +575,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
         stopPlayback(release = false)
+        uiState = uiState.withRecalculatedTranscriptionEstimate()
         uiState = uiState.copy(
             isBusy = true,
             isTranscribing = true,
@@ -913,7 +917,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             } else {
                 CannaBotMode.IDLE
             }
-        )
+        ).withRecalculatedTranscriptionEstimate()
     }
 
     private fun displayName(uri: Uri): String {

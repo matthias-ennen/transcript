@@ -435,8 +435,7 @@ private fun MainContent(
                 Text(
                     transcriptionRuntimeDisplay(
                         elapsedSeconds = state.elapsedSeconds,
-                        audioDurationMs = state.audioDurationMs,
-                        model = state.selectedModel
+                        estimateSeconds = state.transcriptionEstimateSeconds
                     ),
                     style = MaterialTheme.typography.labelLarge
                 )
@@ -593,10 +592,7 @@ internal val TranscriptUiState.isModelSelectionEnabled: Boolean
 
 @Composable
 private fun LiveStatusLine(state: TranscriptUiState) {
-    val estimateStatus = transcriptionEstimateStatus(
-        audioDurationMs = state.audioDurationMs,
-        model = state.selectedModel
-    )
+    val estimateStatus = transcriptionEstimateStatus(state.transcriptionEstimateSeconds)
     val alternatesReadyStatus =
         state.cannaBotMode == CannaBotMode.REVIEW &&
             state.selectedAudio != null &&
