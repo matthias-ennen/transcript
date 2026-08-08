@@ -48,4 +48,15 @@ class TranscriptionTimeEstimateTest {
             transcriptionEstimateStatus(3L * 60L * 1_000L, WhisperModel.BASE)
         )
     }
+
+    @Test
+    fun `changing the selected model immediately changes the ready estimate`() {
+        val durationMs = 10L * 60L * 1_000L
+
+        val tiny = transcriptionEstimateStatus(durationMs, WhisperModel.TINY)
+        val base = transcriptionEstimateStatus(durationMs, WhisperModel.BASE)
+
+        assertEquals("Voraussichtliche Transkriptionsdauer: ca. 9 Minuten", tiny)
+        assertEquals("Voraussichtliche Transkriptionsdauer: ca. 16 Minuten", base)
+    }
 }

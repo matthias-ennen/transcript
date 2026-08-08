@@ -5,6 +5,15 @@ import com.whispercpp.whisper.WhisperSegment
 internal val TranscriptUiState.hasUnsavedTranscriptChanges: Boolean
     get() = isEditingTranscript && draftSegments != segments
 
+internal fun TranscriptUiState.hasUnsavedChangesInGroup(groupStartMs: Long): Boolean {
+    if (!isEditingTranscript || editingTranscriptGroupStartMs != groupStartMs) return false
+    if (draftSegments.size != segments.size) return false
+    return segments.indices.any { index ->
+        transcriptGroupStartMs(segments[index].startMs) == groupStartMs &&
+            segments[index] != draftSegments[index]
+    }
+}
+
 internal fun List<WhisperSegment>.withUpdatedTranscriptText(
     index: Int,
     text: String

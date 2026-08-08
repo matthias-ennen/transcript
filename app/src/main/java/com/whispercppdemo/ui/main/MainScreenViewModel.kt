@@ -18,7 +18,8 @@ import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
 import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.AudioRecorder
-import de.matthiasennen.transcript.media.WAVEFORM_GENERATION_TIMEOUT_MS
+import de.matthiasennen.transcript.media.CachedWaveform
+import de.matthiasennen.transcript.media.WaveformCache
 import de.matthiasennen.transcript.media.generateWaveform
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.transcription.TranscriptionCoordinator
@@ -27,14 +28,13 @@ import de.matthiasennen.transcript.transcription.TranscriptionState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.io.File
+import kotlin.math.roundToInt
 
 private const val PREFERENCES_NAME = "transcript_preferences"
 private const val SELECTED_MODEL_KEY = "selected_model"
@@ -54,6 +54,7 @@ data class TranscriptUiState(
     val waveform: List<Float> = emptyList(),
     val liveWaveform: List<Float> = emptyList(),
     val isWaveformLoading: Boolean = false,
+    val waveformProgress: Float? = null,
     val language: String = "auto",
     val selectedModel: WhisperModel = WhisperModel.BASE,
     val modelInstallations: List<ModelInstallation> = emptyList(),
@@ -66,11 +67,13 @@ data class TranscriptUiState(
     val isCancellationRequested: Boolean = false,
     val progress: Float? = null,
     val status: String = "Bitte zuerst das Whisper-Modell herunterladen.",
+    val runtimeEstimateAnnouncementId: Long = 0L,
     val elapsedSeconds: Long = 0L,
     val activityDetail: String? = null,
     val diagnostics: List<String> = emptyList(),
     val segments: List<WhisperSegment> = emptyList(),
     val isEditingTranscript: Boolean = false,
+    val editingTranscriptGroupStartMs: Long? = null,
     val draftSegments: List<WhisperSegment> = emptyList(),
     val detectedLanguage: String? = null,
     val completedModel: WhisperModel? = null,
@@ -86,6 +89,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         private set
 
     private val modelsDirectory = File(application.filesDir, "models")
+    private val waveformCache = WaveformCache(File(application.filesDir, "waveforms"))
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val audioRecorder = AudioRecorder(application)
     private val audioPlayer = AudioPlayerController(
@@ -162,6 +166,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     liveWaveform = emptyList(),
                     segments = emptyList(),
                     isEditingTranscript = false,
+                    editingTranscriptGroupStartMs = null,
                     draftSegments = emptyList(),
                     error = null,
                     status = "Aufnahme läuft … Zum Beenden erneut tippen.",
@@ -265,17 +270,20 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             mediaReadyStatus = null,
             waveform = emptyList(),
             isWaveformLoading = true,
+            waveformProgress = 0f,
             segments = emptyList(),
             isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
             error = null,
             elapsedSeconds = 0L,
-            activityDetail = null,
             diagnostics = emptyList(),
             detectedLanguage = null,
             completedModel = null,
             transcriptionDurationSeconds = null,
             status = "Wellenform wird erstellt …",
+            runtimeEstimateAnnouncementId = 0L,
+            activityDetail = "Wellenform wird erstellt · 0 %",
             cannaBotMode = CannaBotMode.WAITING
         )
         runCatching { audioPlayer.prepare(uri) }
@@ -292,32 +300,35 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 if (uiState.selectedAudio == uri && uiState.audioDurationMs <= 0L) {
                     uiState = uiState.copy(audioDurationMs = metadataDurationMs)
                 }
-                val (waveform, durationMs) = withTimeout(WAVEFORM_GENERATION_TIMEOUT_MS) {
-                    withContext(Dispatchers.IO) {
-                        val workerContext = currentCoroutineContext()
-                        generateWaveform(
-                            context = application,
-                            uri = uri,
-                            shouldCancel = { !workerContext.isActive }
-                        )
-                    }
-                }
-                if (uiState.selectedAudio == uri) {
-                    uiState = uiState.copy(
-                        waveform = waveform,
-                        audioDurationMs = if (uiState.audioDurationMs > 0L) {
-                            uiState.audioDurationMs
-                        } else {
-                            durationMs
-                        },
-                        isWaveformLoading = false,
-                        mediaReadyStatus = status,
-                        status = status,
-                        cannaBotMode = CannaBotMode.REVIEW
+                val cacheKey = withContext(Dispatchers.IO) {
+                    waveformCache.key(
+                        uri = uri.toString(),
+                        durationMs = metadataDurationMs,
+                        contentLength = contentLength(uri)
                     )
                 }
-            } catch (_: TimeoutCancellationException) {
-                finishWaveformWithoutPreview(uri)
+                val cached = withContext(Dispatchers.IO) { waveformCache.read(cacheKey) }
+                if (cached != null) {
+                    finishWaveform(uri, cached.peaks, cached.durationMs, status)
+                    return@launch
+                }
+
+                val (waveform, durationMs) = withContext(Dispatchers.IO) {
+                    val workerContext = currentCoroutineContext()
+                    generateWaveform(
+                        context = application,
+                        uri = uri,
+                        shouldCancel = { !workerContext.isActive },
+                        onProgress = { progress -> reportWaveformProgress(uri, progress) }
+                    )
+                }
+                withContext(Dispatchers.IO) {
+                    waveformCache.write(
+                        cacheKey,
+                        CachedWaveform(peaks = waveform, durationMs = durationMs)
+                    )
+                }
+                finishWaveform(uri, waveform, durationMs, status)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Throwable) {
@@ -326,14 +337,58 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     }
 
+    private fun reportWaveformProgress(uri: Uri, progress: Float) {
+        viewModelScope.launch {
+            if (uiState.selectedAudio != uri || !uiState.isWaveformLoading) return@launch
+            val safeProgress = progress.coerceIn(0f, 1f)
+            val detail = "Wellenform wird erstellt · ${(safeProgress * 100f).roundToInt()} %"
+            uiState = if (
+                uiState.isBusy ||
+                uiState.isTranscribing ||
+                uiState.segments.isNotEmpty() ||
+                uiState.error != null
+            ) {
+                uiState.copy(waveformProgress = safeProgress)
+            } else {
+                uiState.copy(waveformProgress = safeProgress, activityDetail = detail)
+            }
+        }
+    }
+
+    private fun finishWaveform(
+        uri: Uri,
+        waveform: List<Float>,
+        durationMs: Long,
+        readyStatus: String
+    ) {
+        if (uiState.selectedAudio != uri) return
+        val operationOwnsStatus = uiState.isBusy || uiState.isTranscribing || uiState.isRecording ||
+            uiState.segments.isNotEmpty() || uiState.error != null
+        uiState = uiState.copy(
+            waveform = waveform,
+            audioDurationMs = uiState.audioDurationMs.takeIf { it > 0L } ?: durationMs,
+            isWaveformLoading = false,
+            waveformProgress = 1f,
+            mediaReadyStatus = readyStatus,
+            status = if (operationOwnsStatus) uiState.status else readyStatus,
+            activityDetail = if (operationOwnsStatus) uiState.activityDetail else null,
+            cannaBotMode = if (operationOwnsStatus) uiState.cannaBotMode else CannaBotMode.REVIEW
+        )
+    }
+
     private fun finishWaveformWithoutPreview(uri: Uri) {
         if (uiState.selectedAudio != uri) return
+        val operationOwnsStatus = uiState.isBusy || uiState.isTranscribing || uiState.isRecording ||
+            uiState.segments.isNotEmpty() || uiState.error != null
+        val readyStatus = "Datei ist bereit · Wellenform konnte nicht erstellt werden."
         uiState = uiState.copy(
             waveform = emptyList(),
             isWaveformLoading = false,
-            mediaReadyStatus = "Wellenform übersprungen · Datei ist bereit.",
-            status = "Wellenform übersprungen · Datei ist bereit.",
-            cannaBotMode = CannaBotMode.REVIEW
+            waveformProgress = null,
+            mediaReadyStatus = readyStatus,
+            status = if (operationOwnsStatus) uiState.status else readyStatus,
+            activityDetail = if (operationOwnsStatus) uiState.activityDetail else null,
+            cannaBotMode = if (operationOwnsStatus) uiState.cannaBotMode else CannaBotMode.REVIEW
         )
     }
 
@@ -343,20 +398,51 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun selectModel(model: WhisperModel) {
         if (uiState.isBusy) return
+        val stateBeforeSelection = uiState
         preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
         refreshModelInstallations(model)
+        if (
+            uiState.modelReady &&
+            stateBeforeSelection.selectedAudio != null &&
+            stateBeforeSelection.audioDurationMs > 0L
+        ) {
+            uiState = uiState.copy(
+                status = when {
+                    stateBeforeSelection.isWaveformLoading -> stateBeforeSelection.status
+                    uiState.mediaReadyStatus != null -> uiState.mediaReadyStatus
+                    else -> uiState.status
+                },
+                activityDetail = if (stateBeforeSelection.isWaveformLoading) {
+                    stateBeforeSelection.activityDetail
+                } else {
+                    uiState.activityDetail
+                },
+                runtimeEstimateAnnouncementId =
+                    stateBeforeSelection.runtimeEstimateAnnouncementId + 1L,
+                cannaBotMode = if (stateBeforeSelection.isWaveformLoading) {
+                    CannaBotMode.WAITING
+                } else {
+                    CannaBotMode.REVIEW
+                }
+            )
+        }
     }
 
-    fun startTranscriptEditing() {
+    fun startTranscriptEditing(groupStartMs: Long) {
         if (uiState.isBusy || uiState.segments.isEmpty()) return
+        if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
         uiState = uiState.copy(
             isEditingTranscript = true,
+            editingTranscriptGroupStartMs = groupStartMs,
             draftSegments = uiState.segments
         )
     }
 
     fun updateTranscriptText(index: Int, text: String) {
         if (!uiState.isEditingTranscript) return
+        val groupStartMs = uiState.editingTranscriptGroupStartMs ?: return
+        val segment = uiState.segments.getOrNull(index) ?: return
+        if (transcriptGroupStartMs(segment.startMs) != groupStartMs) return
         uiState = uiState.copy(
             draftSegments = uiState.draftSegments.withUpdatedTranscriptText(index, text)
         )
@@ -366,17 +452,28 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (!uiState.isEditingTranscript) return
         uiState = uiState.copy(
             isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
             draftSegments = emptyList()
         )
     }
 
     fun applyTranscriptEdits() {
-        if (!uiState.isEditingTranscript || uiState.draftSegments.size != uiState.segments.size) {
+        val groupStartMs = uiState.editingTranscriptGroupStartMs
+        if (
+            !uiState.isEditingTranscript ||
+            groupStartMs == null ||
+            uiState.draftSegments.size != uiState.segments.size
+        ) {
             return
         }
         uiState = uiState.copy(
-            segments = uiState.draftSegments,
+            segments = applyTranscriptGroupEdits(
+                original = uiState.segments,
+                draft = uiState.draftSegments,
+                groupStartMs = groupStartMs
+            ),
             isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
             status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert.",
             cannaBotMode = CannaBotMode.IDLE
@@ -472,17 +569,17 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
         stopPlayback(release = false)
-        waveformJob?.cancel()
-        waveformJob = null
         uiState = uiState.copy(
             isBusy = true,
             isTranscribing = true,
-            isWaveformLoading = false,
             isCancellationRequested = false,
             progress = 0f,
+            runtimeEstimateAnnouncementId = 0L,
             isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
             error = null,
+            activityDetail = null,
             status = "Transkription wird im Hintergrund vorbereitet …",
             cannaBotMode = CannaBotMode.RUNNING
         )
@@ -589,7 +686,20 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     downloadingModel = null,
                     error = null,
                     status = "${downloadState.model.modelLabel} ist installiert und aktiv.",
-                    cannaBotMode = CannaBotMode.IDLE
+                    runtimeEstimateAnnouncementId = if (
+                        uiState.selectedAudio != null && uiState.audioDurationMs > 0L
+                    ) {
+                        uiState.runtimeEstimateAnnouncementId + 1L
+                    } else {
+                        uiState.runtimeEstimateAnnouncementId
+                    },
+                    cannaBotMode = if (
+                        uiState.selectedAudio != null && uiState.audioDurationMs > 0L
+                    ) {
+                        if (uiState.isWaveformLoading) CannaBotMode.WAITING else CannaBotMode.REVIEW
+                    } else {
+                        CannaBotMode.IDLE
+                    }
                 )
                 cue(CannaBotCue.SUCCESS)
                 ModelDownloadCoordinator.reset()
@@ -663,6 +773,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     activityDetail = null,
                     segments = state.segments,
                     isEditingTranscript = false,
+                    editingTranscriptGroupStartMs = null,
                     draftSegments = emptyList(),
                     detectedLanguage = state.detectedLanguage,
                     completedModel = state.model,
@@ -686,6 +797,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     activityDetail = null,
                     segments = emptyList(),
                     isEditingTranscript = false,
+                    editingTranscriptGroupStartMs = null,
                     draftSegments = emptyList(),
                     detectedLanguage = null,
                     completedModel = null,
@@ -704,6 +816,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     activityDetail = null,
                     segments = state.committedSegments,
                     isEditingTranscript = false,
+                    editingTranscriptGroupStartMs = null,
                     draftSegments = emptyList(),
                     error = state.message,
                     status = if (state.canResume) {
@@ -764,6 +877,28 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
         }
         return uri.lastPathSegment ?: "Mediendatei"
+    }
+
+    private fun contentLength(uri: Uri): Long {
+        if (uri.scheme == "file") {
+            return uri.path?.let(::File)?.takeIf(File::isFile)?.length() ?: -1L
+        }
+        return runCatching {
+            application.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.SIZE),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && cursor.moveToFirst() && !cursor.isNull(index)) {
+                    cursor.getLong(index)
+                } else {
+                    -1L
+                }
+            } ?: -1L
+        }.getOrDefault(-1L)
     }
 
     private fun fail(throwable: Throwable) {

@@ -50,6 +50,19 @@ class TranscriptEditingTest {
     }
 
     @Test
+    fun groupChangesAreReportedOnlyForTheActiveGroup() {
+        val state = TranscriptUiState(
+            segments = original,
+            isEditingTranscript = true,
+            editingTranscriptGroupStartMs = 0L,
+            draftSegments = original.withUpdatedTranscriptText(0, "Changed")
+        )
+
+        assertTrue(state.hasUnsavedChangesInGroup(0L))
+        assertFalse(state.hasUnsavedChangesInGroup(TRANSCRIPT_GROUP_DURATION_MS))
+    }
+
+    @Test
     fun correctedTextIsUsedByAllExportFormats() {
         val corrected = original.withUpdatedTranscriptText(1, "Corrected line")
         val metadata = TranscriptExportMetadata(

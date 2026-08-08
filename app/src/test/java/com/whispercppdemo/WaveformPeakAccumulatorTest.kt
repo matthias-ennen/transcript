@@ -6,8 +6,30 @@ import org.junit.Test
 
 class WaveformPeakAccumulatorTest {
     @Test
-    fun waveformTimeoutIsSixtySeconds() {
-        assertEquals(60_000L, WAVEFORM_GENERATION_TIMEOUT_MS)
+    fun longFilesUseOnlyDisplayRelevantSamplingDensity() {
+        val oneHourUs = 60L * 60L * 1_000_000L
+
+        assertEquals(5_000_000L, waveformSampleIntervalUs(oneHourUs, barCount = 180))
+    }
+
+    @Test
+    fun shortFilesNeverExceedMaximumSamplingRate() {
+        assertEquals(10_000L, waveformSampleIntervalUs(1_000_000L, barCount = 180))
+    }
+
+    @Test
+    fun progressIsReportedInSmallStableSteps() {
+        val reports = mutableListOf<Float>()
+        val reporter = WaveformProgressReporter(reports::add)
+
+        reporter.report(0f)
+        reporter.report(0.01f)
+        reporter.report(0.05f)
+        reporter.report(0.10f)
+        reporter.report(1f)
+        reporter.report(1f)
+
+        assertEquals(listOf(0f, 0.05f, 0.10f, 1f), reports)
     }
 
     @Test

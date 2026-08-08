@@ -13,11 +13,11 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 
-const val WAVEFORM_GENERATION_TIMEOUT_MS = 60_000L
-
 private const val DEFAULT_BAR_COUNT = 180
 private const val DECODER_TIMEOUT_US = 10_000L
-private const val WAVEFORM_SAMPLES_PER_SECOND = 100
+private const val MAX_WAVEFORM_SAMPLES_PER_SECOND = 100
+private const val WAVEFORM_SAMPLES_PER_BAR = 4
+private const val PROGRESS_STEP_PERCENT = 5
 
 /**
  * Creates a compact waveform without retaining decoded PCM audio.
@@ -30,7 +30,8 @@ fun generateWaveform(
     context: Context,
     uri: Uri,
     barCount: Int = DEFAULT_BAR_COUNT,
-    shouldCancel: () -> Boolean = { false }
+    shouldCancel: () -> Boolean = { false },
+    onProgress: (Float) -> Unit = {}
 ): Pair<List<Float>, Long> {
     val safeBarCount = barCount.coerceAtLeast(1)
     val extractor = MediaExtractor()
@@ -57,7 +58,15 @@ fun generateWaveform(
         var decodedDurationUs = declaredDurationUs
         var inputEnded = false
         var outputEnded = false
+        var nextWaveformSampleUs = 0L
+        val waveformSampleIntervalUs = waveformSampleIntervalUs(
+            durationUs = declaredDurationUs,
+            barCount = safeBarCount
+        )
+        val progressReporter = WaveformProgressReporter(onProgress)
         val bufferInfo = MediaCodec.BufferInfo()
+
+        progressReporter.report(0f)
 
         extractor.selectTrack(trackIndex)
         val decoder = MediaCodec.createDecoderByType(mime)
@@ -114,13 +123,15 @@ fun generateWaveform(
                             outputBuffer.position(bufferInfo.offset)
                             outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
                             outputBuffer.order(ByteOrder.nativeOrder())
-                            sampleOutputBuffer(
+                            nextWaveformSampleUs = sampleOutputBuffer(
                                 buffer = outputBuffer,
                                 presentationTimeUs = bufferInfo.presentationTimeUs,
                                 sampleRate = sampleRate,
                                 channelCount = channelCount,
                                 pcmEncoding = pcmEncoding,
-                                accumulator = accumulator
+                                accumulator = accumulator,
+                                nextSampleTimeUs = nextWaveformSampleUs,
+                                sampleIntervalUs = waveformSampleIntervalUs
                             )
                             val frameCount = bufferInfo.size / frameSizeBytes(channelCount, pcmEncoding)
                             decodedDurationUs = max(
@@ -133,11 +144,18 @@ fun generateWaveform(
 
                     outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     decoder.releaseOutputBuffer(outputIndex, false)
+                    if (declaredDurationUs > 0L) {
+                        progressReporter.report(
+                            bufferInfo.presentationTimeUs.coerceAtLeast(0L).toFloat() /
+                                declaredDurationUs.toFloat()
+                        )
+                    }
                 }
             }
         }
 
         if (shouldCancel()) throw CancellationException("Wellenformerstellung abgebrochen.")
+        progressReporter.report(1f)
         return accumulator.normalizedPeaks() to (decodedDurationUs / 1_000L)
     } finally {
         if (codecStarted) runCatching { codec?.stop() }
@@ -152,22 +170,50 @@ private fun sampleOutputBuffer(
     sampleRate: Int,
     channelCount: Int,
     pcmEncoding: Int,
-    accumulator: WaveformPeakAccumulator
-) {
+    accumulator: WaveformPeakAccumulator,
+    nextSampleTimeUs: Long,
+    sampleIntervalUs: Long
+): Long {
     val safeSampleRate = sampleRate.coerceAtLeast(1)
     val frameSize = frameSizeBytes(channelCount, pcmEncoding)
     val frameCount = buffer.remaining() / frameSize
-    val frameStride = (safeSampleRate / WAVEFORM_SAMPLES_PER_SECOND).coerceAtLeast(1)
     val start = buffer.position()
+    val safePresentationTimeUs = presentationTimeUs.coerceAtLeast(0L)
+    val bufferDurationUs = frameCount.toLong() * 1_000_000L / safeSampleRate
+    val bufferEndUs = safePresentationTimeUs + bufferDurationUs
+    var sampleTimeUs = max(nextSampleTimeUs, safePresentationTimeUs)
 
-    var frameIndex = 0
-    while (frameIndex < frameCount) {
+    while (sampleTimeUs < bufferEndUs && frameCount > 0) {
+        val frameIndex = ((sampleTimeUs - safePresentationTimeUs) * safeSampleRate /
+            1_000_000L).toInt().coerceIn(0, frameCount - 1)
         val frameOffset = start + frameIndex * frameSize
         val amplitude = readDownmixedSample(buffer, frameOffset, channelCount, pcmEncoding)
-        val timestampUs = presentationTimeUs.coerceAtLeast(0L) +
-            frameIndex.toLong() * 1_000_000L / safeSampleRate
-        accumulator.add(amplitude, timestampUs)
-        frameIndex += frameStride
+        accumulator.add(amplitude, sampleTimeUs)
+        sampleTimeUs += sampleIntervalUs
+    }
+    return sampleTimeUs
+}
+
+internal fun waveformSampleIntervalUs(durationUs: Long, barCount: Int): Long {
+    val maximumRateIntervalUs = 1_000_000L / MAX_WAVEFORM_SAMPLES_PER_SECOND
+    if (durationUs <= 0L) return maximumRateIntervalUs
+    val targetSampleCount = barCount.coerceAtLeast(1).toLong() * WAVEFORM_SAMPLES_PER_BAR
+    return ceil(durationUs.toDouble() / targetSampleCount.toDouble())
+        .toLong()
+        .coerceAtLeast(maximumRateIntervalUs)
+}
+
+internal class WaveformProgressReporter(
+    private val onProgress: (Float) -> Unit
+) {
+    private var lastReportedPercent = -PROGRESS_STEP_PERCENT
+
+    fun report(progress: Float) {
+        val percent = (progress.coerceIn(0f, 1f) * 100f).toInt()
+        if (percent <= lastReportedPercent) return
+        if (percent < 100 && percent < lastReportedPercent + PROGRESS_STEP_PERCENT) return
+        lastReportedPercent = percent
+        onProgress(percent / 100f)
     }
 }
 

@@ -12,31 +12,24 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -64,11 +56,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.TranscriptExportMetadata
 import de.matthiasennen.transcript.export.exportTranscript
-import de.matthiasennen.transcript.export.formatTimestamp
 import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -446,19 +436,15 @@ private fun MainContent(
             }
 
             TranscriptList(
+                state = state,
                 segments = if (state.isEditingTranscript) state.draftSegments else state.segments,
-                isEditing = state.isEditingTranscript,
-                onTextChanged = viewModel::updateTranscriptText
+                onTextChanged = viewModel::updateTranscriptText,
+                onEditGroup = viewModel::startTranscriptEditing,
+                onCancelEditing = viewModel::cancelTranscriptEditing,
+                onApplyEdits = viewModel::applyTranscriptEdits
             )
 
             if (state.segments.isNotEmpty()) {
-                TranscriptEditorActions(
-                    state = state,
-                    onEdit = viewModel::startTranscriptEditing,
-                    onCancel = viewModel::cancelTranscriptEditing,
-                    onApply = viewModel::applyTranscriptEdits
-                )
-
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -497,24 +483,14 @@ internal fun ModelSelector(
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val selectorWidth = maxWidth
-        OutlinedButton(
-            onClick = { expanded = true },
+        LabeledSelectorButton(
+            label = "Qualitätsstufe",
+            value = selected.qualityLabel,
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.Start
-            ) {
-                Text("Qualitätsstufe", style = MaterialTheme.typography.labelSmall)
-                Text(selected.qualityLabel, style = MaterialTheme.typography.bodyLarge)
-            }
-            Icon(
-                Icons.Default.ArrowDropDown,
-                contentDescription = if (expanded) "Modellliste schließen" else "Modellliste öffnen"
-            )
-        }
-        androidx.compose.material3.DropdownMenu(
+            onClick = { expanded = true },
+            contentDescription = if (expanded) "Modellliste schließen" else "Modellliste öffnen"
+        )
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             modifier = Modifier.width(selectorWidth)
@@ -548,6 +524,15 @@ private fun LiveStatusLine(state: TranscriptUiState) {
             state.segments.isEmpty() &&
             state.error == null &&
             estimateStatus != null
+    val announcesChangedModelEstimate =
+        state.runtimeEstimateAnnouncementId > 0L &&
+            state.modelReady &&
+            state.selectedAudio != null &&
+            !state.isBusy &&
+            !state.isRecording &&
+            !state.isTranscribing &&
+            state.error == null &&
+            estimateStatus != null
     val isActiveOperation = state.isBusy || state.isRecording || state.isPlaying ||
         state.isWaveformLoading
     val primaryStatus = if (alternatesReadyStatus) {
@@ -559,24 +544,36 @@ private fun LiveStatusLine(state: TranscriptUiState) {
         ?.trim()
         ?.takeIf { it.isNotEmpty() && it != primaryStatus }
     val alternateStatus = when {
+        announcesChangedModelEstimate -> estimateStatus
         alternatesReadyStatus -> estimateStatus
         isActiveOperation -> activityStatus
         else -> null
     }
-    var showAlternate by remember(primaryStatus, alternateStatus) {
-        mutableStateOf(false)
-    }
-    LaunchedEffect(primaryStatus, alternateStatus) {
+    var showAlternate by remember { mutableStateOf(false) }
+    var handledEstimateAnnouncementId by remember { mutableStateOf(0L) }
+    LaunchedEffect(
+        primaryStatus,
+        alternateStatus,
+        announcesChangedModelEstimate,
+        state.runtimeEstimateAnnouncementId
+    ) {
         if (alternateStatus == null) {
             showAlternate = false
             return@LaunchedEffect
+        }
+        if (
+            announcesChangedModelEstimate &&
+            state.runtimeEstimateAnnouncementId != handledEstimateAnnouncementId
+        ) {
+            handledEstimateAnnouncementId = state.runtimeEstimateAnnouncementId
+            showAlternate = true
         }
         while (true) {
             delay(3_600L)
             showAlternate = !showAlternate
         }
     }
-    val isActive = isActiveOperation || alternatesReadyStatus
+    val isActive = isActiveOperation || alternatesReadyStatus || announcesChangedModelEstimate
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(
@@ -676,7 +673,6 @@ private fun TranscriptResultSummary(state: TranscriptUiState) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LanguageSelector(
     selected: String,
@@ -686,20 +682,24 @@ private fun LanguageSelector(
     var expanded by remember { mutableStateOf(false) }
     val label = languages.firstOrNull { it.first == selected }?.second ?: selected
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = !expanded }
-    ) {
-        OutlinedTextField(
+    LaunchedEffect(enabled) {
+        if (!enabled) expanded = false
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val selectorWidth = maxWidth
+        LabeledSelectorButton(
+            label = "Sprache",
             value = label,
-            onValueChange = {},
-            readOnly = true,
             enabled = enabled,
-            label = { Text("Sprache") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            onClick = { expanded = true },
+            contentDescription = if (expanded) "Sprachliste schließen" else "Sprachliste öffnen"
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.width(selectorWidth)
+        ) {
             languages.forEach { (code, name) ->
                 DropdownMenuItem(
                     text = { Text(name) },
@@ -714,139 +714,29 @@ private fun LanguageSelector(
 }
 
 @Composable
-private fun TranscriptList(
-    segments: List<WhisperSegment>,
-    isEditing: Boolean,
-    onTextChanged: (Int, String) -> Unit,
-    modifier: Modifier = Modifier
+private fun LabeledSelectorButton(
+    label: String,
+    value: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    contentDescription: String
 ) {
-    if (segments.isEmpty()) {
-        return
-    }
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        segments.forEachIndexed { index, segment ->
-            TranscriptSegmentCard(
-                number = index + 1,
-                segment = segment,
-                isEditing = isEditing,
-                onTextChanged = { onTextChanged(index, it) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun TranscriptSegmentCard(
-    number: Int,
-    segment: WhisperSegment,
-    isEditing: Boolean,
-    onTextChanged: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp, end = 4.dp)
-    ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            if (isEditing) {
-                TranscriptSegmentBody(
-                    segment = segment,
-                    isEditing = true,
-                    onTextChanged = onTextChanged
-                )
-            } else {
-                SelectionContainer {
-                    TranscriptSegmentBody(segment = segment)
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 8.dp, y = (-8).dp)
-                .width(52.dp)
-                .height(32.dp)
-                .background(MaterialTheme.colorScheme.primary, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = number.toString(),
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = MaterialTheme.typography.labelMedium.fontSize * 1.2f
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun TranscriptSegmentBody(
-    segment: WhisperSegment,
-    isEditing: Boolean = false,
-    onTextChanged: (String) -> Unit = {}
-) {
-    Column(modifier = Modifier.padding(12.dp)) {
-        Text(
-            "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
-            style = MaterialTheme.typography.labelMedium
-        )
-        Spacer(Modifier.height(4.dp))
-        if (isEditing) {
-            OutlinedTextField(
-                value = segment.text,
-                onValueChange = onTextChanged,
-                label = { Text("Text") },
-                minLines = 2,
-                modifier = Modifier.fillMaxWidth()
-            )
-        } else {
-            Text(segment.text)
-        }
-    }
-}
-
-@Composable
-private fun TranscriptEditorActions(
-    state: TranscriptUiState,
-    onEdit: () -> Unit,
-    onCancel: () -> Unit,
-    onApply: () -> Unit
-) {
-    if (!state.isEditingTranscript) {
-        OutlinedButton(
-            onClick = onEdit,
-            enabled = !state.isBusy,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Bearbeiten")
-        }
-        return
-    }
-
-    Text(
-        "Alle Textabschnitte sind editierbar. Die Zeitstempel bleiben unverändert.",
-        style = MaterialTheme.typography.bodySmall
-    )
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
         modifier = Modifier.fillMaxWidth()
     ) {
-        OutlinedButton(
-            onClick = onCancel,
-            modifier = Modifier.weight(1f)
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.Start
         ) {
-            Text("Abbrechen")
+            Text(label, style = MaterialTheme.typography.labelSmall)
+            Text(value, style = MaterialTheme.typography.bodyLarge)
         }
-        Button(
-            onClick = onApply,
-            enabled = state.hasUnsavedTranscriptChanges,
-            modifier = Modifier.weight(1f)
-        ) {
-            Text("Änderungen übernehmen")
-        }
+        Icon(
+            Icons.Default.ArrowDropDown,
+            contentDescription = contentDescription
+        )
     }
 }
 

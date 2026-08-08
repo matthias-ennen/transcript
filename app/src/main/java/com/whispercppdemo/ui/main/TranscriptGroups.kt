@@ -1,0 +1,246 @@
+package de.matthiasennen.transcript.ui.main
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.export.formatTimestamp
+
+@Composable
+internal fun TranscriptList(
+    state: TranscriptUiState,
+    segments: List<WhisperSegment>,
+    onTextChanged: (Int, String) -> Unit,
+    onEditGroup: (Long) -> Unit,
+    onCancelEditing: () -> Unit,
+    onApplyEdits: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (segments.isEmpty()) return
+
+    val groups = groupTranscriptSegments(segments)
+    val expandedGroups = remember(state.selectedAudio) {
+        mutableStateMapOf<Long, Boolean>().apply {
+            groups.firstOrNull()?.let { firstGroup -> put(firstGroup.startMs, true) }
+        }
+    }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(
+                onClick = { groups.forEach { expandedGroups[it.startMs] = false } },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Alle einklappen")
+            }
+            TextButton(
+                onClick = { groups.forEach { expandedGroups[it.startMs] = true } },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Alle ausklappen")
+            }
+        }
+
+        groups.forEach { group ->
+            val isEditingGroup = state.editingTranscriptGroupStartMs == group.startMs
+            val expanded = isEditingGroup || expandedGroups[group.startMs] == true
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        if (!isEditingGroup) expandedGroups[group.startMs] = !expanded
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "${formatClock(group.startMs / 1_000L)}–" +
+                            formatClock(group.endMs / 1_000L),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Icon(
+                        imageVector = if (expanded) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
+                        },
+                        contentDescription = if (expanded) {
+                            "Gruppe einklappen"
+                        } else {
+                            "Gruppe ausklappen"
+                        }
+                    )
+                }
+
+                if (expanded) {
+                    group.segments.forEach { indexedSegment ->
+                        TranscriptSegmentCard(
+                            number = indexedSegment.originalIndex + 1,
+                            segment = indexedSegment.segment,
+                            isEditing = isEditingGroup,
+                            onTextChanged = {
+                                onTextChanged(indexedSegment.originalIndex, it)
+                            }
+                        )
+                    }
+                    TranscriptGroupEditorActions(
+                        state = state,
+                        groupStartMs = group.startMs,
+                        onEdit = { onEditGroup(group.startMs) },
+                        onCancel = onCancelEditing,
+                        onApply = onApplyEdits
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TranscriptSegmentCard(
+    number: Int,
+    segment: WhisperSegment,
+    isEditing: Boolean,
+    onTextChanged: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, end = 4.dp)
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            if (isEditing) {
+                TranscriptSegmentBody(
+                    segment = segment,
+                    isEditing = true,
+                    onTextChanged = onTextChanged
+                )
+            } else {
+                SelectionContainer {
+                    TranscriptSegmentBody(segment = segment)
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 8.dp, y = (-8).dp)
+                .width(52.dp)
+                .height(32.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = number.toString(),
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = MaterialTheme.typography.labelMedium.fontSize * 1.2f
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranscriptSegmentBody(
+    segment: WhisperSegment,
+    isEditing: Boolean = false,
+    onTextChanged: (String) -> Unit = {}
+) {
+    Column(modifier = Modifier.padding(12.dp)) {
+        Text(
+            "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
+            style = MaterialTheme.typography.labelMedium
+        )
+        Spacer(Modifier.height(4.dp))
+        if (isEditing) {
+            OutlinedTextField(
+                value = segment.text,
+                onValueChange = onTextChanged,
+                label = { Text("Text") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Text(segment.text)
+        }
+    }
+}
+
+@Composable
+private fun TranscriptGroupEditorActions(
+    state: TranscriptUiState,
+    groupStartMs: Long,
+    onEdit: () -> Unit,
+    onCancel: () -> Unit,
+    onApply: () -> Unit
+) {
+    val isEditingGroup = state.editingTranscriptGroupStartMs == groupStartMs
+    if (!isEditingGroup) {
+        OutlinedButton(
+            onClick = onEdit,
+            enabled = !state.isBusy && !state.isEditingTranscript,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Bearbeiten")
+        }
+        return
+    }
+
+    Text(
+        "Nur diese Fünf-Minuten-Gruppe ist editierbar. Die Zeitstempel bleiben unverändert.",
+        style = MaterialTheme.typography.bodySmall
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("Abbrechen")
+        }
+        Button(
+            onClick = onApply,
+            enabled = state.hasUnsavedChangesInGroup(groupStartMs),
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("Änderungen übernehmen")
+        }
+    }
+}
