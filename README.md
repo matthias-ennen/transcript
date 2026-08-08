@@ -1,23 +1,31 @@
-# Transcript für Android
-
-Die kompakte CannaBot-Animation in der Titelzeile spiegelt den aktuellen App-Zustand wider, ohne die Höhe der App-Leiste zu verändern.
+# Simple Transcript für Android
 
 Eine lokale Android-App, die Audio- und Videodateien über ihre Audiospur mit
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) transkribiert.
 Die Mediendatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
 Transkriptionsdienst benötigt.
 
-## Stand der ersten Ausbaustufe
+Innerhalb der App lautet der Produktname **Simple Transcript**. Unter dem
+App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
+**Transcript** angezeigt.
+
+## Funktionsumfang
 
 - Android-Dateiauswahl für unterstützte Audio- und Videoformate
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
-- lokale Modellverwaltung mit vier Qualitätsstufen
+- abschnittsweise Transkription langer Aufnahmen mit konstant begrenztem Speicherbedarf
+- Fünf-Minuten-Abschnitte mit zwei Sekunden Kontextüberlappung und absoluten Zeitstempeln
+- automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
+- Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
+- lokale Modellverwaltung mit fünf Qualitätsstufen
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
+- fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
+  die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
 - gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
@@ -27,13 +35,20 @@ Transkriptionsdienst benötigt.
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
 - laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
+- nur bei aktiven Vorgängen pulsierende Statusanzeige mit CannaBot
+- vollständig umbrechende Statusmeldungen neben CannaBot ohne abgeschnittenen Text
+- gezielte Dauer- und Einmalanimationen über alle neun Sprite-Sheet-Zustände
 - laufende Transkription direkt über die Hauptschaltfläche abbrechen
 - direkte Mikrofonaufnahme mit automatischer Speicherung im App-Bereich
 - Play/Pause für ausgewählte Dateien und eigene Aufnahmen
-- Wellenform mit mitlaufender und per Finger verschiebbarer Positionsmarke
+- speicherschonend gestreamte Wellenform mit mitlaufender und per Finger
+  verschiebbarer Positionsmarke
 - Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
 - Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
-- kompakte Kopfzeile mit Einstellungen und App-Informationen
+- vollständige deutsche Bezeichnung aller von Whisper erkannten Sprachen
+- vorläufige, modellabhängige Laufzeitschätzung für eine bereitstehende Datei
+- kompakte Kopfzeile mit vorbereitetem Deutsch-/Englisch-Umschalter,
+  Einstellungen und App-Informationen
 - App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
 - sichtbarer, noch nicht aktiver Bereich „Entwickler unterstützen“ für einen späteren Store-Ausbau
 - modernes adaptives Transcript-App-Symbol mit klassischen, runden und Android-13-Themenvarianten
@@ -49,7 +64,11 @@ enthält Datum und Uhrzeit.
 Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
 abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
 durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
-Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel.
+Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel. Für die
+Wellenform wird die Audiospur blockweise dekodiert und sofort auf 180 Werte
+verdichtet; vollständige PCM-Daten werden dafür nicht im Arbeitsspeicher
+gehalten. Nach spätestens 60 Sekunden wird nur diese optionale Vorschau
+übersprungen. Wiedergabe und Transkription bleiben weiterhin verfügbar.
 
 ## Transkript korrigieren
 
@@ -61,20 +80,58 @@ verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
 Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
 App, wenn dadurch ein geänderter Entwurf verloren ginge.
 
-## Diagnose während der Transkription
+## Status und Diagnose während der Transkription
 
-Version `0.2.0-diagnostic` zeigt, welchen Verarbeitungsschritt die App gerade
-ausführt. Die native Whisper-Engine meldet ihren tatsächlichen Fortschritt in
-Prozent an die Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die
-App außerdem an, seit wann kein neuer Fortschrittswert empfangen wurde.
+Die App zeigt, welchen Verarbeitungsschritt sie gerade ausführt. Die native
+Whisper-Engine meldet ihren tatsächlichen Fortschritt in Prozent an die
+Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die App außerdem
+an, seit wann kein neuer Fortschrittswert empfangen wurde.
+
+CannaBot nutzt alle neun Zeilen des Sprite-Sheets. Dauerzustände laufen ruhig
+weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
+werden einmal abgespielt und kehren anschließend automatisch zum passenden
+Grundzustand zurück. Der Statustext pulsiert, solange die App arbeitet,
+aufnimmt oder wiedergibt, und blendet dabei deutlich zwischen 20 und 100
+Prozent Deckkraft. Ist eine Datei bereit, wechselt die pulsierende Statuszeile
+am schwächsten Punkt zwischen der Bereitschaftsmeldung und einer ersten,
+modellabhängigen Schätzung der Transkriptionsdauer. Die Schätzfaktoren sind
+vorläufig und werden später anhand echter Laufzeitmessungen kalibriert.
+
+Kurze Statusmeldungen bleiben einzeilig. Längere Status- und Fehlermeldungen
+werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit
+Auslassungspunkten abgeschnitten. Bei der Wiedergabe verwendet die Oberfläche
+bewusst den allgemeinen Text **Audio wird wiedergegeben …**.
+
+## Lange Aufnahmen und Hintergrundbetrieb
+
+Die Transkription lädt nicht mehr die vollständige Aufnahme als PCM in den
+Arbeitsspeicher. `TranscriptionService` verarbeitet nacheinander
+Fünf-Minuten-Hauptabschnitte. Jeder Abschnitt enthält an den Grenzen zwei
+Sekunden zusätzlichen Audiokontext, damit Wörter und Sätze nicht abgeschnitten
+werden. Die Überlappung wird anschließend anhand der zeitlichen Mitte jedes
+Whisper-Segments genau einem Hauptabschnitt zugeordnet. Auf die lokalen
+Whisper-Zeitstempel wird die absolute Startposition des Decoderabschnitts
+addiert; dadurch bleiben auch Zeitstempel über einer Stunde korrekt.
+
+Scheitert ein Fünf-Minuten-Abschnitt, wird dieser einmal in zwei
+2,5-Minuten-Sicherheitsabschnitte geteilt. Nach jedem fertigen Abschnitt werden
+Textsegmente, erkannte Sprache und nächste Audioposition atomar im privaten
+App-Speicher gesichert. Eine erneute Transkription derselben Datei mit demselben
+Modell und derselben Sprache setzt dort fort. Ein bewusster Abbruch entfernt
+den Zwischenstand.
+
+Der Foreground-Service läuft auch bei ausgeschaltetem Bildschirm oder
+geschlossener Oberfläche weiter. Seine Systemmeldung zeigt Gesamtfortschritt
+und Abschnittsnummer und bietet einen Abbruchknopf. Bei automatischer
+Spracherkennung wird die Sprache erst nach einem Abschnitt mit erkanntem Text
+festgehalten und für alle folgenden Abschnitte wiederverwendet.
 
 Die Debug-APK baut den rechenintensiven nativen Whisper-Code mit
 Release-Optimierungen. Die Optimierung muss im `lib`-Modul gesetzt sein, weil
 dort der CMake-/NDK-Build stattfindet.
 
-Die erste Version dient als technisches Fundament. Gesangstrennung,
-Wortzeitstempel und die Synchronisierung eines bereits bekannten Songtexts
-sind für spätere Ausbaustufen vorgesehen.
+Gesangstrennung, Wortzeitstempel und die Synchronisierung eines bereits
+bekannten Songtexts gehören nicht zum aktuellen Funktionsumfang.
 
 ## APK bauen
 
@@ -90,8 +147,13 @@ cd transcript
 Die APK liegt anschließend unter
 `app/build/outputs/apk/debug/app-debug.apk`.
 
-Alternativ kann der Workflow **Build Android APK** in GitHub Actions gestartet
-und die APK als Build-Artefakt heruntergeladen werden.
+Alternativ baut der Workflow **Build Android APK** bei jedem Push und Pull
+Request eine APK. Zum Herunterladen auf GitHub:
+
+1. Im Repository den Bereich **Actions** öffnen.
+2. Den neuesten erfolgreichen Lauf **Build Android APK** auswählen.
+3. Unten unter **Artifacts** die Datei `transcript-signed-apk-…` herunterladen.
+4. Das ZIP entpacken und `app-debug.apk` auf dem Android-Gerät installieren.
 
 ## APK-Updates und Signierung
 
@@ -113,13 +175,15 @@ Benötigte GitHub-Actions-Secrets:
 - `ANDROID_SIGNING_KEY_ALIAS`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 
-Build-Test der dauerhaft signierten APK: 6. August 2026.
+Der Workflow führt vor dem APK-Build die JVM-Unit-Tests aus und prüft vor dem
+Upload zusätzlich die APK-Signatur.
 
 ## Modelle und Speicherbedarf
 
-Die App bietet vier mehrsprachige Modelle für automatische, deutsche und
+Die App bietet fünf mehrsprachige Modelle für automatische, deutsche und
 englische Transkriptionen:
 
+- **Sehr schnell:** `ggml-tiny.bin` (ca. 77,7 MB)
 - **Schnell:** `ggml-base.bin` (ca. 148 MB)
 - **Ausgewogen:** `ggml-small-q5_1.bin` (ca. 190 MB)
 - **Sehr genau:** `ggml-large-v3-turbo-q5_0.bin` (ca. 574 MB)
@@ -146,4 +210,5 @@ Modelldownload benötigt Internetzugriff.
 `whisper.cpp` steht unter der MIT-Lizenz. Der vollständige Lizenztext befindet
 sich unter [`licenses/whisper.cpp-MIT.txt`](licenses/whisper.cpp-MIT.txt).
 
-Build-Auslöser: 3
+Die technische Struktur und der Datenfluss sind in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) beschrieben.

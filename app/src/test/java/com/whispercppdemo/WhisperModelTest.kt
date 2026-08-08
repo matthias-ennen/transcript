@@ -6,10 +6,26 @@ import org.junit.Test
 
 class WhisperModelTest {
     @Test
-    fun catalogContainsTheFourRequestedQualityLevelsInOrder() {
+    fun catalogContainsTheFiveRequestedQualityLevelsInOrder() {
         assertEquals(
-            listOf("Schnell", "Ausgewogen", "Sehr genau", "Maximale Qualität"),
+            listOf(
+                "Sehr schnell",
+                "Schnell",
+                "Ausgewogen",
+                "Sehr genau",
+                "Maximale Qualität"
+            ),
             WhisperModel.entries.map { it.qualityLabel }
+        )
+    }
+
+    @Test
+    fun tinyUsesTheOfficialMultilingualModelMetadata() {
+        assertEquals("ggml-tiny.bin", WhisperModel.TINY.fileName)
+        assertEquals("77,7 MB", WhisperModel.TINY.downloadSizeLabel)
+        assertEquals(
+            "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+            WhisperModel.TINY.sha256
         )
     }
 

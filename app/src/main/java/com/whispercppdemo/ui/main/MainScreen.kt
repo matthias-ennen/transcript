@@ -7,22 +7,34 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -57,6 +69,7 @@ import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.TranscriptExportMetadata
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.export.formatTimestamp
+import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -78,6 +91,9 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     val state = viewModel.uiState
     val context = LocalContext.current
     var page by remember { mutableStateOf(AppPage.MAIN) }
+    var appLanguage by remember {
+        mutableStateOf(AppLanguagePreference.load(context))
+    }
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::selectAudio)
@@ -101,8 +117,12 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     Scaffold(
         topBar = {
             TranscriptTopBar(
-                state = state,
                 page = page,
+                appLanguage = appLanguage,
+                onAppLanguageSelected = { language ->
+                    appLanguage = language
+                    AppLanguagePreference.save(context, language)
+                },
                 onNavigate = { page = it }
             )
         }
@@ -164,18 +184,15 @@ private enum class AppPage { MAIN, SETTINGS, ABOUT }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TranscriptTopBar(
-    state: TranscriptUiState,
     page: AppPage,
+    appLanguage: AppLanguage,
+    onAppLanguageSelected: (AppLanguage) -> Unit,
     onNavigate: (AppPage) -> Unit
 ) {
     TopAppBar(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (page == AppPage.MAIN) "Transcript" else page.title)
-                if (page == AppPage.MAIN) {
-                    Spacer(Modifier.width(8.dp))
-                    CannaBotTitleAnimation(state)
-                }
+                Text(if (page == AppPage.MAIN) "Simple Transcript" else page.title)
             }
         },
         navigationIcon = {
@@ -187,20 +204,73 @@ private fun TranscriptTopBar(
         },
         actions = {
             if (page == AppPage.MAIN) {
-                IconButton(onClick = { onNavigate(AppPage.SETTINGS) }) {
-                    Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
-                }
-                IconButton(onClick = { onNavigate(AppPage.ABOUT) }) {
-                    Icon(Icons.Default.Info, contentDescription = "Über die App")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    AppLanguageSelector(
+                        selected = appLanguage,
+                        onSelected = onAppLanguageSelected
+                    )
+                    IconButton(
+                        onClick = { onNavigate(AppPage.SETTINGS) },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
+                    }
+                    IconButton(
+                        onClick = { onNavigate(AppPage.ABOUT) },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = "Über die App")
+                    }
                 }
             }
         }
     )
 }
 
+@Composable
+private fun AppLanguageSelector(
+    selected: AppLanguage,
+    onSelected: (AppLanguage) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 6.dp),
+            modifier = Modifier
+                .width(58.dp)
+                .height(44.dp)
+        ) {
+            Text(selected.flag)
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = "GUI-Sprache auswählen"
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            AppLanguage.entries.forEach { language ->
+                DropdownMenuItem(
+                    text = { Text("${language.flag}  ${language.displayName}") },
+                    onClick = {
+                        onSelected(language)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
 private val AppPage.title: String
     get() = when (this) {
-        AppPage.MAIN -> "Transcript"
+        AppPage.MAIN -> "Simple Transcript"
         AppPage.SETTINGS -> "Einstellungen"
         AppPage.ABOUT -> "Über die App"
     }
@@ -343,7 +413,7 @@ private fun MainContent(
                 } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            Text(state.status, style = MaterialTheme.typography.bodyMedium)
+            LiveStatusLine(state)
             if (state.isBusy && state.downloadingModel == null) {
                 Text(
                     "Laufzeit: ${formatClock(state.elapsedSeconds)}",
@@ -391,17 +461,17 @@ private fun MainContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(
+                    Button(
                         onClick = textExporter,
                         enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("TXT") }
-                    OutlinedButton(
+                    Button(
                         onClick = srtExporter,
                         enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
                     ) { Text("SRT") }
-                    OutlinedButton(
+                    Button(
                         onClick = jsonExporter,
                         enabled = !state.isEditingTranscript,
                         modifier = Modifier.weight(1f)
@@ -465,6 +535,69 @@ internal val TranscriptUiState.isModelSelectionEnabled: Boolean
     get() = !isBusy && !isRecording
 
 @Composable
+private fun LiveStatusLine(state: TranscriptUiState) {
+    val estimateStatus = transcriptionEstimateStatus(
+        audioDurationMs = state.audioDurationMs,
+        model = state.selectedModel
+    )
+    val alternatesReadyStatus =
+        state.cannaBotMode == CannaBotMode.REVIEW &&
+            state.selectedAudio != null &&
+            state.segments.isEmpty() &&
+            state.error == null &&
+            estimateStatus != null
+    var showEstimate by remember(state.selectedAudio, state.selectedModel, estimateStatus) {
+        mutableStateOf(false)
+    }
+    LaunchedEffect(alternatesReadyStatus, estimateStatus) {
+        if (!alternatesReadyStatus) {
+            showEstimate = false
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(3_600L)
+            showEstimate = !showEstimate
+        }
+    }
+    val isActive = state.isBusy || state.isRecording || state.isPlaying ||
+        state.isWaveformLoading || alternatesReadyStatus
+    val transition = rememberInfiniteTransition(label = "status-pulse")
+    val alpha = if (isActive) {
+        transition.animateFloat(
+            initialValue = 0.20f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1_800),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "status-alpha"
+        ).value
+    } else {
+        1f
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        CannaBotStatusAnimation(state)
+        Text(
+            text = if (alternatesReadyStatus && showEstimate) {
+                estimateStatus.orEmpty()
+            } else if (alternatesReadyStatus) {
+                state.mediaReadyStatus ?: state.status
+            } else {
+                state.status
+            },
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+        )
+    }
+}
+
+@Composable
 private fun ModelManagerCard(
     state: TranscriptUiState,
     onDownload: () -> Unit
@@ -524,8 +657,11 @@ private fun TranscriptResultSummary(state: TranscriptUiState) {
         ) {
             Text("Ergebnis", style = MaterialTheme.typography.titleSmall)
             state.completedModel?.let { Text("Modell: ${it.modelLabel}") }
-            state.detectedLanguage?.let { Text("Erkannte Sprache: ${languageDisplayName(it)}") }
+            state.detectedLanguage?.let {
+                Text("Erkannte Sprache: ${whisperLanguageDisplayName(it)}")
+            }
             state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
+            Text("Textabschnitte: ${state.segments.size}")
         }
     }
 }
@@ -579,35 +715,85 @@ private fun TranscriptList(
     }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segments.forEachIndexed { index, segment ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                if (isEditing) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = segment.text,
-                            onValueChange = { onTextChanged(index, it) },
-                            label = { Text("Text") },
-                            minLines = 2,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                } else {
-                    SelectionContainer {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(segment.text)
-                        }
-                    }
+            TranscriptSegmentCard(
+                number = index + 1,
+                segment = segment,
+                isEditing = isEditing,
+                onTextChanged = { onTextChanged(index, it) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranscriptSegmentCard(
+    number: Int,
+    segment: WhisperSegment,
+    isEditing: Boolean,
+    onTextChanged: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, end = 4.dp)
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            if (isEditing) {
+                TranscriptSegmentBody(
+                    segment = segment,
+                    isEditing = true,
+                    onTextChanged = onTextChanged
+                )
+            } else {
+                SelectionContainer {
+                    TranscriptSegmentBody(segment = segment)
                 }
             }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 8.dp, y = (-8).dp)
+                .width(52.dp)
+                .height(32.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = number.toString(),
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = MaterialTheme.typography.labelMedium.fontSize * 1.2f
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranscriptSegmentBody(
+    segment: WhisperSegment,
+    isEditing: Boolean = false,
+    onTextChanged: (String) -> Unit = {}
+) {
+    Column(modifier = Modifier.padding(12.dp)) {
+        Text(
+            "${formatTimestamp(segment.startMs)} – ${formatTimestamp(segment.endMs)}",
+            style = MaterialTheme.typography.labelMedium
+        )
+        Spacer(Modifier.height(4.dp))
+        if (isEditing) {
+            OutlinedTextField(
+                value = segment.text,
+                onValueChange = onTextChanged,
+                label = { Text("Text") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            Text(segment.text)
         }
     }
 }
@@ -685,12 +871,6 @@ private fun defaultName(state: TranscriptUiState, extension: String): String {
         ?.ifBlank { "Transcript" }
         ?: "Transcript"
     return "$base Transcript.$extension"
-}
-
-private fun languageDisplayName(code: String): String = when (code) {
-    "de" -> "Deutsch"
-    "en" -> "Englisch"
-    else -> code.ifBlank { "Unbekannt" }
 }
 
 internal fun formatDownloadSize(bytes: Long): String = when {

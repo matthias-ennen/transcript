@@ -56,6 +56,18 @@ class TranscriptExportTest {
     }
 
     @Test
+    fun escapesJsonControlCharacters() {
+        val json = exportTranscript(
+            listOf(WhisperSegment(0, 1, "Quote \" slash \\ line\nnext\titem")),
+            ExportFormat.JSON,
+            metadata
+        )
+
+        assertTrue(json.contains("Quote \\\" slash \\\\ line\\nnext\\titem"))
+        assertTrue(!json.contains("line\nnext"))
+    }
+
+    @Test
     fun formatsTranscriptionDuration() {
         assertEquals("00:00:00", formatDuration(0L))
         assertEquals("00:10:05", formatDuration(605L))

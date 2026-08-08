@@ -1,5 +1,7 @@
 # Arbeitsplan: Videoimport und stabile Modelldownloads
 
+Status: umgesetzt; die Datei bleibt als nachvollziehbarer Arbeitsplan erhalten.
+
 ## Ziel
 
 - Gängige Android-Videoformate in der Dateiauswahl zulassen und ausschließlich
