@@ -18,13 +18,14 @@ App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
 - Fünf-Minuten-Abschnitte mit zwei Sekunden Kontextüberlappung und absoluten Zeitstempeln
 - automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
 - Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
-- lokale Modellverwaltung mit vier Qualitätsstufen
+- lokale Modellverwaltung mit fünf Qualitätsstufen
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - automatische, deutsche oder englische Spracherkennung
 - Ausgabe mit Segmentzeitstempeln
-- fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus
+- fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
+  die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
 - gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
@@ -44,7 +45,10 @@ App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
   verschiebbarer Positionsmarke
 - Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
 - Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
-- kompakte Kopfzeile mit Einstellungen und App-Informationen
+- vollständige deutsche Bezeichnung aller von Whisper erkannten Sprachen
+- vorläufige, modellabhängige Laufzeitschätzung für eine bereitstehende Datei
+- kompakte Kopfzeile mit vorbereitetem Deutsch-/Englisch-Umschalter,
+  Einstellungen und App-Informationen
 - App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
 - sichtbarer, noch nicht aktiver Bereich „Entwickler unterstützen“ für einen späteren Store-Ausbau
 - modernes adaptives Transcript-App-Symbol mit klassischen, runden und Android-13-Themenvarianten
@@ -86,9 +90,12 @@ an, seit wann kein neuer Fortschrittswert empfangen wurde.
 CannaBot nutzt alle neun Zeilen des Sprite-Sheets. Dauerzustände laufen ruhig
 weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
 werden einmal abgespielt und kehren anschließend automatisch zum passenden
-Grundzustand zurück. Der Statustext pulsiert nur, solange die App tatsächlich
-arbeitet, aufnimmt oder wiedergibt, und blendet dabei deutlich zwischen 20 und
-100 Prozent Deckkraft.
+Grundzustand zurück. Der Statustext pulsiert, solange die App arbeitet,
+aufnimmt oder wiedergibt, und blendet dabei deutlich zwischen 20 und 100
+Prozent Deckkraft. Ist eine Datei bereit, wechselt die pulsierende Statuszeile
+am schwächsten Punkt zwischen der Bereitschaftsmeldung und einer ersten,
+modellabhängigen Schätzung der Transkriptionsdauer. Die Schätzfaktoren sind
+vorläufig und werden später anhand echter Laufzeitmessungen kalibriert.
 
 Kurze Statusmeldungen bleiben einzeilig. Längere Status- und Fehlermeldungen
 werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit
@@ -173,9 +180,10 @@ Upload zusätzlich die APK-Signatur.
 
 ## Modelle und Speicherbedarf
 
-Die App bietet vier mehrsprachige Modelle für automatische, deutsche und
+Die App bietet fünf mehrsprachige Modelle für automatische, deutsche und
 englische Transkriptionen:
 
+- **Sehr schnell:** `ggml-tiny.bin` (ca. 77,7 MB)
 - **Schnell:** `ggml-base.bin` (ca. 148 MB)
 - **Ausgewogen:** `ggml-small-q5_1.bin` (ca. 190 MB)
 - **Sehr genau:** `ggml-large-v3-turbo-q5_0.bin` (ca. 574 MB)

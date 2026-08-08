@@ -37,6 +37,8 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
 8. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
    an jedes aktive `MainScreenViewModel`.
 9. Die Ergebnisansicht stellt jedes Segment mit Zeitstempel und GUI-Nummer dar.
+   Eine 52 × 32 dp große, abgerundete Nummernkapsel hält auch drei- und
+   vierstellige Nummern vollständig sichtbar.
 10. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
    **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
    Reihenfolge bleiben erhalten.
@@ -50,6 +52,11 @@ an; `AppLanguagePreference` speichert die Auswahl dauerhaft. Die vollständige
 Umstellung aller sichtbaren Texte auf Android-Stringressourcen erfolgt in einem
 separaten Lokalisierungsschritt.
 
+Die von Whisper erkannte Transkriptionssprache bleibt davon unabhängig. Die
+Ergebnisansicht löst sämtliche Whisper-Sprachcodes über
+`WhisperLanguageNames` in vollständige deutsche Bezeichnungen auf. Unbekannte
+Codes werden weiterhin sichtbar mit ihrem Code ausgegeben.
+
 ## Status- und Animationssteuerung
 
 Die sichtbare Statuszeile verbindet Text und CannaBot. Dauerzustände sind
@@ -59,7 +66,18 @@ Erfolgssequenz spielt Springen und Winken nacheinander ab und kehrt anschließen
 zum Grundzustand zurück. Fortschrittsereignisse werden nur an festgelegten
 Meilensteinen ausgelöst.
 
+Im Zustand `REVIEW` ergänzt `TranscriptionTimeEstimate` die unveränderte
+Bereitschaftsmeldung um eine vorläufige Laufzeitschätzung. Die Statuszeile
+wechselt am 20-Prozent-Punkt der Pulsation zwischen beiden Texten. Pro
+Whisper-Modell liegt ein zentraler Echtzeitfaktor vor, der später anhand
+gemessener Transkriptionen angepasst werden kann.
+
 ## Modelle und Speicherung
+
+Der zentrale `WhisperModel`-Katalog enthält fünf mehrsprachige Qualitätsstufen
+von **Sehr schnell** (`ggml-tiny.bin`) bis **Maximale Qualität**. Sämtliche
+Modelle durchlaufen denselben Auswahl-, Download-, Prüfsummen-, Speicher-,
+Lösch- und Transkriptionspfad; Tiny benötigt keine Sonderbehandlung.
 
 Modelle, Aufnahmen und Transkriptionszwischenstände liegen im privaten
 App-Speicher. Modelldownload und Transkription besitzen getrennte

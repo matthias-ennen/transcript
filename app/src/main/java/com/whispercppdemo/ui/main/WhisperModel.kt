@@ -10,6 +10,16 @@ enum class WhisperModel(
     val minimumBytes: Long,
     val sha256: String
 ) {
+    TINY(
+        id = "tiny",
+        qualityLabel = "Sehr schnell",
+        modelLabel = "Whisper Tiny",
+        description = "Besonders schnelle Ergebnisse bei geringerer Genauigkeit",
+        fileName = "ggml-tiny.bin",
+        downloadSizeLabel = "77,7 MB",
+        minimumBytes = 70_000_000L,
+        sha256 = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+    ),
     BASE(
         id = "base",
         qualityLabel = "Schnell",

@@ -49,6 +49,7 @@ data class TranscriptUiState(
     val isPlaying: Boolean = false,
     val playbackPositionMs: Long = 0L,
     val audioDurationMs: Long = 0L,
+    val mediaReadyStatus: String? = null,
     val waveform: List<Float> = emptyList(),
     val liveWaveform: List<Float> = emptyList(),
     val isWaveformLoading: Boolean = false,
@@ -260,6 +261,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isPlaying = false,
             playbackPositionMs = 0L,
             audioDurationMs = 0L,
+            mediaReadyStatus = null,
             waveform = emptyList(),
             isWaveformLoading = true,
             segments = emptyList(),
@@ -302,6 +304,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                             durationMs
                         },
                         isWaveformLoading = false,
+                        mediaReadyStatus = status,
                         status = status,
                         cannaBotMode = CannaBotMode.REVIEW
                     )
@@ -321,6 +324,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             waveform = emptyList(),
             isWaveformLoading = false,
+            mediaReadyStatus = "Wellenform übersprungen · Datei ist bereit.",
             status = "Wellenform übersprungen · Datei ist bereit.",
             cannaBotMode = CannaBotMode.REVIEW
         )
@@ -732,7 +736,16 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             } else {
                 "Bitte ${selectedModel.modelLabel} herunterladen."
             },
-            cannaBotMode = CannaBotMode.IDLE
+            cannaBotMode = if (
+                selectedInstallation.isInstalled &&
+                uiState.mediaReadyStatus != null &&
+                uiState.segments.isEmpty() &&
+                uiState.error == null
+            ) {
+                CannaBotMode.REVIEW
+            } else {
+                CannaBotMode.IDLE
+            }
         )
     }
 

@@ -69,6 +69,7 @@ import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.TranscriptExportMetadata
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.export.formatTimestamp
+import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -535,7 +536,31 @@ internal val TranscriptUiState.isModelSelectionEnabled: Boolean
 
 @Composable
 private fun LiveStatusLine(state: TranscriptUiState) {
-    val isActive = state.isBusy || state.isRecording || state.isPlaying || state.isWaveformLoading
+    val estimateStatus = transcriptionEstimateStatus(
+        audioDurationMs = state.audioDurationMs,
+        model = state.selectedModel
+    )
+    val alternatesReadyStatus =
+        state.cannaBotMode == CannaBotMode.REVIEW &&
+            state.selectedAudio != null &&
+            state.segments.isEmpty() &&
+            state.error == null &&
+            estimateStatus != null
+    var showEstimate by remember(state.selectedAudio, state.selectedModel, estimateStatus) {
+        mutableStateOf(false)
+    }
+    LaunchedEffect(alternatesReadyStatus, estimateStatus) {
+        if (!alternatesReadyStatus) {
+            showEstimate = false
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(3_600L)
+            showEstimate = !showEstimate
+        }
+    }
+    val isActive = state.isBusy || state.isRecording || state.isPlaying ||
+        state.isWaveformLoading || alternatesReadyStatus
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(
@@ -558,7 +583,13 @@ private fun LiveStatusLine(state: TranscriptUiState) {
     ) {
         CannaBotStatusAnimation(state)
         Text(
-            text = state.status,
+            text = if (alternatesReadyStatus && showEstimate) {
+                estimateStatus.orEmpty()
+            } else if (alternatesReadyStatus) {
+                state.mediaReadyStatus ?: state.status
+            } else {
+                state.status
+            },
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
@@ -626,7 +657,9 @@ private fun TranscriptResultSummary(state: TranscriptUiState) {
         ) {
             Text("Ergebnis", style = MaterialTheme.typography.titleSmall)
             state.completedModel?.let { Text("Modell: ${it.modelLabel}") }
-            state.detectedLanguage?.let { Text("Erkannte Sprache: ${languageDisplayName(it)}") }
+            state.detectedLanguage?.let {
+                Text("Erkannte Sprache: ${whisperLanguageDisplayName(it)}")
+            }
             state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
             Text("Textabschnitte: ${state.segments.size}")
         }
@@ -723,7 +756,8 @@ private fun TranscriptSegmentCard(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .offset(x = 8.dp, y = (-8).dp)
-                .size(32.dp)
+                .width(52.dp)
+                .height(32.dp)
                 .background(MaterialTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center
         ) {
@@ -837,12 +871,6 @@ private fun defaultName(state: TranscriptUiState, extension: String): String {
         ?.ifBlank { "Transcript" }
         ?: "Transcript"
     return "$base Transcript.$extension"
-}
-
-private fun languageDisplayName(code: String): String = when (code) {
-    "de" -> "Deutsch"
-    "en" -> "Englisch"
-    else -> code.ifBlank { "Unbekannt" }
 }
 
 internal fun formatDownloadSize(bytes: Long): String = when {
