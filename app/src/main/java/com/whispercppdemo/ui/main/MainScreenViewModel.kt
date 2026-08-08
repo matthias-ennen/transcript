@@ -20,6 +20,7 @@ import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.AudioRecorder
 import de.matthiasennen.transcript.media.WAVEFORM_GENERATION_TIMEOUT_MS
 import de.matthiasennen.transcript.media.generateWaveform
+import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.transcription.TranscriptionCoordinator
 import de.matthiasennen.transcript.transcription.TranscriptionService
 import de.matthiasennen.transcript.transcription.TranscriptionState
@@ -285,6 +286,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
         waveformJob = viewModelScope.launch {
             try {
+                val metadataDurationMs = withContext(Dispatchers.IO) {
+                    inspectAudioTrack(application, uri).durationMs
+                }
+                if (uiState.selectedAudio == uri && uiState.audioDurationMs <= 0L) {
+                    uiState = uiState.copy(audioDurationMs = metadataDurationMs)
+                }
                 val (waveform, durationMs) = withTimeout(WAVEFORM_GENERATION_TIMEOUT_MS) {
                     withContext(Dispatchers.IO) {
                         val workerContext = currentCoroutineContext()

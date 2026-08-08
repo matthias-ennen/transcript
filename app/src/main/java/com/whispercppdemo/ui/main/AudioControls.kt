@@ -88,10 +88,10 @@ fun AudioControls(
                     style = MaterialTheme.typography.labelSmall
                 )
                 Text(
-                    when {
-                        state.isRecording -> "Stopp über Mikrofon-Taste"
-                        state.isWaveformLoading -> "Wellenform wird erstellt …"
-                        else -> formatClock(state.audioDurationMs / 1_000L)
+                    if (state.isRecording) {
+                        "Stopp über Mikrofon-Taste"
+                    } else {
+                        formatClock(state.audioDurationMs / 1_000L)
                     },
                     style = MaterialTheme.typography.labelSmall
                 )

@@ -214,13 +214,17 @@ private fun TranscriptTopBar(
                     )
                     IconButton(
                         onClick = { onNavigate(AppPage.SETTINGS) },
-                        modifier = Modifier.size(44.dp)
+                        modifier = Modifier
+                            .width(42.dp)
+                            .height(44.dp)
                     ) {
                         Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
                     }
                     IconButton(
                         onClick = { onNavigate(AppPage.ABOUT) },
-                        modifier = Modifier.size(44.dp)
+                        modifier = Modifier
+                            .width(42.dp)
+                            .height(44.dp)
                     ) {
                         Icon(Icons.Default.Info, contentDescription = "Über die App")
                     }
@@ -240,9 +244,10 @@ private fun AppLanguageSelector(
     Box {
         OutlinedButton(
             onClick = { expanded = true },
-            contentPadding = PaddingValues(horizontal = 6.dp),
+            border = null,
+            contentPadding = PaddingValues(horizontal = 2.dp),
             modifier = Modifier
-                .width(58.dp)
+                .width(48.dp)
                 .height(44.dp)
         ) {
             Text(selected.flag)
