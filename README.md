@@ -87,7 +87,8 @@ CannaBot nutzt alle neun Zeilen des Sprite-Sheets. Dauerzustände laufen ruhig
 weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
 werden einmal abgespielt und kehren anschließend automatisch zum passenden
 Grundzustand zurück. Der Statustext pulsiert nur, solange die App tatsächlich
-arbeitet, aufnimmt oder wiedergibt.
+arbeitet, aufnimmt oder wiedergibt, und blendet dabei deutlich zwischen 20 und
+100 Prozent Deckkraft.
 
 Kurze Statusmeldungen bleiben einzeilig. Längere Status- und Fehlermeldungen
 werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit

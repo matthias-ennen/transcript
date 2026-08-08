@@ -474,7 +474,7 @@ private fun LiveStatusLine(state: TranscriptUiState) {
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(
-            initialValue = 0.52f,
+            initialValue = 0.20f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
                 animation = tween(durationMillis = 1_800),
