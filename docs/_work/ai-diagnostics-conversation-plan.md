@@ -17,6 +17,11 @@
   Kontext ab.
 - Die nächste Anfrage wird an den bestehenden Chatpräfix angehängt und kann auf
   frühere Aussagen Bezug nehmen.
+- Die Fortsetzung vergleicht keine gerenderten Zeichenketten mehr. Stattdessen
+  gleicht sie die von der jeweiligen Modellvorlage erzeugten Tokens mit dem
+  vorhandenen KV-Cache ab, behält den gemeinsamen Präfix und synchronisiert nur
+  den abweichenden Rest. Dadurch sind kleine Vorlagenunterschiede zwischen den
+  drei Qwen-Modellen zulässig.
 - Das eingebettete Qwen-Chattemplate bleibt mit `enable_thinking=false` aktiv.
 - Messwerte kennzeichnen, ob eine neue Unterhaltung begonnen oder die vorhandene
   Unterhaltung fortgeführt wurde.

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <codecvt>
+#include <cstddef>
 #include <exception>
 #include <locale>
 #include <memory>
@@ -76,7 +77,7 @@ struct LocalEngine {
     int thread_count = 4;
     llama_context * free_context = nullptr;
     std::vector<std::pair<std::string, std::string>> free_messages;
-    std::string free_rendered_history;
+    std::vector<llama_token> free_cached_tokens;
     std::string last_error;
     llama_context * correction_context = nullptr;
     int correction_base_tokens = 0;
@@ -91,6 +92,7 @@ struct RenderedChat {
 
 struct SampleResult {
     std::string text;
+    std::vector<llama_token> tokens;
     int generated_tokens = 0;
     long time_to_first_token_ms = 0;
     long answer_generation_ms = 0;
@@ -286,6 +288,45 @@ bool decode_tokens(llama_context * context, std::vector<llama_token> & tokens) {
     return true;
 }
 
+size_t common_token_prefix(
+    const std::vector<llama_token> & first,
+    const std::vector<llama_token> & second) {
+    const size_t maximum = std::min(first.size(), second.size());
+    size_t common = 0;
+    while (common < maximum && first[common] == second[common]) {
+        ++common;
+    }
+    return common;
+}
+
+bool sync_context_tokens(
+    llama_context * context,
+    std::vector<llama_token> & cached_tokens,
+    const std::vector<llama_token> & target_tokens,
+    int & decoded_tokens) {
+    if (!context) return false;
+
+    const size_t common = common_token_prefix(cached_tokens, target_tokens);
+    if (common < cached_tokens.size()) {
+        llama_memory_t memory = llama_get_memory(context);
+        if (!llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(common), -1)) {
+            log_error("Could not rewind the free conversation KV cache.");
+            return false;
+        }
+    }
+
+    std::vector<llama_token> delta(
+        target_tokens.begin() + static_cast<std::ptrdiff_t>(common),
+        target_tokens.end());
+    decoded_tokens = static_cast<int>(delta.size());
+    if (!delta.empty() && !decode_tokens(context, delta)) {
+        return false;
+    }
+
+    cached_tokens = target_tokens;
+    return true;
+}
+
 bool has_complete_json_object(const std::string & value) {
     bool in_string = false;
     bool escaped = false;
@@ -353,6 +394,7 @@ SampleResult sample_response(
             result.time_to_first_token_ms = elapsed_ms(request_started, token_at);
         }
         result.text += token_piece(vocab, token);
+        result.tokens.push_back(token);
         ++result.generated_tokens;
         llama_token mutable_token = token;
         llama_batch batch = llama_batch_get_one(&mutable_token, 1);
@@ -389,7 +431,7 @@ void clear_free_session(LocalEngine * engine) {
         engine->free_context = nullptr;
     }
     engine->free_messages.clear();
-    engine->free_rendered_history.clear();
+    engine->free_cached_tokens.clear();
 }
 
 jobjectArray fail_free_generation(
@@ -482,7 +524,9 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         return fail_free_generation(env, engine, "Der KI-Auftrag darf nicht leer sein.");
     }
 
-    const bool conversation_continued = engine->free_context != nullptr;
+    const bool conversation_continued = engine->free_context != nullptr &&
+        !engine->free_cached_tokens.empty() &&
+        !engine->free_messages.empty();
     if (!conversation_continued) {
         clear_free_session(engine);
         engine->free_messages = {
@@ -500,22 +544,11 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
             engine,
             "Die Chatvorlage konnte die KI-Unterhaltung nicht fortsetzen.");
     }
-    if (conversation_continued &&
-        rendered.prompt.rfind(engine->free_rendered_history, 0) != 0) {
-        return fail_free_generation(
-            env,
-            engine,
-            "Die Chatvorlage hat keinen stabilen Gesprächspräfix erzeugt.");
-    }
-
-    const std::string prompt_delta = conversation_continued
-        ? rendered.prompt.substr(engine->free_rendered_history.size())
-        : rendered.prompt;
     const llama_vocab * vocab = llama_model_get_vocab(engine->model);
-    std::vector<llama_token> prompt_tokens = tokenize(
+    const std::vector<llama_token> prompt_tokens = tokenize(
         vocab,
-        prompt_delta,
-        !conversation_continued);
+        rendered.prompt,
+        true);
     if (prompt_tokens.empty()) {
         return fail_free_generation(
             env,
@@ -533,10 +566,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         }
     }
 
-    const int existing_tokens = conversation_continued
-        ? llama_memory_seq_pos_max(llama_get_memory(engine->free_context), 0) + 1
-        : 0;
-    const int remaining_context = engine->context_size - existing_tokens -
+    const int remaining_context = engine->context_size -
         static_cast<int>(prompt_tokens.size()) - CHAT_SUFFIX_TOKEN_RESERVE;
     if (remaining_context < 64) {
         return reject_free_prompt(
@@ -548,7 +578,12 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         std::clamp(static_cast<int>(maximum_output_tokens), 64, 4096),
         remaining_context);
 
-    if (!decode_tokens(engine->free_context, prompt_tokens)) {
+    int decoded_prompt_tokens = 0;
+    if (!sync_context_tokens(
+            engine->free_context,
+            engine->free_cached_tokens,
+            prompt_tokens,
+            decoded_prompt_tokens)) {
         return fail_free_generation(
             env,
             engine,
@@ -572,29 +607,43 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
 
     engine->free_messages.push_back({"assistant", output.text});
     const RenderedChat completed = render_chat(engine, engine->free_messages, false);
-    const std::string rendered_response = rendered.prompt + output.text;
-    if (completed.prompt.rfind(rendered_response, 0) != 0) {
+    if (completed.prompt.empty()) {
         return fail_free_generation(
             env,
             engine,
-            "Die KI-Antwort konnte nicht sicher im Gesprächskontext abgeschlossen werden.");
+            "Die KI-Antwort konnte nicht in die Unterhaltung übernommen werden.");
     }
-    const std::string completion_suffix = completed.prompt.substr(rendered_response.size());
-    if (!completion_suffix.empty()) {
-        std::vector<llama_token> suffix_tokens = tokenize(vocab, completion_suffix, false);
-        if (suffix_tokens.empty() ||
-            !decode_tokens(engine->free_context, suffix_tokens)) {
-            return fail_free_generation(
-                env,
-                engine,
-                "Das Ende der KI-Antwort konnte nicht im Gesprächskontext gespeichert werden.");
-        }
+    const std::vector<llama_token> completed_tokens = tokenize(
+        vocab,
+        completed.prompt,
+        true);
+    if (completed_tokens.empty() ||
+        static_cast<int>(completed_tokens.size()) >= engine->context_size) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Die vollständige KI-Unterhaltung passt nicht mehr in das Kontextfenster.");
     }
-    engine->free_rendered_history = completed.prompt;
+
+    engine->free_cached_tokens.insert(
+        engine->free_cached_tokens.end(),
+        output.tokens.begin(),
+        output.tokens.end());
+    int decoded_completion_tokens = 0;
+    if (!sync_context_tokens(
+            engine->free_context,
+            engine->free_cached_tokens,
+            completed_tokens,
+            decoded_completion_tokens)) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Die KI-Antwort konnte nicht im Gesprächskontext gespeichert werden.");
+    }
 
     return to_java_generation_result(env, {
         output.text,
-        std::to_string(prompt_tokens.size()),
+        std::to_string(decoded_prompt_tokens),
         std::to_string(output.generated_tokens),
         std::to_string(elapsed_ms(request_started, prompt_processed_at)),
         std::to_string(output.time_to_first_token_ms),
@@ -621,7 +670,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_hasTestConversation(
     jobject,
     jlong handle) {
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
-    return engine && engine->free_context && !engine->free_rendered_history.empty()
+    return engine && engine->free_context && !engine->free_cached_tokens.empty()
         ? JNI_TRUE
         : JNI_FALSE;
 }
