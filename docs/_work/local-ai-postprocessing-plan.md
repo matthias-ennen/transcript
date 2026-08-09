@@ -87,3 +87,9 @@ Beispiel für die Abschlusssmeldung: „KI-Prüfung abgeschlossen: 65 Segmente
 geprüft, 4 Korrekturen übernommen.“ Sie darf nicht behaupten, alle 65 Segmente
 seien überarbeitet worden. Zwischenstände und Diagnoseeinträge verwenden dieselben
 Begriffe und enthalten weiterhin ihren Zeitstempel.
+
+## Build-Verifikation
+
+Der APK-Workflow wird für jeden veröffentlichten Stand des Agent-Branches erneut
+ausgeführt. Die Prüfung umfasst JVM-Tests, Kotlin-/Compose-Kompilierung, native
+Bibliotheken, Signatur und den Artefakt-Upload.
