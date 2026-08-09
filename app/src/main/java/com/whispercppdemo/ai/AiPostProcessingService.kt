@@ -104,43 +104,79 @@ class AiPostProcessingService : Service() {
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
             }
-            addDiagnostic("KI-Test: ${model.modelLabel} wird lokal geladen.")
+            val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(model, modelFile)
+            addDiagnostic(
+                if (modelAlreadyLoaded) {
+                    "KI-Test: ${model.modelLabel} ist bereits im Arbeitsspeicher."
+                } else {
+                    "KI-Test: ${model.modelLabel} wird lokal geladen."
+                }
+            )
             AiPostProcessingCoordinator.update(
                 AiPostProcessingState.SelfTestRunning(
                     model = model,
-                    status = "KI-Modell wird geladen …",
-                    activityDetail = "${model.modelLabel} wird für den freien KI-Test vorbereitet.",
+                    status = if (modelAlreadyLoaded) {
+                        "Geladenes KI-Modell wird verwendet …"
+                    } else {
+                        "KI-Modell wird geladen …"
+                    },
+                    activityDetail = if (modelAlreadyLoaded) {
+                        "${model.modelLabel} bleibt im RAM und ist sofort ansprechbar."
+                    } else {
+                        "${model.modelLabel} wird für den freien KI-Test vorbereitet."
+                    },
                     diagnostics = diagnostics.toList()
                 )
             )
-            LocalAiEngine(modelFile.absolutePath).use { engine ->
-                addDiagnostic("KI-Modell geladen. Eigene Anfrage wird an die KI gesendet.")
+            val sessionResult = AiEngineSessionManager.withModel(model, modelFile) { engine, sessionInfo ->
+                addDiagnostic(
+                    if (sessionInfo.modelAlreadyLoaded) {
+                        "Bereits geladenes KI-Modell wird wiederverwendet."
+                    } else {
+                        "KI-Modell in ${sessionInfo.modelLoadMs} ms geladen und bleibt im RAM."
+                    }
+                )
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.SelfTestRunning(
                         model = model,
-                        status = "Anfrage wird an KI gesendet …",
-                        activityDetail = "Eigene Eingabe: ${prompt.length} Zeichen.",
+                        status = "Anfrage wird verarbeitet …",
+                        activityDetail = "Thinking ist technisch deaktiviert · Eingabe: ${prompt.length} Zeichen.",
                         diagnostics = diagnostics.toList()
                     )
                 )
-                val response = engine.generateTest(prompt)
-                addDiagnostic("Erstes Antwortzeichen empfangen.")
-                addDiagnostic("Antwort vollständig empfangen: ${response.length} Zeichen.")
-                val durationSeconds = ((SystemClock.elapsedRealtime() - startedAt) / 1_000L)
-                    .coerceAtLeast(0L)
-                AiPostProcessingCoordinator.update(
-                    AiPostProcessingState.SelfTestCompleted(
-                        model = model,
-                        response = response,
-                        durationSeconds = durationSeconds,
-                        diagnostics = diagnostics.toList()
-                    )
-                )
-                finishWithNotification(
-                    "KI-Test erfolgreich",
-                    "Antwort vollständig empfangen: ${response.length} Zeichen."
-                )
+                engine.generateTest(prompt)
             }
+            val generation = sessionResult.value
+            addDiagnostic(
+                "Erstes Antwort-Token nach ${generation.metrics.timeToFirstTokenMs} ms."
+            )
+            addDiagnostic(
+                "Antwort vollständig: ${generation.metrics.generatedTokens} Tokens, Ende: ${generation.metrics.finishReason}."
+            )
+            val metrics = AiSelfTestMetrics(
+                modelAlreadyLoaded = sessionResult.info.modelAlreadyLoaded,
+                modelLoadMs = sessionResult.info.modelLoadMs,
+                promptTokens = generation.metrics.promptTokens,
+                generatedTokens = generation.metrics.generatedTokens,
+                promptProcessingMs = generation.metrics.promptProcessingMs,
+                timeToFirstTokenMs = generation.metrics.timeToFirstTokenMs,
+                answerGenerationMs = generation.metrics.answerGenerationMs,
+                totalMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
+                finishReason = generation.metrics.finishReason,
+                thinkingDisabled = generation.metrics.thinkingDisabled
+            )
+            AiPostProcessingCoordinator.update(
+                AiPostProcessingState.SelfTestCompleted(
+                    model = model,
+                    response = generation.text,
+                    metrics = metrics,
+                    diagnostics = diagnostics.toList()
+                )
+            )
+            finishWithNotification(
+                "KI-Test erfolgreich",
+                "Antwort vollständig empfangen: ${generation.text.length} Zeichen."
+            )
         } catch (throwable: Throwable) {
             if (!stopRequested.get() && throwable !is CancellationException) {
                 val message = throwable.localizedMessage ?: "Der KI-Test ist fehlgeschlagen."
@@ -167,10 +203,23 @@ class AiPostProcessingService : Service() {
                 "${model.modelLabel} ist nicht vollständig installiert."
             }
             addDiagnostic("Whisper-Speicher wurde freigegeben.")
-            addDiagnostic("${model.modelLabel} wird lokal geladen.")
+            addDiagnostic(
+                if (AiEngineSessionManager.isLoaded(model, modelFile)) {
+                    "${model.modelLabel} ist bereits im Arbeitsspeicher."
+                } else {
+                    "${model.modelLabel} wird lokal geladen."
+                }
+            )
 
-            LocalAiEngine(modelFile.absolutePath).use { engine ->
-                addDiagnostic("${model.modelLabel} ist bereit.")
+            AiEngineSessionManager.withModel(model, modelFile) { engine, sessionInfo ->
+                addDiagnostic(
+                    if (sessionInfo.modelAlreadyLoaded) {
+                        "${model.modelLabel} wird aus dem RAM wiederverwendet."
+                    } else {
+                        "${model.modelLabel} ist nach ${sessionInfo.modelLoadMs} ms bereit und bleibt im RAM."
+                    }
+                )
+                addDiagnostic("Thinking ist über die Qwen-Chatvorlage technisch deaktiviert.")
                 var correctedSegments = initialRequest.segments
                 val groups = targetGroups(initialRequest)
                 check(groups.isNotEmpty()) { "Für die KI-Nachbearbeitung wurde kein Text gefunden." }

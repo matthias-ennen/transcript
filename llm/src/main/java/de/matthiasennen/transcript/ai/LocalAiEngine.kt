@@ -2,6 +2,22 @@ package de.matthiasennen.transcript.ai
 
 import java.io.Closeable
 
+data class LocalAiGenerationMetrics(
+    val promptTokens: Int,
+    val generatedTokens: Int,
+    val promptProcessingMs: Long,
+    val timeToFirstTokenMs: Long,
+    val answerGenerationMs: Long,
+    val totalInferenceMs: Long,
+    val finishReason: String,
+    val thinkingDisabled: Boolean
+)
+
+data class LocalAiGenerationResult(
+    val text: String,
+    val metrics: LocalAiGenerationMetrics
+)
+
 /**
  * Small lifecycle wrapper around llama.cpp. The model is mapped once. Free test
  * prompts use an isolated context; transcript correction keeps one group context
@@ -18,16 +34,32 @@ class LocalAiEngine(
         check(handle != 0L) { "Das lokale KI-Modell konnte nicht geladen werden." }
     }
 
-    private fun generate(prompt: String, maximumOutputTokens: Int): String {
+    private fun generate(prompt: String, maximumOutputTokens: Int): LocalAiGenerationResult {
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
         require(prompt.isNotBlank()) { "Der KI-Auftrag darf nicht leer sein." }
-        return LocalAiNative.generate(handle, prompt, maximumOutputTokens)
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
+        val values = LocalAiNative.generate(handle, prompt, maximumOutputTokens)
             ?: error("Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.")
+        check(values.size == GENERATION_RESULT_FIELD_COUNT) {
+            "Die lokale KI hat unvollständige Diagnosewerte geliefert."
+        }
+        val text = values[0].trim().takeIf(String::isNotEmpty)
+            ?: error("Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.")
+        return LocalAiGenerationResult(
+            text = text,
+            metrics = LocalAiGenerationMetrics(
+                promptTokens = values[1].toIntOrNull() ?: 0,
+                generatedTokens = values[2].toIntOrNull() ?: 0,
+                promptProcessingMs = values[3].toLongOrNull() ?: 0L,
+                timeToFirstTokenMs = values[4].toLongOrNull() ?: 0L,
+                answerGenerationMs = values[5].toLongOrNull() ?: 0L,
+                totalInferenceMs = values[6].toLongOrNull() ?: 0L,
+                finishReason = values[7],
+                thinkingDisabled = values[8].toBooleanStrictOrNull() ?: false
+            )
+        )
     }
 
-    fun generateTest(prompt: String): String = generate(
+    fun generateTest(prompt: String): LocalAiGenerationResult = generate(
         prompt = "[[FREE_TEST]]$prompt",
         maximumOutputTokens = 512
     )
@@ -56,6 +88,8 @@ class LocalAiEngine(
     }
 
     companion object {
+        private const val GENERATION_RESULT_FIELD_COUNT = 9
+
         internal fun preferredThreadCount(
             availableProcessors: Int = Runtime.getRuntime().availableProcessors()
         ): Int = (availableProcessors - 2).coerceIn(2, 6)
@@ -68,7 +102,7 @@ internal object LocalAiNative {
     }
 
     external fun create(modelPath: String, contextSize: Int, threadCount: Int): Long
-    external fun generate(handle: Long, prompt: String, maximumOutputTokens: Int): String?
+    external fun generate(handle: Long, prompt: String, maximumOutputTokens: Int): Array<String>?
     external fun prepareCorrectionContext(handle: Long, prompt: String): Boolean
     external fun generateCorrection(
         handle: Long,

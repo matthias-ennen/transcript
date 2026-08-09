@@ -57,6 +57,15 @@ KI-Stufe beginnt erst nach der vollständigen Freigabe des Whisper-Kontexts.
 - Die vollständige Modellantwort lässt sich weiterhin ein- und ausblenden.
 - Eingabe und Antwort bleiben beim Modellwechsel sichtbar, damit die drei Modelle
   mit demselben Auftrag verglichen werden können.
+- Beim ersten Auftrag wird das ausgewählte Modell geladen und anschließend im RAM
+  gehalten. Weitere Aufträge verwenden das geladene Modell mit jeweils frischem
+  Gesprächskontext.
+- Beim Modellwechsel oder Löschen wird die bisherige Engine freigegeben; das neu
+  ausgewählte Modell wird beim nächsten Auftrag geladen.
+- Die Diagnose trennt Modellladezeit, Promptverarbeitung, Zeit bis zum ersten Token,
+  Antworterzeugung, Gesamtdauer, Tokenzahlen und Beendigungsgrund.
+- Die Qwen-Chatvorlage wird technisch mit `enable_thinking=false` gerendert.
+  `/no_think` ist nicht Bestandteil des Prompts.
 
 ## Prüfpunkte
 
@@ -113,3 +122,6 @@ Der v2-Umbau wird zunächst auf `agent/simple-transcript-finalization` umgesetzt
 vollständig geprüft. Danach wird der Gesamtstand kontrolliert nach `main`
 übernommen. Der abschließende signierte APK-Workflow muss auf dem resultierenden
 `main`-Commit laufen.
+
+Das Paket für persistente KI-Sitzungen, technische Thinking-Deaktivierung und
+getrennte Diagnosemesswerte wird auf `agent/persistent-ai-diagnostics` geprüft.

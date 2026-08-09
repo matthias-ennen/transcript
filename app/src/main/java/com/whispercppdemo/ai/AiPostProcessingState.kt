@@ -14,6 +14,19 @@ data class AiCorrectionTrace(
     val decision: String
 )
 
+data class AiSelfTestMetrics(
+    val modelAlreadyLoaded: Boolean,
+    val modelLoadMs: Long,
+    val promptTokens: Int,
+    val generatedTokens: Int,
+    val promptProcessingMs: Long,
+    val timeToFirstTokenMs: Long,
+    val answerGenerationMs: Long,
+    val totalMs: Long,
+    val finishReason: String,
+    val thinkingDisabled: Boolean
+)
+
 sealed interface AiPostProcessingState {
     data object Idle : AiPostProcessingState
 
@@ -34,7 +47,7 @@ sealed interface AiPostProcessingState {
     data class SelfTestCompleted(
         val model: AiModel,
         val response: String,
-        val durationSeconds: Long,
+        val metrics: AiSelfTestMetrics,
         val diagnostics: List<String>
     ) : AiPostProcessingState
 

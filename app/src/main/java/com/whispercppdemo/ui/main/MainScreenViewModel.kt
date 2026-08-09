@@ -19,11 +19,13 @@ import de.matthiasennen.transcript.ai.AiModelDownloadService
 import de.matthiasennen.transcript.ai.AiModelDownloadState
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
+import de.matthiasennen.transcript.ai.AiEngineSessionManager
 import de.matthiasennen.transcript.ai.AiPostProcessingCoordinator
 import de.matthiasennen.transcript.ai.AiPostProcessingMode
 import de.matthiasennen.transcript.ai.AiPostProcessingService
 import de.matthiasennen.transcript.ai.AiPostProcessingState
 import de.matthiasennen.transcript.ai.AiPreferences
+import de.matthiasennen.transcript.ai.AiSelfTestMetrics
 import de.matthiasennen.transcript.download.ModelDownloadCoordinator
 import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
@@ -84,6 +86,8 @@ data class TranscriptUiState(
     val isAiSelfTest: Boolean = false,
     val aiTestPrompt: String = "",
     val aiSelfTestResponse: String? = null,
+    val aiSelfTestModel: AiModel? = null,
+    val aiSelfTestMetrics: AiSelfTestMetrics? = null,
     val latestAiCorrectionTrace: AiCorrectionTrace? = null,
     val isBusy: Boolean = false,
     val isTranscribing: Boolean = false,
@@ -517,14 +521,25 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun startAiSelfTest() {
         if (uiState.isBusy || !uiState.selectedAiModelInstalled || uiState.aiTestPrompt.isBlank()) return
+        val selectedModelFile = aiModelFile(uiState.selectedAiModel)
+        val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(
+            uiState.selectedAiModel,
+            selectedModelFile
+        )
         uiState = uiState.copy(
             isBusy = true,
             isAiSelfTest = true,
             aiSelfTestResponse = null,
+            aiSelfTestModel = null,
+            aiSelfTestMetrics = null,
             progress = null,
             error = null,
             status = "KI-Test wird vorbereitet …",
-            activityDetail = "${uiState.selectedAiModel.modelLabel} wird lokal geladen.",
+            activityDetail = if (modelAlreadyLoaded) {
+                "${uiState.selectedAiModel.modelLabel} ist bereits im RAM."
+            } else {
+                "${uiState.selectedAiModel.modelLabel} wird lokal geladen."
+            },
             diagnostics = (uiState.diagnostics +
                 "Freier KI-Test mit ${uiState.selectedAiModel.modelLabel} gestartet.")
                 .takeLast(12),
@@ -598,12 +613,14 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun selectAiModel(model: AiModel) {
         if (uiState.isBusy) return
+        AiEngineSessionManager.releaseIfDifferent(model)
         aiPreferences.setSelectedModel(model)
         refreshAiModelInstallations(model)
     }
 
     fun downloadAiModel(model: AiModel = uiState.selectedAiModel) {
         if (uiState.isBusy) return
+        AiEngineSessionManager.releaseIfDifferent(model)
         aiPreferences.setSelectedModel(model)
         uiState = uiState.copy(
             selectedAiModel = model,
@@ -634,6 +651,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             )
             runCatching {
                 withContext(Dispatchers.IO) {
+                    AiEngineSessionManager.release(model)
                     val file = aiModelFile(model)
                     check(!file.exists() || file.delete()) { "Das KI-Modell konnte nicht gelöscht werden." }
                     val partial = partialAiModelFile(model)
@@ -1014,8 +1032,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isAiSelfTest = true,
                     progress = null,
                     error = null,
-                    status = "KI-Modell wird geladen …",
-                    activityDetail = "${state.model.modelLabel} wird für den freien KI-Test vorbereitet.",
+                    status = "KI-Sitzung wird vorbereitet …",
+                    activityDetail = "${state.model.modelLabel} wird für den freien KI-Test bereitgestellt.",
                     cannaBotMode = CannaBotMode.REVIEW
                 )
             }
@@ -1041,6 +1059,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         "KI-Test erfolgreich: ${state.response.length} Zeichen empfangen.")
                         .takeLast(12),
                     aiSelfTestResponse = state.response,
+                    aiSelfTestModel = state.model,
+                    aiSelfTestMetrics = state.metrics,
                     error = null,
                     status = "KI-Test erfolgreich.",
                     cannaBotMode = CannaBotMode.IDLE
@@ -1056,6 +1076,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     activityDetail = null,
                     diagnostics = state.diagnostics.takeLast(12),
                     aiSelfTestResponse = null,
+                    aiSelfTestModel = null,
+                    aiSelfTestMetrics = null,
                     error = state.message,
                     status = "KI-Test fehlgeschlagen.",
                     cannaBotMode = CannaBotMode.IDLE

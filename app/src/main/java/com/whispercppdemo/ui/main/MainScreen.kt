@@ -926,6 +926,39 @@ private fun AiSelfTestCard(
                 )
             }
             state.aiSelfTestResponse?.let { response ->
+                state.aiSelfTestMetrics?.let { metrics ->
+                    Text(
+                        "Messwerte · ${state.aiSelfTestModel?.modelLabel ?: state.selectedAiModel.modelLabel}",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        buildString {
+                            append("Modell: ")
+                            append(
+                                if (metrics.modelAlreadyLoaded) {
+                                    "bereits im RAM"
+                                } else {
+                                    "neu geladen (${metrics.modelLoadMs} ms)"
+                                }
+                            )
+                            append("\nModellladezeit: ${metrics.modelLoadMs} ms")
+                            append("\nPromptverarbeitung: ${metrics.promptProcessingMs} ms")
+                            append("\nZeit bis zum ersten Token: ${metrics.timeToFirstTokenMs} ms")
+                            append("\nAntworterzeugung: ${metrics.answerGenerationMs} ms")
+                            append("\nGesamtdauer: ${metrics.totalMs} ms")
+                            append("\nTokens: ${metrics.promptTokens} Eingabe · ${metrics.generatedTokens} Antwort")
+                            append("\nBeendigung: ${aiFinishReasonLabel(metrics.finishReason)}")
+                            append(
+                                if (metrics.thinkingDisabled) {
+                                    "\nThinking: technisch deaktiviert"
+                                } else {
+                                    "\nThinking: von der Modellvorlage nicht bestätigt"
+                                }
+                            )
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 OutlinedButton(
                     onClick = { responseExpanded = !responseExpanded },
                     modifier = Modifier.fillMaxWidth()
@@ -938,6 +971,14 @@ private fun AiSelfTestCard(
             }
         }
     }
+}
+
+private fun aiFinishReasonLabel(reason: String): String = when (reason) {
+    "eog" -> "reguläres Modellende"
+    "token_limit" -> "Antwortlimit erreicht"
+    "structured_result" -> "vollständiges Ergebnis"
+    "decode_error" -> "Dekodierungsfehler"
+    else -> reason
 }
 
 @Composable

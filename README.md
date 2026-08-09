@@ -115,7 +115,19 @@ Plausibilitätsprüfungen werden erst nach den Praxistests ergänzt.
 Die Kachel **KI-Testbereich** enthält statt einer fest eingebauten Testfrage ein
 mehrzeiliges Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an
 das ausgewählte Qwen-Modell senden; die vollständige Antwort kann anschließend
-ein- und ausgeblendet werden.
+ein- und ausgeblendet werden. Beim ersten Auftrag wird das ausgewählte Modell
+geladen und bleibt anschließend im Arbeitsspeicher. Weitere Testaufträge verwenden
+dasselbe Modell ohne erneute Ladezeit, erhalten aber jeweils einen frischen
+Gesprächskontext. Erst ein Modellwechsel, das Löschen des Modells oder das Beenden
+des App-Prozesses gibt den Modellspeicher wieder frei.
+
+Die Qwen-Chatvorlage wird für freie Tests und Transkriptkorrekturen technisch mit
+`enable_thinking=false` angewendet. Die Korrektur verwendet zusätzlich eine native
+JSON-Grammatik und beendet die Ausgabe, sobald das vollständige Ergebnisobjekt
+vorliegt. Der Testbereich zeigt getrennt Modellladezeit, Promptverarbeitung, Zeit
+bis zum ersten Antwort-Token, Antwortdauer, Gesamtdauer, Tokenzahlen und
+Beendigungsgrund an. So lässt sich insbesondere der zweite Aufruf eines Modells
+ohne erneut eingerechnete Ladezeit beurteilen.
 
 ## Status und Diagnose während der Transkription
 

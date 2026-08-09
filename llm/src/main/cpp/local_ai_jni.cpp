@@ -1,12 +1,22 @@
 #include <jni.h>
 #include <android/log.h>
 #include <algorithm>
+#include <chrono>
 #include <codecvt>
+#include <exception>
 #include <locale>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "jinja/lexer.h"
+#include "jinja/parser.h"
+#include "jinja/runtime.h"
+#include "jinja/value.h"
 #include "llama.h"
 
 namespace {
@@ -14,6 +24,7 @@ namespace {
 constexpr const char * TAG = "TranscriptLocalAI";
 constexpr int PROMPT_BATCH_SIZE = 1024;
 constexpr const char * FREE_TEST_MARKER = "[[FREE_TEST]]";
+using SteadyClock = std::chrono::steady_clock;
 constexpr const char * CORRECTION_GRAMMAR = R"GBNF(
 root ::= "{" ws "\"result\"" ws ":" ws string "}" ws
 string ::= "\"" ([^"\\\x7F\x00-\x1F] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
@@ -21,25 +32,58 @@ ws ::= [ \t\n]*
 )GBNF";
 
 const std::string CORRECTION_SYSTEM_PROMPT =
-    "Du korrigierst ein lokal erzeugtes Whisper-Rohtranskript. Der gemeinsame "
-    "Gesprächskontext wird einmal bereitgestellt und ist schreibgeschützt. Danach "
-    "erhältst du jeweils genau ein Zielsegment. Korrigiere ausschließlich dieses "
-    "Zielsegment anhand des Gesprächskontexts. Erlaubt sind Rechtschreibung, "
-    "Zeichensetzung, Groß- und Kleinschreibung sowie im Kontext eindeutig falsch "
-    "erkannte Wörter. Erhalte Bedeutung, Sprechstil, Wiederholungen und "
-    "Informationsgehalt. Ergänze keine neuen Informationen. Bei Unsicherheit "
-    "behalte den Whisper-Rohtext bei. Antworte ausschließlich als JSON-Objekt mit "
-    "genau einem Feld result; result enthält immer den vollständigen Zieltext. "
-    "Keine Erklärungen, keine Segmentnummer und kein Markdown.";
+    "Du korrigierst genau ein Zielsegment eines lokal erzeugten Whisper-Rohtranskripts. "
+    "Korrigiere ausschließlich eindeutige Rechtschreib-, Grammatik- und "
+    "Zeichensetzungsfehler sowie anhand des bereitgestellten Gesprächskontexts "
+    "eindeutig falsch erkannte Wörter. Verändere weder Bedeutung noch "
+    "Informationsgehalt oder Sprechstil. Lasse nichts weg, füge nichts hinzu und "
+    "formuliere nicht unnötig um. Ist keine eindeutige Korrektur erforderlich, "
+    "übernimm den Zieltext unverändert. Der Gesprächskontext ist schreibgeschützt. "
+    "Antworte ausschließlich als JSON-Objekt mit genau einem Feld result. result "
+    "enthält immer den vollständigen korrigierten oder unveränderten Zieltext. "
+    "Gib keine Erklärung, Analyse, Segmentnummer, Markdown-Formatierung, weiteren "
+    "Felder oder sonstigen Text aus.";
+
+std::string token_piece(const llama_vocab * vocab, llama_token token);
+
+struct LocalChatTemplate {
+    std::string source;
+    jinja::program program;
+    std::string bos_token;
+    std::string eos_token;
+
+    LocalChatTemplate(
+        std::string source_value,
+        std::string bos_token_value,
+        std::string eos_token_value)
+        : source(std::move(source_value)),
+          program(jinja::parse_from_tokens(jinja::lexer().tokenize(source))),
+          bos_token(std::move(bos_token_value)),
+          eos_token(std::move(eos_token_value)) {}
+};
 
 struct LocalEngine {
     llama_model * model = nullptr;
+    std::unique_ptr<LocalChatTemplate> chat_template;
     int context_size = 4096;
     int thread_count = 4;
     llama_context * correction_context = nullptr;
     int correction_base_tokens = 0;
     std::string correction_common_prompt;
     std::string correction_base_rendered;
+};
+
+struct RenderedChat {
+    std::string prompt;
+    bool thinking_disabled = true;
+};
+
+struct SampleResult {
+    std::string text;
+    int generated_tokens = 0;
+    long time_to_first_token_ms = 0;
+    long answer_generation_ms = 0;
+    std::string finish_reason = "token_limit";
 };
 
 void log_error(const std::string & message) {
@@ -66,32 +110,64 @@ jstring to_java(JNIEnv * env, const std::string & value) {
     }
 }
 
-std::string render_chat(
-    llama_model * model,
-    const std::vector<llama_chat_message> & messages,
-    bool add_assistant) {
-    const char * chat_template = llama_model_chat_template(model, nullptr);
-    const int32_t required = llama_chat_apply_template(
-        chat_template,
-        messages.data(),
-        messages.size(),
-        add_assistant,
-        nullptr,
-        0);
-    if (required <= 0) return {};
-    std::vector<char> buffer(static_cast<size_t>(required) + 1U);
-    const int32_t written = llama_chat_apply_template(
-        chat_template,
-        messages.data(),
-        messages.size(),
-        add_assistant,
-        buffer.data(),
-        static_cast<int32_t>(buffer.size()));
-    if (written <= 0) return {};
-    return std::string(buffer.data(), static_cast<size_t>(written));
+long elapsed_ms(SteadyClock::time_point start, SteadyClock::time_point end) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 }
 
-std::string format_free_prompt(llama_model * model, const std::string & marked_prompt) {
+jobjectArray to_java_generation_result(
+    JNIEnv * env,
+    const std::vector<std::string> & values) {
+    jclass string_class = env->FindClass("java/lang/String");
+    if (!string_class) return nullptr;
+    jobjectArray result = env->NewObjectArray(
+        static_cast<jsize>(values.size()),
+        string_class,
+        nullptr);
+    env->DeleteLocalRef(string_class);
+    if (!result) return nullptr;
+    for (size_t index = 0; index < values.size(); ++index) {
+        jstring value = to_java(env, values[index]);
+        if (!value) return nullptr;
+        env->SetObjectArrayElement(result, static_cast<jsize>(index), value);
+        env->DeleteLocalRef(value);
+    }
+    return result;
+}
+
+RenderedChat render_chat(
+    LocalEngine * engine,
+    const std::vector<std::pair<std::string, std::string>> & messages,
+    bool add_assistant) {
+    if (!engine || !engine->chat_template) return {};
+    nlohmann::ordered_json message_values = nlohmann::ordered_json::array();
+    for (const auto & message : messages) {
+        message_values.push_back({
+            {"role", message.first},
+            {"content", message.second},
+        });
+    }
+    nlohmann::ordered_json inputs = {
+        {"messages", message_values},
+        {"bos_token", engine->chat_template->bos_token},
+        {"eos_token", engine->chat_template->eos_token},
+        {"enable_thinking", false},
+    };
+    if (add_assistant) inputs["add_generation_prompt"] = true;
+
+    try {
+        jinja::context context(engine->chat_template->source);
+        jinja::global_from_json(context, inputs, false);
+        jinja::runtime runtime(context);
+        const jinja::value result = runtime.execute(engine->chat_template->program);
+        const auto parts = jinja::runtime::gather_string_parts(result);
+        return { parts->as_string().str(), true };
+    } catch (const std::exception & exception) {
+        log_error(std::string("Chat template rendering failed: ") + exception.what());
+        return {};
+    }
+}
+
+RenderedChat format_free_prompt(LocalEngine * engine, const std::string & marked_prompt) {
     const bool marked = marked_prompt.rfind(FREE_TEST_MARKER, 0) == 0;
     const std::string user_prompt = marked
         ? marked_prompt.substr(std::string(FREE_TEST_MARKER).size())
@@ -100,37 +176,37 @@ std::string format_free_prompt(llama_model * model, const std::string & marked_p
         "Du bist ein vollständig lokaler KI-Assistent. Bearbeite die Benutzeranfrage "
         "direkt. Antworte in der Sprache der Anfrage. Es gibt für diesen freien "
         "KI-Test keine besondere Transkript-Korrekturstruktur.";
-    const std::vector<llama_chat_message> messages = {
-        {"system", system_prompt.c_str()},
-        {"user", user_prompt.c_str()},
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", system_prompt},
+        {"user", user_prompt},
     };
-    std::string rendered = render_chat(model, messages, true);
-    if (!rendered.empty()) return rendered;
-    return system_prompt + "\n\n" + user_prompt + "\n\nAntwort:\n";
+    RenderedChat rendered = render_chat(engine, messages, true);
+    if (!rendered.prompt.empty()) return rendered;
+    return { system_prompt + "\n\n" + user_prompt + "\n\nAntwort:\n", false };
 }
 
-std::string format_correction_base(llama_model * model, const std::string & common_prompt) {
+std::string format_correction_base(LocalEngine * engine, const std::string & common_prompt) {
     const std::string acknowledgement = "Gesprächskontext gelesen.";
-    const std::vector<llama_chat_message> messages = {
-        {"system", CORRECTION_SYSTEM_PROMPT.c_str()},
-        {"user", common_prompt.c_str()},
-        {"assistant", acknowledgement.c_str()},
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", CORRECTION_SYSTEM_PROMPT},
+        {"user", common_prompt},
+        {"assistant", acknowledgement},
     };
-    return render_chat(model, messages, false);
+    return render_chat(engine, messages, false).prompt;
 }
 
 std::string format_correction_with_target(
-    llama_model * model,
+    LocalEngine * engine,
     const std::string & common_prompt,
     const std::string & target_prompt) {
     const std::string acknowledgement = "Gesprächskontext gelesen.";
-    const std::vector<llama_chat_message> messages = {
-        {"system", CORRECTION_SYSTEM_PROMPT.c_str()},
-        {"user", common_prompt.c_str()},
-        {"assistant", acknowledgement.c_str()},
-        {"user", target_prompt.c_str()},
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", CORRECTION_SYSTEM_PROMPT},
+        {"user", common_prompt},
+        {"assistant", acknowledgement},
+        {"user", target_prompt},
     };
-    return render_chat(model, messages, true);
+    return render_chat(engine, messages, true).prompt;
 }
 
 std::vector<llama_token> tokenize(
@@ -211,11 +287,41 @@ bool decode_tokens(llama_context * context, std::vector<llama_token> & tokens) {
     return true;
 }
 
-std::string sample_response(
+bool has_complete_json_object(const std::string & value) {
+    bool in_string = false;
+    bool escaped = false;
+    bool started = false;
+    int depth = 0;
+    for (char character : value) {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (character == '\\') {
+                escaped = true;
+            } else if (character == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (character == '"') {
+            in_string = true;
+        } else if (character == '{') {
+            started = true;
+            ++depth;
+        } else if (character == '}' && started) {
+            --depth;
+            if (depth == 0) return true;
+        }
+    }
+    return false;
+}
+
+SampleResult sample_response(
     llama_context * context,
     const llama_vocab * vocab,
     int output_limit,
-    const char * grammar) {
+    const char * grammar,
+    SteadyClock::time_point request_started) {
     llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
     sampler_params.no_perf = true;
     std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
@@ -233,17 +339,39 @@ std::string sample_response(
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(grammar ? 0.0f : 0.20f));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(0x51A17U));
 
-    std::string output;
-    output.reserve(static_cast<size_t>(output_limit) * 4U);
+    SampleResult result;
+    result.text.reserve(static_cast<size_t>(output_limit) * 4U);
+    SteadyClock::time_point first_token_at;
     for (int generated = 0; generated < output_limit; ++generated) {
         const llama_token token = llama_sampler_sample(sampler.get(), context, -1);
-        if (llama_vocab_is_eog(vocab, token)) break;
-        output += token_piece(vocab, token);
+        if (llama_vocab_is_eog(vocab, token)) {
+            result.finish_reason = "eog";
+            break;
+        }
+        const SteadyClock::time_point token_at = SteadyClock::now();
+        if (result.generated_tokens == 0) {
+            first_token_at = token_at;
+            result.time_to_first_token_ms = elapsed_ms(request_started, token_at);
+        }
+        result.text += token_piece(vocab, token);
+        ++result.generated_tokens;
         llama_token mutable_token = token;
         llama_batch batch = llama_batch_get_one(&mutable_token, 1);
-        if (llama_decode(context, batch) != 0) return {};
+        if (llama_decode(context, batch) != 0) {
+            result.text.clear();
+            result.finish_reason = "decode_error";
+            return result;
+        }
+        if (grammar && has_complete_json_object(result.text)) {
+            result.finish_reason = "structured_result";
+            break;
+        }
     }
-    return output;
+    const SteadyClock::time_point finished_at = SteadyClock::now();
+    if (result.generated_tokens > 0) {
+        result.answer_generation_ms = elapsed_ms(first_token_at, finished_at);
+    }
+    return result;
 }
 
 void clear_correction_session(LocalEngine * engine) {
@@ -282,10 +410,29 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     engine->model = model;
     engine->context_size = std::max(2048, static_cast<int>(context_size));
     engine->thread_count = std::clamp(static_cast<int>(thread_count), 2, 8);
+    try {
+        const char * source = llama_model_chat_template(model, nullptr);
+        if (!source || source[0] == '\0') {
+            throw std::runtime_error("Das GGUF-Modell enthält keine Chatvorlage.");
+        }
+        const llama_vocab * vocab = llama_model_get_vocab(model);
+        const llama_token bos = llama_vocab_bos(vocab);
+        const llama_token eos = llama_vocab_eos(vocab);
+        engine->chat_template = std::make_unique<LocalChatTemplate>(
+            source,
+            bos == LLAMA_TOKEN_NULL ? std::string() : token_piece(vocab, bos),
+            eos == LLAMA_TOKEN_NULL ? std::string() : token_piece(vocab, eos));
+    } catch (const std::exception & exception) {
+        log_error(std::string("Chat template initialization failed: ") + exception.what());
+        llama_model_free(model);
+        delete engine;
+        llama_backend_free();
+        return 0;
+    }
     return reinterpret_cast<jlong>(engine);
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" JNIEXPORT jobjectArray JNICALL
 Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     JNIEnv * env,
     jobject,
@@ -295,8 +442,10 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine || !engine->model) return nullptr;
 
+    const SteadyClock::time_point request_started = SteadyClock::now();
     const std::string user_prompt = from_java(env, prompt_value);
-    const std::string prompt = format_free_prompt(engine->model, user_prompt);
+    const RenderedChat rendered = format_free_prompt(engine, user_prompt);
+    const std::string & prompt = rendered.prompt;
     const llama_vocab * vocab = llama_model_get_vocab(engine->model);
     std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt, true);
     if (prompt_tokens.empty()) return nullptr;
@@ -314,8 +463,26 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         create_context(engine), llama_free);
     if (!context || !decode_tokens(context.get(), prompt_tokens)) return nullptr;
 
-    const std::string output = sample_response(context.get(), vocab, output_limit, nullptr);
-    return output.empty() ? nullptr : to_java(env, output);
+    const SteadyClock::time_point prompt_processed_at = SteadyClock::now();
+    const SampleResult output = sample_response(
+        context.get(),
+        vocab,
+        output_limit,
+        nullptr,
+        request_started);
+    const SteadyClock::time_point finished_at = SteadyClock::now();
+    if (output.text.empty()) return nullptr;
+    return to_java_generation_result(env, {
+        output.text,
+        std::to_string(prompt_tokens.size()),
+        std::to_string(output.generated_tokens),
+        std::to_string(elapsed_ms(request_started, prompt_processed_at)),
+        std::to_string(output.time_to_first_token_ms),
+        std::to_string(output.answer_generation_ms),
+        std::to_string(elapsed_ms(request_started, finished_at)),
+        output.finish_reason,
+        rendered.thinking_disabled ? "true" : "false",
+    });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -331,7 +498,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_prepareCorrectionContext(
     engine->correction_common_prompt = from_java(env, common_prompt_value);
     if (engine->correction_common_prompt.empty()) return JNI_FALSE;
     engine->correction_base_rendered = format_correction_base(
-        engine->model,
+        engine,
         engine->correction_common_prompt);
     if (engine->correction_base_rendered.empty()) {
         clear_correction_session(engine);
@@ -380,7 +547,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
 
     const std::string target_prompt = from_java(env, target_prompt_value);
     const std::string full_prompt = format_correction_with_target(
-        engine->model,
+        engine,
         engine->correction_common_prompt,
         target_prompt);
     if (full_prompt.rfind(engine->correction_base_rendered, 0) != 0) {
@@ -403,12 +570,13 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
         remaining_context);
     if (!decode_tokens(engine->correction_context, target_tokens)) return nullptr;
 
-    const std::string output = sample_response(
+    const SampleResult output = sample_response(
         engine->correction_context,
         vocab,
         output_limit,
-        CORRECTION_GRAMMAR);
-    return output.empty() ? nullptr : to_java(env, output);
+        CORRECTION_GRAMMAR,
+        SteadyClock::now());
+    return output.text.empty() ? nullptr : to_java(env, output.text);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -419,6 +587,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_release(
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine) return;
     clear_correction_session(engine);
+    engine->chat_template.reset();
     if (engine->model) llama_model_free(engine->model);
     delete engine;
     llama_backend_free();
