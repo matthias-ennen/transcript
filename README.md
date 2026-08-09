@@ -3,7 +3,8 @@
 Eine lokale Android-App, die Audio- und Videodateien über ihre Audiospur mit
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) transkribiert.
 Die Mediendatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
-Transkriptionsdienst benötigt.
+Transkriptionsdienst benötigt. Optional kann ein ebenfalls lokales Qwen3.5-Modell
+die erkannten Texte mit `llama.cpp` nachbearbeiten.
 
 Innerhalb der App lautet der Produktname **Simple Transcript**. Unter dem
 App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
@@ -32,6 +33,9 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
 - Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
 - lokale Modellverwaltung mit fünf Qualitätsstufen
+- optionale lokale KI-Nachbearbeitung mit drei auswählbaren Qwen3.5-Größen
+- automatische KI-Korrektur nach dem Entladen von Whisper
+- gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
@@ -88,13 +92,22 @@ gehalten. Nach spätestens 60 Sekunden wird nur diese optionale Vorschau
 
 ## Transkript korrigieren
 
-Nach einer Transkription schaltet **Bearbeiten** alle erkannten Textabschnitte
-gemeinsam in den Korrekturmodus. Die zugehörigen Zeitstempel bleiben sichtbar
-und unveränderbar. **Abbrechen** verwirft den Entwurf; **Änderungen übernehmen**
+Nach einer Transkription stehen unter jeder Fünf-Minuten-Gruppe links
+**KI-Nachbearbeitung** und rechts **Bearbeiten**. **Bearbeiten** öffnet die Gruppe
+direkt zur manuellen Korrektur. **KI-Nachbearbeitung** öffnet denselben Entwurf,
+überarbeitet aber zunächst nur diese Gruppe mit dem in den Einstellungen gewählten
+lokalen Modell. Danach lässt sich der Vorschlag weiter manuell ändern. Die
+Zeitstempel bleiben sichtbar und unveränderbar. **Abbrechen** verwirft den Entwurf;
+**Änderungen übernehmen**
 aktualisiert das Ergebnis, das anschließend einheitlich für TXT, SRT und JSON
 verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
 Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
 App, wenn dadurch ein geänderter Entwurf verloren ginge.
+
+Für jede KI-Gruppe werden Nachbarsegmente davor und danach als reiner Kontext
+mitgegeben. Der Korrekturauftrag verbietet Umformulierungen und lässt Namen,
+Gesang, Dialekt, Fülllaute, Gebrabbel und andere unsichere Stellen unverändert.
+Nur Antworten mit vollständig erhaltenen Segmentmarken werden akzeptiert.
 
 ## Status und Diagnose während der Transkription
 
@@ -153,7 +166,7 @@ bekannten Songtexts gehören nicht zum aktuellen Funktionsumfang.
 
 ## APK bauen
 
-Das Repository bindet `whisper.cpp` als Git-Submodul ein. Beim lokalen Klonen
+Das Repository bindet `whisper.cpp` und `llama.cpp` als Git-Submodule ein. Beim lokalen Klonen
 daher die Submodule mit abrufen:
 
 ```bash

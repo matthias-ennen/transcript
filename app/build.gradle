@@ -24,6 +24,12 @@ android {
         vectorDrawables {
             useSupportLibrary true
         }
+        ndk {
+            // Lokale LLMs benötigen einen 64-Bit-Prozess und mehrere GB
+            // adressierbaren Speicher. Das Zielgerät und aktuelle Android-Geräte
+            // verwenden arm64; x86_64 bleibt für Emulator-Tests verfügbar.
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
 
     }
 
@@ -72,6 +78,7 @@ android {
 
 dependencies {
     implementation project(':lib')
+    implementation project(':llm')
     implementation 'androidx.activity:activity-compose:1.7.2'
     implementation 'androidx.core:core-ktx:1.10.1'
     implementation 'androidx.compose.material:material-icons-core:1.5.0'

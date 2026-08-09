@@ -3,15 +3,18 @@
 ## Zielbild
 
 Simple Transcript ist eine lokale Android-App. Audio- und Videodateien werden
-auf dem Gerät dekodiert und mit `whisper.cpp` transkribiert. Nur der optionale
-Download eines Whisper-Modells benötigt eine Internetverbindung.
+auf dem Gerät dekodiert und mit `whisper.cpp` transkribiert. Optional glättet
+Qwen3.5 das Ergebnis lokal über `llama.cpp`. Nur Modelldownloads benötigen eine
+Internetverbindung.
 
 ## Module
 
 - `app`: Oberfläche, Medienauswahl, Aufnahme, Wiedergabe, Modelldownload,
   Statussteuerung und Export
 - `lib`: Kotlin-/JNI-Brücke zu `whisper.cpp` und nativer CMake-Build
+- `llm`: kleine Kotlin-/JNI-Brücke zu `llama.cpp` für lokale GGUF-Inferenz
 - `third_party/whisper.cpp`: als Git-Submodul eingebundene Inferenzbibliothek
+- `third_party/llama.cpp`: fest gepinnte lokale LLM-Inferenzbibliothek
 
 ## Datenfluss
 
@@ -45,13 +48,17 @@ Download eines Whisper-Modells benötigt eine Internetverbindung.
 10. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
    **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
    Reihenfolge bleiben erhalten.
-11. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
-12. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
+11. `AiPostProcessingService` lädt nach vollständiger Freigabe des Whisper-
+    Kontexts genau ein ausgewähltes Qwen3.5-GGUF. Stabile Segmentmarker sichern
+    Anzahl, Reihenfolge und Zeitstempel. Automatische Läufe übernehmen validierte
+    Gruppen direkt; manuelle Läufe schreiben nur in `draftSegments`.
+12. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
+13. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
     Cache-Unterordner. Ein nicht exportierter `FileProvider` gibt ausschließlich
     diese Dateien mit zeitlich begrenztem Leserecht an das Android-Teilen-Menü
     weiter. Ein Format verwendet `ACTION_SEND`, mehrere Formate verwenden
     `ACTION_SEND_MULTIPLE`.
-13. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
+14. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
     schwebende Navigationskapsel ein. Sie verwendet denselben Scrollzustand wie
     die gesamte Hauptansicht und führt deshalb bis an den Anfang der App zurück.
 
@@ -108,6 +115,18 @@ Fehlerbehandlung. Downloads können über `.part`-Dateien fortgesetzt werden und
 werden vor der Aktivierung per SHA-256 geprüft. Modelle werden nicht in die APK
 aufgenommen. Ein bewusster Transkriptionsabbruch entfernt den Zwischenstand;
 eine Prozessunterbrechung lässt ihn für die Wiederaufnahme bestehen.
+
+Der getrennte `AiModel`-Katalog enthält Qwen3.5 mit 0,8B, 2B und 4B Parametern.
+Auswahl, Download, SHA-256-Prüfung und Löschen liegen ausschließlich in den
+Einstellungen. `AiPostProcessingService` speichert seinen Gruppenfortschritt
+atomar und verwendet nie gleichzeitig Speicher mit einem aktiven Whisper-Kontext.
+Whisper- und KI-Modelldateien sind von Cloud-Backup und Gerätetransfer ausgeschlossen.
+
+Jeder KI-Auftrag enthält die vollständige aktive Fünf-Minuten-Gruppe sowie bis zu
+acht Nachbarsegmente davor und danach als schreibgeschützten Kontext. Der Parser
+akzeptiert ausschließlich dieselben Zielmarker in derselben Reihenfolge und genau
+eine Textzeile pro Marker. Unsichere Ausgaben oder ausgegebene Kontextzeilen werden
+vollständig verworfen; Zeitstempel werden der KI nie zur Mutation überlassen.
 
 ## Build und Veröffentlichung
 

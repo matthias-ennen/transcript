@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.exportTranscript
+import de.matthiasennen.transcript.ai.AiModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -96,11 +97,14 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         uri?.let(viewModel::selectAudio)
     }
     var pendingModelDownload by remember { mutableStateOf<WhisperModel?>(null) }
+    var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
         pendingModelDownload?.let(viewModel::downloadModel)
+        pendingAiModelDownload?.let(viewModel::downloadAiModel)
         pendingModelDownload = null
+        pendingAiModelDownload = null
     }
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -129,6 +133,24 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 state = state,
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
+                onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
+                onAiAutomaticChanged = viewModel::setAutomaticAiPostProcessingEnabled,
+                onSelectAiModel = viewModel::selectAiModel,
+                onDownloadAiModel = { model ->
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingAiModelDownload = model
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.downloadAiModel(model)
+                    }
+                },
+                onDeleteAiModel = viewModel::deleteAiModel,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.ABOUT -> AboutScreen(
@@ -137,6 +159,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             AppPage.MAIN -> MainContent(
                 viewModel = viewModel,
                 state = state,
+                openSettings = { page = AppPage.SETTINGS },
                 innerPadding = innerPadding,
                 audioPicker = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
                 requestModelDownload = {
@@ -287,6 +310,7 @@ private val AppPage.title: String
 private fun MainContent(
     viewModel: MainScreenViewModel,
     state: TranscriptUiState,
+    openSettings: () -> Unit,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     audioPicker: () -> Unit,
     requestModelDownload: () -> Unit,
@@ -301,6 +325,7 @@ private fun MainContent(
         }
         var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
         var showTranscriptShareDialog by remember { mutableStateOf(false) }
+        var showMissingAiModelDialog by remember { mutableStateOf(false) }
         val scrollState = rememberScrollState()
         val scrollScope = rememberCoroutineScope()
         val density = LocalDensity.current
@@ -340,6 +365,30 @@ private fun MainContent(
             TranscriptShareDialog(
                 onDismiss = { showTranscriptShareDialog = false },
                 onShare = { formats -> shareTranscript(context, state, formats) }
+            )
+        }
+
+        if (showMissingAiModelDialog) {
+            AlertDialog(
+                onDismissRequest = { showMissingAiModelDialog = false },
+                title = { Text("KI-Modell fehlt") },
+                text = {
+                    Text(
+                        "Für die lokale KI-Nachbearbeitung muss zuerst in den Einstellungen " +
+                            "ein KI-Modell heruntergeladen und ausgewählt werden."
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showMissingAiModelDialog = false
+                        openSettings()
+                    }) { Text("Zu den Einstellungen") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showMissingAiModelDialog = false }) {
+                        Text("Abbrechen")
+                    }
+                }
             )
         }
 
@@ -532,6 +581,13 @@ private fun MainContent(
                                 state.segments
                             },
                             onTextChanged = viewModel::updateTranscriptText,
+                            onAiEditGroup = { groupStartMs ->
+                                if (state.selectedAiModelInstalled) {
+                                    viewModel.startAiTranscriptEditing(groupStartMs)
+                                } else {
+                                    showMissingAiModelDialog = true
+                                }
+                            },
                             onEditGroup = viewModel::startTranscriptEditing,
                             onCancelEditing = viewModel::cancelTranscriptEditing,
                             onApplyEdits = viewModel::applyTranscriptEdits
