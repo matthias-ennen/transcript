@@ -4,6 +4,7 @@ import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ai.IndexedTranscriptSegment
 import de.matthiasennen.transcript.ai.applyCorrections
 import de.matthiasennen.transcript.ai.buildCorrectionPrompt
+import de.matthiasennen.transcript.ai.maximumCorrectionTokens
 import de.matthiasennen.transcript.ai.parseCorrectedSegments
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -69,5 +70,17 @@ class AiTranscriptCorrectionTest {
         assertEquals(1_000L, updated[1].startMs)
         assertEquals(2_000L, updated[1].endMs)
         assertEquals("Mir geht es sehr gut.", updated[1].text)
+    }
+
+    @Test
+    fun outputBudgetIncludesSegmentMarkerOverhead() {
+        val manyShortSegments = List(100) { index ->
+            IndexedTranscriptSegment(
+                index,
+                WhisperSegment(index * 1_000L, (index + 1) * 1_000L, "kurzer Text")
+            )
+        }
+
+        assertTrue(maximumCorrectionTokens(manyShortSegments) >= 1_300)
     }
 }

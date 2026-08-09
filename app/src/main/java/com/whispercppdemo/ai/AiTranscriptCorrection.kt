@@ -97,7 +97,8 @@ internal fun applyCorrections(
 
 internal fun maximumCorrectionTokens(segments: List<IndexedTranscriptSegment>): Int {
     val estimatedInputTokens = segments.sumOf { (it.segment.text.length / 3).coerceAtLeast(1) }
-    return (estimatedInputTokens + 192).coerceIn(256, 2_048)
+    val markerAndFormattingTokens = segments.size * 8
+    return (estimatedInputTokens + markerAndFormattingTokens + 256).coerceIn(256, 3_072)
 }
 
 internal fun segmentMarker(index: Int): String = "[[SEGMENT_${(index + 1).toString().padStart(4, '0')}]]"
