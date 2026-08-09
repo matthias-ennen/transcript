@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 14468)
+Total output lines: 1353
+
 package de.matthiasennen.transcript.ui.main
 
 import android.app.Application
@@ -13,6 +16,16 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.ai.AiModel
+import de.matthiasennen.transcript.ai.AiModelDownloadCoordinator
+import de.matthiasennen.transcript.ai.AiModelDownloadService
+import de.matthiasennen.transcript.ai.AiModelDownloadState
+import de.matthiasennen.transcript.ai.AiModelInstallation
+import de.matthiasennen.transcript.ai.AiPostProcessingCoordinator
+import de.matthiasennen.transcript.ai.AiPostProcessingMode
+import de.matthiasennen.transcript.ai.AiPostProcessingService
+import de.matthiasennen.transcript.ai.AiPostProcessingState
+import de.matthiasennen.transcript.ai.AiPreferences
 import de.matthiasennen.transcript.download.ModelDownloadCoordinator
 import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
@@ -62,6 +75,14 @@ data class TranscriptUiState(
     val downloadingModel: WhisperModel? = null,
     val downloadedBytes: Long = 0L,
     val downloadTotalBytes: Long = 0L,
+    val selectedAiModel: AiModel = AiModel.BALANCED,
+    val aiModelInstallations: List<AiModelInstallation> = emptyList(),
+    val aiPostProcessingEnabled: Boolean = false,
+    val automaticAiPostProcessingEnabled: Boolean = false,
+    val downloadingAiModel: AiModel? = null,
+    val aiDownloadedBytes: Long = 0L,
+    val aiDownloadTotalBytes: Long = 0L,
+    val isAiPostProcessing: Boolean = false,
     val isBusy: Boolean = false,
     val isTranscribing: Boolean = false,
     val isCancellationRequested: Boolean = false,
@@ -90,6 +111,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         private set
 
     private val modelsDirectory = File(application.filesDir, "models")
+    private val aiModelsDirectory = File(application.filesDir, "ai-models")
+    private val aiPreferences = AiPreferences(application)
     private val waveformCache = WaveformCache(File(application.filesDir, "waveforms"))
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val audioRecorder = AudioRecorder(application)
@@ -136,13 +159,27 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     init {
         modelsDirectory.mkdirs()
+        aiModelsDirectory.mkdirs()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
         refreshModelInstallations(selectedModel)
+        val aiSettings = aiPreferences.load()
+        uiState = uiState.copy(
+            selectedAiModel = aiSettings.selectedModel,
+            aiPostProcessingEnabled = aiSettings.enabled,
+            automaticAiPostProcessingEnabled = aiSettings.automatic
+        )
+        refreshAiModelInstallations(aiSettings.selectedModel)
         viewModelScope.launch {
             ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
         }
         viewModelScope.launch {
+            AiModelDownloadCoordinator.state.collect(::handleAiModelDownloadState)
+        }
+        viewModelScope.launch {
             TranscriptionCoordinator.state.collect(::handleTranscriptionState)
+        }
+        viewModelScope.launch {
+            AiPostProcessingCoordinator.state.collect(::handleAiPostProcessingState)
         }
     }
 
@@ -438,330 +475,151 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (uiState.isBusy || uiState.segments.isEmpty()) return
         if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
         uiState = uiState.copy(
-            isEditingTranscript = true,
-            editingTranscriptGroupStartMs = groupStartMs,
-            draftSegments = uiState.segments
-        )
-    }
-
-    fun updateTranscriptText(index: Int, text: String) {
-        if (!uiState.isEditingTranscript) return
-        val groupStartMs = uiState.editingTranscriptGroupStartMs ?: return
-        val segment = uiState.segments.getOrNull(index) ?: return
-        if (transcriptGroupStartMs(segment.startMs) != groupStartMs) return
-        uiState = uiState.copy(
-            draftSegments = uiState.draftSegments.withUpdatedTranscriptText(index, text)
-        )
-    }
-
-    fun cancelTranscriptEditing() {
-        if (!uiState.isEditingTranscript) return
-        uiState = uiState.copy(
-            isEditingTranscript = false,
-            editingTranscriptGroupStartMs = null,
-            draftSegments = emptyList()
-        )
-    }
-
-    fun applyTranscriptEdits() {
-        val groupStartMs = uiState.editingTranscriptGroupStartMs
-        if (
-            !uiState.isEditingTranscript ||
-            groupStartMs == null ||
-            uiState.draftSegments.size != uiState.segments.size
-        ) {
-            return
-        }
-        uiState = uiState.copy(
-            segments = applyTranscriptGroupEdits(
-                original = uiState.segments,
-                draft = uiState.draftSegments,
-                groupStartMs = groupStartMs
-            ),
-            isEditingTranscript = false,
-            editingTranscriptGroupStartMs = null,
-            draftSegments = emptyList(),
-            status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert.",
-            cannaBotMode = CannaBotMode.IDLE
-        )
-        cue(CannaBotCue.WAVING)
-    }
-
-    fun downloadModel(model: WhisperModel = uiState.selectedModel) {
-        if (uiState.isBusy) return
-        preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
-        uiState = uiState.copy(
-            isBusy = true,
-            progress = 0f,
-            downloadingModel = model,
-            downloadedBytes = 0L,
-            downloadTotalBytes = 0L,
-            error = null,
-            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …",
-            cannaBotMode = CannaBotMode.RUNNING
-        )
-        lastDownloadAnimationBucket = -1
-        cue(CannaBotCue.RUNNING_RIGHT)
-        ModelDownloadService.start(application, model)
-    }
-
-    fun deleteModel(model: WhisperModel = uiState.selectedModel) {
-        if (uiState.isBusy) return
-        viewModelScope.launch {
-            uiState = uiState.copy(
-                isBusy = true,
-                progress = null,
-                error = null,
-                status = "${model.modelLabel} wird gelöscht …",
-                cannaBotMode = CannaBotMode.WAITING
-            )
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val file = modelFile(model)
-                    check(!file.exists() || file.delete()) {
-                        "Das Modell konnte nicht gelöscht werden."
-                    }
-                    val partial = partialModelFile(model)
-                    check(!partial.exists() || partial.delete()) {
-                        "Der unvollständige Download konnte nicht gelöscht werden."
-                    }
-                }
-            }.onSuccess {
-                refreshModelInstallations(uiState.selectedModel)
-                uiState = uiState.copy(
-                    isBusy = false,
-                    status = "${model.modelLabel} wurde gelöscht.",
-                    cannaBotMode = CannaBotMode.IDLE
-                )
-            }.onFailure { throwable -> fail(throwable) }
-        }
-    }
-
-    fun deleteAllModels() {
-        if (uiState.isBusy) return
-        viewModelScope.launch {
-            uiState = uiState.copy(
-                isBusy = true,
-                progress = null,
-                error = null,
-                status = "Alle Whisper-Modelle werden gelöscht …",
-                cannaBotMode = CannaBotMode.WAITING
-            )
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    WhisperModel.entries.forEach { model ->
-                        val file = modelFile(model)
-                        check(!file.exists() || file.delete()) {
-                            "${model.modelLabel} konnte nicht gelöscht werden."
-                        }
-                        val partial = partialModelFile(model)
-                        check(!partial.exists() || partial.delete()) {
-                            "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
-                        }
-                    }
-                }
-            }.onSuccess {
-                refreshModelInstallations(uiState.selectedModel)
-                uiState = uiState.copy(
-                    isBusy = false,
-                    status = "Alle Whisper-Modelle wurden gelöscht.",
-                    cannaBotMode = CannaBotMode.IDLE
-                )
-            }.onFailure { throwable -> fail(throwable) }
-        }
-    }
-
-    fun transcribe() {
-        val uri = uiState.selectedAudio ?: return
-        if (!uiState.modelReady || uiState.isBusy) return
-        stopPlayback(release = false)
-        uiState = uiState.withRecalculatedTranscriptionEstimate()
-        uiState = uiState.copy(
-            isBusy = true,
-            isTranscribing = true,
-            isCancellationRequested = false,
-            progress = 0f,
-            elapsedSeconds = 0L,
-            runtimeEstimateAnnouncementId = 0L,
-            isEditingTranscript = false,
-            editingTranscriptGroupStartMs = null,
-            draftSegments = emptyList(),
-            error = null,
-            activityDetail = null,
-            status = "Transkription wird im Hintergrund vorbereitet …",
-            cannaBotMode = CannaBotMode.RUNNING
-        )
-        ensureTranscriptionElapsedTimer(System.currentTimeMillis())
-        cue(CannaBotCue.RUNNING_RIGHT)
-        TranscriptionService.start(
-            context = application,
-            uri = uri,
-            fileName = uiState.selectedFileName ?: displayName(uri),
-            model = uiState.selectedModel,
-            language = uiState.language
-        )
-    }
-
-    fun cancelTranscription() {
-        if (!uiState.isTranscribing || uiState.isCancellationRequested) return
-        uiState = uiState.copy(
-            isCancellationRequested = true,
-            progress = null,
-            status = "Transkription wird abgebrochen …",
-            activityDetail = "Das Abbruchsignal wurde an die laufende Verarbeitung gesendet.",
-            cannaBotMode = CannaBotMode.WAITING
-        )
-        TranscriptionService.cancel(application)
-    }
-
-    private fun startPlaybackTimer() {
-        playbackTimer?.cancel()
-        playbackTimer = viewModelScope.launch {
-            while (uiState.isPlaying) {
-                uiState = uiState.copy(
-                    playbackPositionMs = audioPlayer.positionMs(),
-                    audioDurationMs = audioPlayer.durationMs().takeIf { it > 0L }
-                        ?: uiState.audioDurationMs
-                )
-                delay(100L)
-            }
-        }
-    }
-
-    private fun stopPlaybackTimer() {
-        playbackTimer?.cancel()
-        playbackTimer = null
-    }
-
-    private fun ensureTranscriptionElapsedTimer(startedAtEpochMs: Long) {
-        val safeStartedAtEpochMs = startedAtEpochMs.takeIf { it > 0L }
-            ?: (System.currentTimeMillis() - uiState.elapsedSeconds * 1_000L)
-        if (
-            transcriptionElapsedTimer?.isActive == true &&
-            transcriptionStartedAtEpochMs == safeStartedAtEpochMs
-        ) {
-            return
-        }
-
-        transcriptionElapsedTimer?.cancel()
-        transcriptionStartedAtEpochMs = safeStartedAtEpochMs
-        transcriptionElapsedTimer = viewModelScope.launch {
-            while (isActive && uiState.isTranscribing) {
-                val elapsed = elapsedSecondsSince(
-                    startedAtEpochMs = transcriptionStartedAtEpochMs,
-                    nowEpochMs = System.currentTimeMillis()
-                )
-                if (uiState.elapsedSeconds != elapsed) {
-                    uiState = uiState.copy(elapsedSeconds = elapsed)
-                }
-                delay(1_000L)
-            }
-        }
-    }
-
-    private fun stopTranscriptionElapsedTimer() {
-        transcriptionElapsedTimer?.cancel()
-        transcriptionElapsedTimer = null
-        transcriptionStartedAtEpochMs = 0L
-    }
-
-    private fun stopPlayback(release: Boolean) {
-        stopPlaybackTimer()
-        audioPlayer.pause()
-        if (release) audioPlayer.release()
-        uiState = uiState.copy(isPlaying = false)
-    }
-
-    private fun handleModelDownloadState(downloadState: ModelDownloadState) {
-        when (downloadState) {
-            ModelDownloadState.Idle -> Unit
-            is ModelDownloadState.Running -> {
-                val total = downloadState.totalBytes
-                uiState = uiState.copy(
-                    isBusy = true,
-                    downloadingModel = downloadState.model,
-                    downloadedBytes = downloadState.downloadedBytes,
-                    downloadTotalBytes = total,
+…4468 tokens truncated…        aiDownloadedBytes = downloadState.downloadedBytes,
+                    aiDownloadTotalBytes = total,
                     progress = if (total > 0L) {
                         (downloadState.downloadedBytes.toFloat() / total).coerceIn(0f, 1f)
                     } else null,
                     error = null,
                     status = if (downloadState.resumed) {
-                        "${downloadState.model.modelLabel}: Download wird im Hintergrund fortgesetzt …"
+                        "${downloadState.model.modelLabel}: Download wird fortgesetzt …"
                     } else {
-                        "${downloadState.model.modelLabel} wird im Hintergrund heruntergeladen …"
+                        "${downloadState.model.modelLabel} wird heruntergeladen …"
                     },
+                    activityDetail = "Lokales KI-Modell · ${formatDownloadSize(downloadState.downloadedBytes)}",
                     cannaBotMode = CannaBotMode.RUNNING
                 )
-                if (total > 0L) {
-                    val animationBucket =
-                        ((downloadState.downloadedBytes * 4L) / total).toInt().coerceIn(0, 4)
-                    if (animationBucket > lastDownloadAnimationBucket) {
-                        lastDownloadAnimationBucket = animationBucket
-                        if (animationBucket > 0) {
-                            cue(
-                                if (animationBucket % 2 == 0) CannaBotCue.RUNNING_RIGHT
-                                else CannaBotCue.RUNNING_LEFT
-                            )
-                        }
-                    }
-                }
             }
-            is ModelDownloadState.Verifying -> {
+            is AiModelDownloadState.Verifying -> {
                 uiState = uiState.copy(
                     isBusy = true,
-                    downloadingModel = downloadState.model,
-                    downloadedBytes = downloadState.downloadedBytes,
-                    downloadTotalBytes = downloadState.downloadedBytes,
+                    downloadingAiModel = downloadState.model,
+                    aiDownloadedBytes = downloadState.downloadedBytes,
+                    aiDownloadTotalBytes = downloadState.downloadedBytes,
                     progress = null,
-                    status = "Download vollständig · Prüfsumme wird kontrolliert …",
+                    status = "KI-Modell wird auf Vollständigkeit geprüft …",
+                    activityDetail = "SHA-256-Prüfsumme wird kontrolliert.",
                     cannaBotMode = CannaBotMode.WAITING
                 )
             }
-            is ModelDownloadState.Completed -> {
-                preferences.edit().putString(SELECTED_MODEL_KEY, downloadState.model.id).apply()
-                refreshModelInstallations(downloadState.model)
+            is AiModelDownloadState.Completed -> {
+                aiPreferences.setSelectedModel(downloadState.model)
+                refreshAiModelInstallations(downloadState.model)
                 uiState = uiState.copy(
                     isBusy = false,
                     progress = null,
-                    downloadingModel = null,
+                    downloadingAiModel = null,
                     error = null,
-                    status = "${downloadState.model.modelLabel} ist installiert und aktiv.",
-                    runtimeEstimateAnnouncementId = if (
-                        uiState.selectedAudio != null && uiState.audioDurationMs > 0L
-                    ) {
-                        uiState.runtimeEstimateAnnouncementId + 1L
-                    } else {
-                        uiState.runtimeEstimateAnnouncementId
-                    },
-                    cannaBotMode = if (
-                        uiState.selectedAudio != null && uiState.audioDurationMs > 0L
-                    ) {
-                        if (uiState.isWaveformLoading) CannaBotMode.WAITING else CannaBotMode.REVIEW
-                    } else {
-                        CannaBotMode.IDLE
-                    }
+                    status = "${downloadState.model.modelLabel} ist installiert und ausgewählt.",
+                    activityDetail = null,
+                    cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.SUCCESS)
-                ModelDownloadCoordinator.reset()
+                AiModelDownloadCoordinator.reset()
             }
-            is ModelDownloadState.Failed -> {
+            is AiModelDownloadState.Failed -> {
+                refreshAiModelInstallations(uiState.selectedAiModel)
                 uiState = uiState.copy(
                     isBusy = false,
                     progress = null,
-                    downloadingModel = null,
-                    downloadedBytes = downloadState.downloadedBytes,
-                    downloadTotalBytes = downloadState.totalBytes,
+                    downloadingAiModel = null,
+                    aiDownloadedBytes = downloadState.downloadedBytes,
+                    aiDownloadTotalBytes = downloadState.totalBytes,
                     error = downloadState.message,
                     status = if (downloadState.downloadedBytes > 0L) {
-                        "Download unterbrochen. Beim nächsten Start wird er fortgesetzt."
+                        "KI-Download unterbrochen. Er wird beim nächsten Versuch fortgesetzt."
                     } else {
-                        "Modelldownload fehlgeschlagen."
+                        "KI-Modelldownload fehlgeschlagen."
                     },
+                    activityDetail = null,
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.FAILED)
-                ModelDownloadCoordinator.reset()
+                AiModelDownloadCoordinator.reset()
+            }
+        }
+    }
+
+    private fun handleAiPostProcessingState(state: AiPostProcessingState) {
+        when (state) {
+            AiPostProcessingState.Idle -> Unit
+            is AiPostProcessingState.Starting -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiPostProcessing = true,
+                    progress = null,
+                    error = null,
+                    status = "Texte werden mit KI überarbeitet …",
+                    activityDetail = "${state.model.modelLabel} wird lokal geladen.",
+                    cannaBotMode = CannaBotMode.REVIEW
+                )
+            }
+            is AiPostProcessingState.Running -> {
+                val nextSegments = if (state.mode == AiPostProcessingMode.AUTOMATIC) {
+                    state.correctedSegments
+                } else {
+                    uiState.segments
+                }
+                val nextDraft = if (state.mode == AiPostProcessingMode.MANUAL_GROUP) {
+                    state.correctedSegments
+                } else {
+                    uiState.draftSegments
+                }
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiPostProcessing = true,
+                    progress = state.progress,
+                    status = state.status,
+                    activityDetail = state.activityDetail,
+                    diagnostics = state.diagnostics.takeLast(12),
+                    segments = nextSegments,
+                    draftSegments = nextDraft,
+                    error = null,
+                    cannaBotMode = CannaBotMode.REVIEW
+                )
+            }
+            is AiPostProcessingState.Completed -> {
+                val manual = state.mode == AiPostProcessingMode.MANUAL_GROUP
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiPostProcessing = false,
+                    progress = null,
+                    activityDetail = null,
+                    segments = if (manual) uiState.segments else state.segments,
+                    draftSegments = if (manual) state.segments else emptyList(),
+                    isEditingTranscript = manual,
+                    editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
+                    diagnostics = (state.diagnostics +
+                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen ${if (manual) "im Entwurf" else "übernommen"}.${if (state.rejectedCorrections > 0) " ${state.rejectedCorrections} ungültige Einträge verworfen." else ""}").takeLast(12),
+                    error = null,
+                    status = if (manual) {
+                        "KI-Prüfung abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen im Entwurf."
+                    } else {
+                        "KI-Prüfung abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen übernommen."
+                    },
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.SUCCESS)
+                AiPostProcessingCoordinator.reset()
+            }
+            is AiPostProcessingState.Failed -> {
+                val manual = state.mode == AiPostProcessingMode.MANUAL_GROUP
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiPostProcessing = false,
+                    progress = null,
+                    activityDetail = null,
+                    segments = state.originalSegments,
+                    draftSegments = if (manual) state.originalSegments else emptyList(),
+                    isEditingTranscript = manual,
+                    editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
+                    diagnostics = state.diagnostics.takeLast(12),
+                    error = state.message,
+                    status = "KI-Nachbearbeitung fehlgeschlagen. Der ursprüngliche Text bleibt erhalten.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+                AiPostProcessingCoordinator.reset()
             }
         }
     }
@@ -814,8 +672,16 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is TranscriptionState.Completed -> {
                 stopTranscriptionElapsedTimer()
+                val canRunAutomaticAi = state.segments.isNotEmpty() &&
+                    uiState.aiPostProcessingEnabled &&
+                    uiState.automaticAiPostProcessingEnabled &&
+                    uiState.selectedAiModelInstalled
+                val automaticAiMissingModel = state.segments.isNotEmpty() &&
+                    uiState.aiPostProcessingEnabled &&
+                    uiState.automaticAiPostProcessingEnabled &&
+                    !uiState.selectedAiModelInstalled
                 uiState = uiState.copy(
-                    isBusy = false,
+                    isBusy = canRunAutomaticAi,
                     isTranscribing = false,
                     isCancellationRequested = false,
                     progress = null,
@@ -828,14 +694,41 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     completedModel = state.model,
                     transcriptionDurationSeconds = state.transcriptionDurationSeconds,
                     error = null,
-                    status = if (state.segments.isEmpty()) {
+                    status = if (canRunAutomaticAi) {
+                        "Transkription fertig. Texte werden jetzt mit KI überarbeitet …"
+                    } else if (state.segments.isEmpty()) {
                         "Es wurde kein Text erkannt."
+                    } else if (automaticAiMissingModel) {
+                        "Transkription fertig. KI-Nachbearbeitung übersprungen: Modell fehlt."
                     } else {
                         "Fertig: ${state.segments.size} Textabschnitte erkannt."
                     },
-                    cannaBotMode = CannaBotMode.IDLE
+                    cannaBotMode = if (canRunAutomaticAi) CannaBotMode.REVIEW else CannaBotMode.IDLE
                 )
-                cue(CannaBotCue.SUCCESS)
+                if (canRunAutomaticAi) {
+                    uiState = uiState.copy(
+                        isAiPostProcessing = true,
+                        activityDetail = "Whisper wurde entladen. Das KI-Modell wird vorbereitet.",
+                        diagnostics = (uiState.diagnostics +
+                            "Whisper-Speicher freigegeben; automatische KI-Nachbearbeitung gestartet.")
+                            .takeLast(12)
+                    )
+                    AiPostProcessingService.startAutomatic(
+                        context = application,
+                        model = uiState.selectedAiModel,
+                        fileName = uiState.selectedFileName ?: "Transkript",
+                        segments = state.segments
+                    )
+                } else {
+                    if (automaticAiMissingModel) {
+                        uiState = uiState.copy(
+                            diagnostics = (uiState.diagnostics +
+                                "Automatische KI-Nachbearbeitung übersprungen: ausgewähltes Modell ist nicht installiert.")
+                                .takeLast(12)
+                        )
+                    }
+                    cue(CannaBotCue.SUCCESS)
+                }
             }
             is TranscriptionState.Cancelled -> {
                 stopTranscriptionElapsedTimer()
@@ -886,6 +779,27 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     private fun partialModelFile(model: WhisperModel): File =
         File(modelsDirectory, "${model.fileName}.part")
+
+    private fun aiModelFile(model: AiModel): File = File(aiModelsDirectory, model.fileName)
+
+    private fun partialAiModelFile(model: AiModel): File =
+        File(aiModelsDirectory, "${model.fileName}.part")
+
+    private fun refreshAiModelInstallations(selectedModel: AiModel) {
+        val installations = AiModel.entries.map { model ->
+            val file = aiModelFile(model)
+            AiModelInstallation(
+                model = model,
+                isInstalled = file.isFile && file.length() >= model.minimumBytes,
+                installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
+                partialBytes = partialAiModelFile(model).takeIf(File::isFile)?.length() ?: 0L
+            )
+        }
+        uiState = uiState.copy(
+            selectedAiModel = selectedModel,
+            aiModelInstallations = installations
+        )
+    }
 
     private fun refreshModelInstallations(selectedModel: WhisperModel) {
         val installations = WhisperModel.entries.map { model ->
@@ -960,6 +874,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isCancellationRequested = false,
             progress = null,
             downloadingModel = null,
+            downloadingAiModel = null,
+            isAiPostProcessing = false,
             activityDetail = null,
             error = throwable.localizedMessage ?: throwable.javaClass.simpleName,
             status = "Vorgang fehlgeschlagen.",

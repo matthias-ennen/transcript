@@ -50,6 +50,20 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".ai.AiModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".ai.AiPostProcessingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Lokale Offline-Nachbearbeitung erkannter Transkripttexte" />
+        </service>
+
+        <service
             android:name=".transcription.TranscriptionService"
             android:exported="false"
             android:foregroundServiceType="specialUse">

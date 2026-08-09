@@ -42,6 +42,7 @@ internal fun TranscriptList(
     state: TranscriptUiState,
     segments: List<WhisperSegment>,
     onTextChanged: (Int, String) -> Unit,
+    onAiEditGroup: (Long) -> Unit,
     onEditGroup: (Long) -> Unit,
     onCancelEditing: () -> Unit,
     onApplyEdits: () -> Unit,
@@ -132,6 +133,7 @@ internal fun TranscriptList(
                             number = indexedSegment.originalIndex + 1,
                             segment = indexedSegment.segment,
                             isEditing = isEditingGroup,
+                            editingEnabled = !state.isAiPostProcessing,
                             onTextChanged = {
                                 onTextChanged(indexedSegment.originalIndex, it)
                             }
@@ -140,6 +142,7 @@ internal fun TranscriptList(
                     TranscriptGroupEditorActions(
                         state = state,
                         groupStartMs = group.startMs,
+                        onAiEdit = { onAiEditGroup(group.startMs) },
                         onEdit = { onEditGroup(group.startMs) },
                         onCancel = onCancelEditing,
                         onApply = onApplyEdits
@@ -155,6 +158,7 @@ private fun TranscriptSegmentCard(
     number: Int,
     segment: WhisperSegment,
     isEditing: Boolean,
+    editingEnabled: Boolean,
     onTextChanged: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -168,6 +172,7 @@ private fun TranscriptSegmentCard(
                 TranscriptSegmentBody(
                     segment = segment,
                     isEditing = true,
+                    editingEnabled = editingEnabled,
                     onTextChanged = onTextChanged
                 )
             } else {
@@ -201,6 +206,7 @@ private fun TranscriptSegmentCard(
 private fun TranscriptSegmentBody(
     segment: WhisperSegment,
     isEditing: Boolean = false,
+    editingEnabled: Boolean = true,
     onTextChanged: (String) -> Unit = {}
 ) {
     Column(modifier = Modifier.padding(12.dp)) {
@@ -213,6 +219,7 @@ private fun TranscriptSegmentBody(
             OutlinedTextField(
                 value = segment.text,
                 onValueChange = onTextChanged,
+                enabled = editingEnabled,
                 label = { Text("Text") },
                 minLines = 2,
                 modifier = Modifier.fillMaxWidth()
@@ -227,18 +234,43 @@ private fun TranscriptSegmentBody(
 private fun TranscriptGroupEditorActions(
     state: TranscriptUiState,
     groupStartMs: Long,
+    onAiEdit: () -> Unit,
     onEdit: () -> Unit,
     onCancel: () -> Unit,
     onApply: () -> Unit
 ) {
     val isEditingGroup = state.editingTranscriptGroupStartMs == groupStartMs
     if (!isEditingGroup) {
-        OutlinedButton(
-            onClick = onEdit,
-            enabled = !state.isBusy && !state.isEditingTranscript,
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
         ) {
-            Text("Bearbeiten")
+            OutlinedButton(
+                onClick = onAiEdit,
+                enabled = !state.isBusy && !state.isEditingTranscript && state.completedModel != null && state.selectedAiModelInstalled,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "KI-Nachbearbeitung",
+                    maxLines = 1,
+                    softWrap = false,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            OutlinedButton(
+                onClick = onEdit,
+                enabled = !state.isBusy && !state.isEditingTranscript,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                Text("Bearbeiten")
+            }
         }
         return
     }
@@ -255,6 +287,7 @@ private fun TranscriptGroupEditorActions(
     ) {
         OutlinedButton(
             onClick = onCancel,
+            enabled = !state.isAiPostProcessing,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
@@ -269,7 +302,7 @@ private fun TranscriptGroupEditorActions(
         }
         Button(
             onClick = onApply,
-            enabled = state.hasUnsavedChangesInGroup(groupStartMs),
+            enabled = !state.isAiPostProcessing && state.hasUnsavedChangesInGroup(groupStartMs),
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
