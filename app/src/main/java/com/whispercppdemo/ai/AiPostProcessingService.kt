@@ -105,11 +105,14 @@ class AiPostProcessingService : Service() {
                 "${model.modelLabel} ist nicht vollständig installiert."
             }
             val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(model, modelFile)
+            val conversationContinued = AiEngineSessionManager.hasTestConversation(model, modelFile)
             addDiagnostic(
-                if (modelAlreadyLoaded) {
-                    "KI-Test: ${model.modelLabel} ist bereits im Arbeitsspeicher."
+                if (conversationContinued) {
+                    "KI-Unterhaltung wird mit vorhandenem Gesprächskontext fortgeführt."
+                } else if (modelAlreadyLoaded) {
+                    "KI-Test: ${model.modelLabel} ist im Arbeitsspeicher; eine neue Unterhaltung beginnt."
                 } else {
-                    "KI-Test: ${model.modelLabel} wird lokal geladen."
+                    "KI-Test: ${model.modelLabel} wird lokal geladen; eine neue Unterhaltung beginnt."
                 }
             )
             AiPostProcessingCoordinator.update(
@@ -155,6 +158,7 @@ class AiPostProcessingService : Service() {
             )
             val metrics = AiSelfTestMetrics(
                 modelAlreadyLoaded = sessionResult.info.modelAlreadyLoaded,
+                conversationContinued = conversationContinued,
                 modelLoadMs = sessionResult.info.modelLoadMs,
                 promptTokens = generation.metrics.promptTokens,
                 generatedTokens = generation.metrics.generatedTokens,

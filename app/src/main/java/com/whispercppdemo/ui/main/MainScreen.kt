@@ -160,6 +160,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 state = state,
                 onPromptChange = viewModel::updateAiTestPrompt,
                 onStart = viewModel::startAiSelfTest,
+                onResetConversation = viewModel::resetAiTestConversation,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.MAIN -> MainContent(

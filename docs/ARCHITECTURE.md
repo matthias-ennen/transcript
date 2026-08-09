@@ -145,10 +145,20 @@ Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
 
 `AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
 Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
-Korrekturläufe verwenden dieselbe Modellabbildung. Jeder freie Test erzeugt dabei
-einen neuen nativen Kontext, sodass vorherige Testfragen die nächste Antwort nicht
-beeinflussen. Ein Modellwechsel oder das Löschen des geladenen Modells schließt die
-Session, bevor die neue Auswahl verwendet wird.
+Korrekturläufe verwenden dieselbe Modellabbildung. Die KI-Diagnose hält zusätzlich
+einen nativen `llama_context` samt KV-Cache und nicht sichtbaren Chatnachrichten im
+Arbeitsspeicher. Neue Fragen werden über die eingebettete Chatvorlage nur als Delta
+an diesen Kontext angehängt; dadurch kann die Antwort vorherige Aussagen derselben
+Unterhaltung berücksichtigen. Es wird kein Verlauf persistiert. Ein Modellwechsel,
+das Löschen des geladenen Modells, **Unterhaltung zurücksetzen** oder das Ende des
+App-Prozesses schließt die flüchtige Gesprächssitzung.
+
+Reicht das feste Kontextfenster nicht für eine weitere Anfrage, bleibt die bisherige
+Unterhaltung unverändert und die Oberfläche fordert zu einem bewussten Zurücksetzen
+auf. Ein unbemerkter automatischer Kontextverlust findet nicht statt. Die
+automatisierte Transkriptkorrektur behält vorerst ihren getrennten Gruppenpfad; die
+spätere abschnittsweise Unterhaltung ist in
+`docs/_work/ai-diagnostics-conversation-plan.md` festgehalten.
 
 Die JNI-Schicht rendert die im GGUF eingebettete Qwen-Chatvorlage über die offizielle
 `llama.cpp`-Jinja-Anbindung mit `enable_thinking=false`. `/no_think` wird nicht in

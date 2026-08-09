@@ -124,10 +124,16 @@ Der KI-Testbereich enthält statt einer fest eingebauten Testfrage ein mehrzeili
 Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an das ausgewählte
 Qwen-Modell senden; die vollständige Antwort kann anschließend ein- und
 ausgeblendet werden. Beim ersten Auftrag wird das ausgewählte Modell geladen und
-bleibt anschließend im Arbeitsspeicher. Weitere Testaufträge verwenden dasselbe
-Modell ohne erneute Ladezeit, erhalten aber jeweils einen frischen
-Gesprächskontext. Erst ein Modellwechsel, das Löschen des Modells oder das Beenden
-des App-Prozesses gibt den Modellspeicher wieder frei.
+bleibt anschließend im Arbeitsspeicher. Weitere Anfragen verwenden dasselbe Modell
+und führen außerdem dieselbe flüchtige Unterhaltung samt nativem KV-Cache fort.
+Dadurch kann die KI auf vorherige Aussagen Bezug nehmen, ohne dass die App einen
+Chatverlauf anzeigt oder dauerhaft speichert. **Unterhaltung zurücksetzen** beginnt
+bewusst einen neuen Kontext. Auch ein Modellwechsel, das Löschen des Modells oder
+das Beenden des App-Prozesses beendet die Unterhaltung.
+
+Ist das Kontextfenster gefüllt, fordert die App zum Zurücksetzen auf, anstatt die
+Unterhaltung unbemerkt zu vergessen. Die Messwerte zeigen zusätzlich, ob eine neue
+Unterhaltung begonnen oder ein vorhandener Kontext fortgeführt wurde.
 
 Die Qwen-Chatvorlage wird für freie Tests und Transkriptkorrekturen technisch mit
 `enable_thinking=false` angewendet. Die Korrektur verwendet zusätzlich eine native

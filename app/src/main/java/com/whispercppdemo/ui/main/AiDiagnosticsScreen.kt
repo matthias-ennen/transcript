@@ -35,6 +35,7 @@ fun AiDiagnosticsScreen(
     state: TranscriptUiState,
     onPromptChange: (String) -> Unit,
     onStart: () -> Unit,
+    onResetConversation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -48,7 +49,8 @@ fun AiDiagnosticsScreen(
         AiSelfTestCard(
             state = state,
             onPromptChange = onPromptChange,
-            onStart = onStart
+            onStart = onStart,
+            onResetConversation = onResetConversation
         )
         if (state.diagnostics.isNotEmpty()) {
             DiagnosticsLogCard(state.diagnostics)
@@ -164,7 +166,8 @@ internal fun LiveStatusLine(state: TranscriptUiState) {
 private fun AiSelfTestCard(
     state: TranscriptUiState,
     onPromptChange: (String) -> Unit,
-    onStart: () -> Unit
+    onStart: () -> Unit,
+    onResetConversation: () -> Unit
 ) {
     var responseExpanded by remember { mutableStateOf(false) }
     val modelInstalled = state.selectedAiModelInstalled
@@ -175,7 +178,7 @@ private fun AiSelfTestCard(
         ) {
             Text("KI-Testbereich", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Hier kannst du dem ausgewählten lokalen KI-Modell eine eigene Frage oder Aufgabe geben.",
+                "Hier kannst du eine flüchtige Unterhaltung mit dem ausgewählten lokalen KI-Modell führen. Es wird kein Chatverlauf gespeichert.",
                 style = MaterialTheme.typography.bodySmall
             )
             OutlinedTextField(
@@ -194,6 +197,13 @@ private fun AiSelfTestCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (state.isAiSelfTest) "Anfrage läuft …" else "Anfrage an KI senden")
+            }
+            OutlinedButton(
+                onClick = onResetConversation,
+                enabled = !state.isBusy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Unterhaltung zurücksetzen")
             }
             if (!modelInstalled) {
                 Text(
@@ -219,6 +229,13 @@ private fun AiSelfTestCard(
                                 }
                             )
                             append("\nModellladezeit: ${metrics.modelLoadMs} ms")
+                            append(
+                                if (metrics.conversationContinued) {
+                                    "\nUnterhaltung: vorhandenen Kontext fortgeführt"
+                                } else {
+                                    "\nUnterhaltung: neu begonnen"
+                                }
+                            )
                             append("\nPromptverarbeitung: ${metrics.promptProcessingMs} ms")
                             append("\nZeit bis zum ersten Token: ${metrics.timeToFirstTokenMs} ms")
                             append("\nAntworterzeugung: ${metrics.answerGenerationMs} ms")
