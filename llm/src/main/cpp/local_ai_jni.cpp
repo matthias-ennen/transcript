@@ -45,8 +45,13 @@ jstring to_java(JNIEnv * env, const std::string & value) {
 }
 
 std::string format_prompt(llama_model * model, const std::string & user_prompt) {
-    const std::string system_prompt =
-        "Du korrigierst deutsche oder englische Spracherkennungs-Transkripte. "
+    const bool is_self_test = user_prompt.rfind("[[SELF_TEST]]", 0) == 0;
+    const std::string effective_user_prompt = is_self_test
+        ? user_prompt.substr(std::string("[[SELF_TEST]]").size())
+        : user_prompt;
+    const std::string system_prompt = is_self_test
+        ? "Du bist ein lokaler KI-Assistent. Antworte direkt, kurz und auf Deutsch. Befolge nur die Benutzerfrage."
+        : "Du korrigierst deutsche oder englische Spracherkennungs-Transkripte. "
         "Korrigiere ausschließlich Rechtschreibung, Zeichensetzung, Groß- und "
         "Kleinschreibung sowie eindeutig falsch erkannte Wörter. Erfinde keine "
         "Informationen, formuliere nicht um, fasse nichts zusammen und ändere keine "
@@ -61,13 +66,13 @@ std::string format_prompt(llama_model * model, const std::string & user_prompt) 
 
     llama_chat_message messages[2] = {
         {"system", system_prompt.c_str()},
-        {"user", user_prompt.c_str()},
+        {"user", effective_user_prompt.c_str()},
     };
     const char * chat_template = llama_model_chat_template(model, nullptr);
     int32_t required = llama_chat_apply_template(
         chat_template, messages, 2, true, nullptr, 0);
     if (required <= 0) {
-        return system_prompt + "\n\n" + user_prompt + "\n\nKorrigierte Segmente:\n";
+        return system_prompt + "\n\n" + effective_user_prompt + "\n\nAntwort:\n";
     }
     std::vector<char> buffer(static_cast<size_t>(required) + 1U);
     const int32_t written = llama_chat_apply_template(
