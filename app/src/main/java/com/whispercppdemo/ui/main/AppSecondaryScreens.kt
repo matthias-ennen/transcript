@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript.ui.main
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.BuildConfig
@@ -59,7 +61,12 @@ fun SettingsScreen(
                 Text("Hier kannst du installierte Modelle und unvollständige Downloads entfernen, um Speicherplatz freizugeben.", style = MaterialTheme.typography.bodyMedium)
                 Text("Belegter Speicher: ${formatDownloadSize(totalBytes)}", style = MaterialTheme.typography.titleMedium)
                 state.modelInstallations.forEach { installation ->
-                    ModelStorageCard(installation, !state.isBusy && !state.isRecording, onDelete = { modelToDelete = installation.model })
+                    ModelStorageCard(
+                        installation = installation,
+                        selected = installation.model == state.selectedModel,
+                        enabled = !state.isBusy && !state.isRecording,
+                        onDelete = { modelToDelete = installation.model }
+                    )
                 }
                 OutlinedButton(onClick = { confirmDeleteAll = true }, enabled = totalBytes > 0L && !state.isBusy && !state.isRecording, modifier = Modifier.fillMaxWidth()) { Text("Alle Modelle löschen") }
             }
@@ -207,7 +214,10 @@ private fun AiModelStorageCard(
     onDelete: () -> Unit
 ) {
     val model = installation.model
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = if (selected) BorderStroke(2.dp, Color.White) else null
+    ) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -271,10 +281,14 @@ private fun AiModelStorageCard(
 @Composable
 private fun ModelStorageCard(
     installation: ModelInstallation,
+    selected: Boolean,
     enabled: Boolean,
     onDelete: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = if (selected) BorderStroke(2.dp, Color.White) else null
+    ) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
