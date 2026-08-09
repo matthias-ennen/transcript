@@ -145,13 +145,16 @@ Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
 
 `AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
 Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
-Korrekturläufe verwenden dieselbe Modellabbildung. Die KI-Diagnose hält zusätzlich
-einen nativen `llama_context` samt KV-Cache und nicht sichtbaren Chatnachrichten im
-Arbeitsspeicher. Neue Fragen werden über die eingebettete Chatvorlage nur als Delta
-an diesen Kontext angehängt; dadurch kann die Antwort vorherige Aussagen derselben
-Unterhaltung berücksichtigen. Es wird kein Verlauf persistiert. Ein Modellwechsel,
-das Löschen des geladenen Modells, **Unterhaltung zurücksetzen** oder das Ende des
-App-Prozesses schließt die flüchtige Gesprächssitzung.
+Korrekturläufe verwenden dieselbe Modellabbildung. Die KI-Diagnose hält die nicht
+sichtbaren Chatnachrichten ausschließlich im Arbeitsspeicher. Für jede neue Frage
+rendert die eingebettete Chatvorlage die vollständige Unterhaltung und die native
+Schicht baut daraus einen frischen `llama_context` auf. Nach der Antwort wird dieser
+Rechenkontext freigegeben; Modell und Nachrichten bleiben erhalten. Dadurch kann
+die Antwort frühere Aussagen berücksichtigen, ohne einen KV-Cache samt
+Tokenpositionen über mehrere Aufrufe synchronisieren zu müssen. Es wird kein
+Verlauf persistiert. Ein Modellwechsel, das Löschen des geladenen Modells,
+**Unterhaltung zurücksetzen** oder das Ende des App-Prozesses schließt die flüchtige
+Gesprächssitzung.
 
 Reicht das feste Kontextfenster nicht für eine weitere Anfrage, bleibt die bisherige
 Unterhaltung unverändert und die Oberfläche fordert zu einem bewussten Zurücksetzen

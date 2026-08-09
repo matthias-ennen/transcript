@@ -125,11 +125,13 @@ Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an das ausgew�
 Qwen-Modell senden; die vollständige Antwort kann anschließend ein- und
 ausgeblendet werden. Beim ersten Auftrag wird das ausgewählte Modell geladen und
 bleibt anschließend im Arbeitsspeicher. Weitere Anfragen verwenden dasselbe Modell
-und führen außerdem dieselbe flüchtige Unterhaltung samt nativem KV-Cache fort.
-Dadurch kann die KI auf vorherige Aussagen Bezug nehmen, ohne dass die App einen
-Chatverlauf anzeigt oder dauerhaft speichert. **Unterhaltung zurücksetzen** beginnt
-bewusst einen neuen Kontext. Auch ein Modellwechsel, das Löschen des Modells oder
-das Beenden des App-Prozesses beendet die Unterhaltung.
+und führen außerdem dieselbe flüchtige Unterhaltung fort. Die unsichtbaren
+Nachrichten bleiben im Arbeitsspeicher; für jeden neuen Chat-Turn wird daraus ein
+frischer nativer Rechenkontext aufgebaut. Dadurch kann die KI auf vorherige
+Aussagen Bezug nehmen, ohne dass die App einen Chatverlauf anzeigt oder dauerhaft
+speichert. **Unterhaltung zurücksetzen** beginnt bewusst einen neuen Kontext. Auch
+ein Modellwechsel, das Löschen des Modells oder das Beenden des App-Prozesses
+beendet die Unterhaltung.
 
 Ist das Kontextfenster gefüllt, fordert die App zum Zurücksetzen auf, anstatt die
 Unterhaltung unbemerkt zu vergessen. Die Messwerte zeigen zusätzlich, ob eine neue

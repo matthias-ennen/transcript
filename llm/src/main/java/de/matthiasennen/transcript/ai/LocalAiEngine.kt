@@ -20,9 +20,10 @@ data class LocalAiGenerationResult(
 
 /**
  * Small lifecycle wrapper around llama.cpp. The model is mapped once. Free test
- * prompts share one in-memory conversation until it is explicitly reset;
- * transcript correction keeps one group context cached and resets to that exact
- * base before every target segment.
+ * prompts share one in-memory message conversation until it is explicitly reset;
+ * every chat turn receives a fresh native compute context. Transcript correction
+ * keeps one group context cached and resets to that exact base before every target
+ * segment.
  */
 class LocalAiEngine(
     modelPath: String,
