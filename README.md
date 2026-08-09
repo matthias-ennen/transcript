@@ -1,4 +1,4 @@
-# Simple Transcript für Android
+# Transcript für Android
 
 Eine lokale Android-App, die Audio- und Videodateien über ihre Audiospur mit
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) transkribiert.
@@ -6,9 +6,8 @@ Die Mediendatei bleibt auf dem Gerät; es wird kein kostenpflichtiger
 Transkriptionsdienst benötigt. Optional kann ein ebenfalls lokales Qwen3.5-Modell
 die erkannten Texte mit `llama.cpp` nachbearbeiten.
 
-Innerhalb der App lautet der Produktname **Simple Transcript**. Unter dem
-App-Symbol auf dem Android-Startbildschirm wird bewusst nur der kurze Name
-**Transcript** angezeigt.
+Innerhalb der App und unter dem App-Symbol auf dem Android-Startbildschirm lautet
+der Produktname **Transcript**.
 
 ## Aktueller Entwicklungsstand
 
