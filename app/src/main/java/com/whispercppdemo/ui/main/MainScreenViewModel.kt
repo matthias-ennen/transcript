@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 14468)
-Total output lines: 1353
-
 package de.matthiasennen.transcript.ui.main
 
 import android.app.Application
@@ -475,7 +472,443 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (uiState.isBusy || uiState.segments.isEmpty()) return
         if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
         uiState = uiState.copy(
-…4468 tokens truncated…        aiDownloadedBytes = downloadState.downloadedBytes,
+            isEditingTranscript = true,
+            editingTranscriptGroupStartMs = groupStartMs,
+            draftSegments = uiState.segments
+        )
+    }
+
+    fun startAiTranscriptEditing(groupStartMs: Long) {
+        if (uiState.isBusy || uiState.completedModel == null || uiState.segments.isEmpty() || !uiState.selectedAiModelInstalled) return
+        if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
+        uiState = uiState.copy(
+            isEditingTranscript = true,
+            editingTranscriptGroupStartMs = groupStartMs,
+            draftSegments = uiState.segments,
+            isBusy = true,
+            isAiPostProcessing = true,
+            progress = null,
+            error = null,
+            status = "Texte werden mit KI überarbeitet …",
+            activityDetail = "Die ausgewählte Gruppe wird lokal geprüft.",
+            diagnostics = (uiState.diagnostics +
+                "Manuelle KI-Nachbearbeitung mit ${uiState.selectedAiModel.modelLabel} gestartet.")
+                .takeLast(12),
+            cannaBotMode = CannaBotMode.REVIEW
+        )
+        AiPostProcessingService.startManualGroup(
+            context = application,
+            model = uiState.selectedAiModel,
+            fileName = uiState.selectedFileName ?: "Transkript",
+            groupStartMs = groupStartMs,
+            segments = uiState.segments
+        )
+    }
+
+    fun updateTranscriptText(index: Int, text: String) {
+        if (!uiState.isEditingTranscript || uiState.isAiPostProcessing) return
+        val groupStartMs = uiState.editingTranscriptGroupStartMs ?: return
+        val segment = uiState.segments.getOrNull(index) ?: return
+        if (transcriptGroupStartMs(segment.startMs) != groupStartMs) return
+        uiState = uiState.copy(
+            draftSegments = uiState.draftSegments.withUpdatedTranscriptText(index, text)
+        )
+    }
+
+    fun cancelTranscriptEditing() {
+        if (!uiState.isEditingTranscript || uiState.isAiPostProcessing) return
+        uiState = uiState.copy(
+            isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
+            draftSegments = emptyList()
+        )
+    }
+
+    fun applyTranscriptEdits() {
+        val groupStartMs = uiState.editingTranscriptGroupStartMs
+        if (
+            !uiState.isEditingTranscript || uiState.isAiPostProcessing ||
+            groupStartMs == null ||
+            uiState.draftSegments.size != uiState.segments.size
+        ) {
+            return
+        }
+        uiState = uiState.copy(
+            segments = applyTranscriptGroupEdits(
+                original = uiState.segments,
+                draft = uiState.draftSegments,
+                groupStartMs = groupStartMs
+            ),
+            isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
+            draftSegments = emptyList(),
+            status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+        cue(CannaBotCue.WAVING)
+    }
+
+    fun setAiPostProcessingEnabled(enabled: Boolean) {
+        if (uiState.isBusy) return
+        aiPreferences.setEnabled(enabled)
+        if (!enabled) aiPreferences.setAutomatic(false)
+        uiState = uiState.copy(
+            aiPostProcessingEnabled = enabled,
+            automaticAiPostProcessingEnabled = enabled && uiState.automaticAiPostProcessingEnabled
+        )
+    }
+
+    fun setAutomaticAiPostProcessingEnabled(enabled: Boolean) {
+        if (uiState.isBusy || !uiState.aiPostProcessingEnabled) return
+        aiPreferences.setAutomatic(enabled)
+        uiState = uiState.copy(automaticAiPostProcessingEnabled = enabled)
+    }
+
+    fun selectAiModel(model: AiModel) {
+        if (uiState.isBusy) return
+        aiPreferences.setSelectedModel(model)
+        refreshAiModelInstallations(model)
+    }
+
+    fun downloadAiModel(model: AiModel = uiState.selectedAiModel) {
+        if (uiState.isBusy) return
+        aiPreferences.setSelectedModel(model)
+        uiState = uiState.copy(
+            selectedAiModel = model,
+            isBusy = true,
+            progress = 0f,
+            downloadingAiModel = model,
+            aiDownloadedBytes = 0L,
+            aiDownloadTotalBytes = 0L,
+            error = null,
+            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …",
+            activityDetail = "KI-Modell wird sicher auf dem Gerät gespeichert.",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        lastDownloadAnimationBucket = -1
+        cue(CannaBotCue.RUNNING_RIGHT)
+        AiModelDownloadService.start(application, model)
+    }
+
+    fun deleteAiModel(model: AiModel) {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "${model.modelLabel} wird gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val file = aiModelFile(model)
+                    check(!file.exists() || file.delete()) { "Das KI-Modell konnte nicht gelöscht werden." }
+                    val partial = partialAiModelFile(model)
+                    check(!partial.exists() || partial.delete()) {
+                        "Der unvollständige KI-Download konnte nicht gelöscht werden."
+                    }
+                }
+            }.onSuccess {
+                refreshAiModelInstallations(uiState.selectedAiModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "${model.modelLabel} wurde gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }.onFailure(::fail)
+        }
+    }
+
+    fun downloadModel(model: WhisperModel = uiState.selectedModel) {
+        if (uiState.isBusy) return
+        preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
+        uiState = uiState.copy(
+            isBusy = true,
+            progress = 0f,
+            downloadingModel = model,
+            downloadedBytes = 0L,
+            downloadTotalBytes = 0L,
+            error = null,
+            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        lastDownloadAnimationBucket = -1
+        cue(CannaBotCue.RUNNING_RIGHT)
+        ModelDownloadService.start(application, model)
+    }
+
+    fun deleteModel(model: WhisperModel = uiState.selectedModel) {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "${model.modelLabel} wird gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val file = modelFile(model)
+                    check(!file.exists() || file.delete()) {
+                        "Das Modell konnte nicht gelöscht werden."
+                    }
+                    val partial = partialModelFile(model)
+                    check(!partial.exists() || partial.delete()) {
+                        "Der unvollständige Download konnte nicht gelöscht werden."
+                    }
+                }
+            }.onSuccess {
+                refreshModelInstallations(uiState.selectedModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "${model.modelLabel} wurde gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }.onFailure { throwable -> fail(throwable) }
+        }
+    }
+
+    fun deleteAllModels() {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "Alle Whisper-Modelle werden gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    WhisperModel.entries.forEach { model ->
+                        val file = modelFile(model)
+                        check(!file.exists() || file.delete()) {
+                            "${model.modelLabel} konnte nicht gelöscht werden."
+                        }
+                        val partial = partialModelFile(model)
+                        check(!partial.exists() || partial.delete()) {
+                            "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
+                        }
+                    }
+                }
+            }.onSuccess {
+                refreshModelInstallations(uiState.selectedModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "Alle Whisper-Modelle wurden gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }.onFailure { throwable -> fail(throwable) }
+        }
+    }
+
+    fun transcribe() {
+        val uri = uiState.selectedAudio ?: return
+        if (!uiState.modelReady || uiState.isBusy) return
+        stopPlayback(release = false)
+        uiState = uiState.withRecalculatedTranscriptionEstimate()
+        uiState = uiState.copy(
+            isBusy = true,
+            isTranscribing = true,
+            isCancellationRequested = false,
+            progress = 0f,
+            elapsedSeconds = 0L,
+            runtimeEstimateAnnouncementId = 0L,
+            isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
+            draftSegments = emptyList(),
+            error = null,
+            activityDetail = null,
+            status = "Transkription wird im Hintergrund vorbereitet …",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        ensureTranscriptionElapsedTimer(System.currentTimeMillis())
+        cue(CannaBotCue.RUNNING_RIGHT)
+        TranscriptionService.start(
+            context = application,
+            uri = uri,
+            fileName = uiState.selectedFileName ?: displayName(uri),
+            model = uiState.selectedModel,
+            language = uiState.language
+        )
+    }
+
+    fun cancelTranscription() {
+        if (!uiState.isTranscribing || uiState.isCancellationRequested) return
+        uiState = uiState.copy(
+            isCancellationRequested = true,
+            progress = null,
+            status = "Transkription wird abgebrochen …",
+            activityDetail = "Das Abbruchsignal wurde an die laufende Verarbeitung gesendet.",
+            cannaBotMode = CannaBotMode.WAITING
+        )
+        TranscriptionService.cancel(application)
+    }
+
+    private fun startPlaybackTimer() {
+        playbackTimer?.cancel()
+        playbackTimer = viewModelScope.launch {
+            while (uiState.isPlaying) {
+                uiState = uiState.copy(
+                    playbackPositionMs = audioPlayer.positionMs(),
+                    audioDurationMs = audioPlayer.durationMs().takeIf { it > 0L }
+                        ?: uiState.audioDurationMs
+                )
+                delay(100L)
+            }
+        }
+    }
+
+    private fun stopPlaybackTimer() {
+        playbackTimer?.cancel()
+        playbackTimer = null
+    }
+
+    private fun ensureTranscriptionElapsedTimer(startedAtEpochMs: Long) {
+        val safeStartedAtEpochMs = startedAtEpochMs.takeIf { it > 0L }
+            ?: (System.currentTimeMillis() - uiState.elapsedSeconds * 1_000L)
+        if (
+            transcriptionElapsedTimer?.isActive == true &&
+            transcriptionStartedAtEpochMs == safeStartedAtEpochMs
+        ) {
+            return
+        }
+
+        transcriptionElapsedTimer?.cancel()
+        transcriptionStartedAtEpochMs = safeStartedAtEpochMs
+        transcriptionElapsedTimer = viewModelScope.launch {
+            while (isActive && uiState.isTranscribing) {
+                val elapsed = elapsedSecondsSince(
+                    startedAtEpochMs = transcriptionStartedAtEpochMs,
+                    nowEpochMs = System.currentTimeMillis()
+                )
+                if (uiState.elapsedSeconds != elapsed) {
+                    uiState = uiState.copy(elapsedSeconds = elapsed)
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun stopTranscriptionElapsedTimer() {
+        transcriptionElapsedTimer?.cancel()
+        transcriptionElapsedTimer = null
+        transcriptionStartedAtEpochMs = 0L
+    }
+
+    private fun stopPlayback(release: Boolean) {
+        stopPlaybackTimer()
+        audioPlayer.pause()
+        if (release) audioPlayer.release()
+        uiState = uiState.copy(isPlaying = false)
+    }
+
+    private fun handleModelDownloadState(downloadState: ModelDownloadState) {
+        when (downloadState) {
+            ModelDownloadState.Idle -> Unit
+            is ModelDownloadState.Running -> {
+                val total = downloadState.totalBytes
+                uiState = uiState.copy(
+                    isBusy = true,
+                    downloadingModel = downloadState.model,
+                    downloadedBytes = downloadState.downloadedBytes,
+                    downloadTotalBytes = total,
+                    progress = if (total > 0L) {
+                        (downloadState.downloadedBytes.toFloat() / total).coerceIn(0f, 1f)
+                    } else null,
+                    error = null,
+                    status = if (downloadState.resumed) {
+                        "${downloadState.model.modelLabel}: Download wird im Hintergrund fortgesetzt …"
+                    } else {
+                        "${downloadState.model.modelLabel} wird im Hintergrund heruntergeladen …"
+                    },
+                    cannaBotMode = CannaBotMode.RUNNING
+                )
+                if (total > 0L) {
+                    val animationBucket =
+                        ((downloadState.downloadedBytes * 4L) / total).toInt().coerceIn(0, 4)
+                    if (animationBucket > lastDownloadAnimationBucket) {
+                        lastDownloadAnimationBucket = animationBucket
+                        if (animationBucket > 0) {
+                            cue(
+                                if (animationBucket % 2 == 0) CannaBotCue.RUNNING_RIGHT
+                                else CannaBotCue.RUNNING_LEFT
+                            )
+                        }
+                    }
+                }
+            }
+            is ModelDownloadState.Verifying -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    downloadingModel = downloadState.model,
+                    downloadedBytes = downloadState.downloadedBytes,
+                    downloadTotalBytes = downloadState.downloadedBytes,
+                    progress = null,
+                    status = "Download vollständig · Prüfsumme wird kontrolliert …",
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            is ModelDownloadState.Completed -> {
+                preferences.edit().putString(SELECTED_MODEL_KEY, downloadState.model.id).apply()
+                refreshModelInstallations(downloadState.model)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    progress = null,
+                    downloadingModel = null,
+                    error = null,
+                    status = "${downloadState.model.modelLabel} ist installiert und aktiv.",
+                    runtimeEstimateAnnouncementId = if (
+                        uiState.selectedAudio != null && uiState.audioDurationMs > 0L
+                    ) {
+                        uiState.runtimeEstimateAnnouncementId + 1L
+                    } else {
+                        uiState.runtimeEstimateAnnouncementId
+                    },
+                    cannaBotMode = if (
+                        uiState.selectedAudio != null && uiState.audioDurationMs > 0L
+                    ) {
+                        if (uiState.isWaveformLoading) CannaBotMode.WAITING else CannaBotMode.REVIEW
+                    } else {
+                        CannaBotMode.IDLE
+                    }
+                )
+                cue(CannaBotCue.SUCCESS)
+                ModelDownloadCoordinator.reset()
+            }
+            is ModelDownloadState.Failed -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    progress = null,
+                    downloadingModel = null,
+                    downloadedBytes = downloadState.downloadedBytes,
+                    downloadTotalBytes = downloadState.totalBytes,
+                    error = downloadState.message,
+                    status = if (downloadState.downloadedBytes > 0L) {
+                        "Download unterbrochen. Beim nächsten Start wird er fortgesetzt."
+                    } else {
+                        "Modelldownload fehlgeschlagen."
+                    },
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+                ModelDownloadCoordinator.reset()
+            }
+        }
+    }
+
+    private fun handleAiModelDownloadState(downloadState: AiModelDownloadState) {
+        when (downloadState) {
+            AiModelDownloadState.Idle -> Unit
+            is AiModelDownloadState.Running -> {
+                val total = downloadState.totalBytes
+                uiState = uiState.copy(
+                    isBusy = true,
+                    selectedAiModel = downloadState.model,
+                    downloadingAiModel = downloadState.model,
+                    aiDownloadedBytes = downloadState.downloadedBytes,
                     aiDownloadTotalBytes = total,
                     progress = if (total > 0L) {
                         (downloadState.downloadedBytes.toFloat() / total).coerceIn(0f, 1f)
