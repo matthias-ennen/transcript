@@ -31,6 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 private const val CHANNEL_ID = "local_ai_postprocessing"
 private const val NOTIFICATION_ID = 2111
 private const val ACTION_START = "de.matthiasennen.transcript.START_AI_POSTPROCESSING"
+private const val ACTION_START_SELF_TEST = "de.matthiasennen.transcript.START_AI_SELF_TEST"
+private const val EXTRA_MODEL_ID = "model_id"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
 private const val TRANSCRIPT_GROUP_DURATION_MS = 5L * 60L * 1_000L
 private const val NEIGHBOR_CONTEXT_SEGMENTS = 8
@@ -50,6 +52,21 @@ class AiPostProcessingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (processingJob?.isActive == true) return START_REDELIVER_INTENT
+        if (intent?.action == ACTION_START_SELF_TEST) {
+            val model = AiModel.fromId(intent.getStringExtra(EXTRA_MODEL_ID))
+            stopRequested.set(false)
+            diagnostics.clear()
+            AiPostProcessingCoordinator.update(AiPostProcessingState.SelfTestStarting(model))
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification("KI-Selbsttest wird vorbereitet …", 0, true)
+            )
+            processingJob = serviceScope.launch {
+                runSelfTest(model)
+                processingJob = null
+            }
+            return START_REDELIVER_INTENT
+        }
         val request = requestStore.read()
         if (request == null) {
             stopSelf(startId)
@@ -76,6 +93,66 @@ class AiPostProcessingService : Service() {
         stopRequested.set(true)
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun runSelfTest(model: AiModel) {
+        val startedAt = SystemClock.elapsedRealtime()
+        try {
+            val modelFile = File(File(filesDir, "ai-models"), model.fileName)
+            check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
+                "${model.modelLabel} ist nicht vollständig installiert."
+            }
+            addDiagnostic("KI-Selbsttest: ${model.modelLabel} wird lokal geladen.")
+            AiPostProcessingCoordinator.update(
+                AiPostProcessingState.SelfTestRunning(
+                    model = model,
+                    status = "KI-Modell wird geladen …",
+                    activityDetail = "${model.modelLabel} wird für den Selbsttest vorbereitet.",
+                    diagnostics = diagnostics.toList()
+                )
+            )
+            LocalAiEngine(modelFile.absolutePath).use { engine ->
+                addDiagnostic("KI-Modell geladen. Selbsttest wird an die KI gesendet.")
+                AiPostProcessingCoordinator.update(
+                    AiPostProcessingState.SelfTestRunning(
+                        model = model,
+                        status = "Selbsttest wird an KI gesendet …",
+                        activityDetail = "Frage: Was ist der Mond?",
+                        diagnostics = diagnostics.toList()
+                    )
+                )
+                val response = engine.generateSelfTest()
+                addDiagnostic("Erstes Antwortzeichen empfangen.")
+                addDiagnostic("Antwort vollständig empfangen: ${response.length} Zeichen.")
+                val durationSeconds = ((SystemClock.elapsedRealtime() - startedAt) / 1_000L)
+                    .coerceAtLeast(0L)
+                AiPostProcessingCoordinator.update(
+                    AiPostProcessingState.SelfTestCompleted(
+                        model = model,
+                        response = response,
+                        durationSeconds = durationSeconds,
+                        diagnostics = diagnostics.toList()
+                    )
+                )
+                finishWithNotification(
+                    "KI-Selbsttest erfolgreich",
+                    "Antwort vollständig empfangen: ${response.length} Zeichen."
+                )
+            }
+        } catch (throwable: Throwable) {
+            if (!stopRequested.get() && throwable !is CancellationException) {
+                val message = throwable.localizedMessage ?: "Der KI-Selbsttest ist fehlgeschlagen."
+                addDiagnostic("KI-Selbsttest-Fehler: $message")
+                AiPostProcessingCoordinator.update(
+                    AiPostProcessingState.SelfTestFailed(
+                        model = model,
+                        message = message,
+                        diagnostics = diagnostics.toList()
+                    )
+                )
+                finishWithNotification("KI-Selbsttest fehlgeschlagen", message)
+            }
+        }
     }
 
     private fun runProcessing(initialRequest: AiPostProcessingRequest) {
@@ -319,6 +396,14 @@ class AiPostProcessingService : Service() {
     }
 
     companion object {
+        fun startSelfTest(context: Context, model: AiModel) {
+            val intent = Intent(context, AiPostProcessingService::class.java).apply {
+                action = ACTION_START_SELF_TEST
+                putExtra(EXTRA_MODEL_ID, model.id)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+
         fun startAutomatic(
             context: Context,
             model: AiModel,
