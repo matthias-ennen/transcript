@@ -31,6 +31,7 @@ private const val ACTION_START = "de.matthiasennen.transcript.START_AI_POSTPROCE
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
 private const val TRANSCRIPT_GROUP_DURATION_MS = 5L * 60L * 1_000L
 private const val NEIGHBOR_CONTEXT_SEGMENTS = 8
+private const val TARGET_SEGMENTS_PER_PACKAGE = 12
 
 class AiPostProcessingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -93,49 +94,34 @@ class AiPostProcessingService : Service() {
                 val groups = targetGroups(initialRequest)
                 check(groups.isNotEmpty()) { "Für die KI-Nachbearbeitung wurde kein Text gefunden." }
 
-                groups.forEachIndexed { groupIndex, indexes ->
+                groups.forEachIndexed { groupIndex, groupIndexes ->
                     if (groupIndex < initialRequest.nextGroupIndex) return@forEachIndexed
                     ensureContinues()
-                    val rangeStartMs = correctedSegments[indexes.first()].startMs
-                    val rangeEndMs = correctedSegments[indexes.last()].endMs
-                    val indexed = indexes.map { index ->
-                        IndexedTranscriptSegment(index, correctedSegments[index])
+                    val label = formatGroupLabel(correctedSegments, groupIndexes)
+                    val packages = groupIndexes.chunked(TARGET_SEGMENTS_PER_PACKAGE)
+                    addDiagnostic("KI prüft Bereich $label in ${packages.size} kleinen Textpaketen.")
+                    packages.forEachIndexed { packageIndex, indexes ->
+                        ensureContinues()
+                        val indexed = indexes.map { index -> IndexedTranscriptSegment(index, correctedSegments[index]) }
+                        val contextBefore = neighboringContextBefore(correctedSegments, indexes.first(), NEIGHBOR_CONTEXT_SEGMENTS)
+                        val contextAfter = neighboringContextAfter(correctedSegments, indexes.last(), NEIGHBOR_CONTEXT_SEGMENTS)
+                        publishRunning(
+                            request = initialRequest, model = model,
+                            groupNumber = groupIndex + 1, groupCount = groups.size,
+                            correctedSegments = correctedSegments,
+                            status = "KI prüft Bereich ${groupIndex + 1} von ${groups.size} …",
+                            activity = "Textpaket ${packageIndex + 1} von ${packages.size}: ${indexes.size} Segmente werden geprüft."
+                        )
+                        addDiagnostic("Textpaket ${packageIndex + 1}/${packages.size}: ${indexes.size} Segmente + ${contextBefore.size + contextAfter.size} Kontextsegmente übergeben.")
+                        val response = engine.generate(
+                            prompt = buildCorrectionPrompt(indexed, contextBefore, contextAfter),
+                            maximumOutputTokens = maximumCorrectionTokens(indexed)
+                        )
+                        val corrections = parseCorrectedSegments(response, indexes.map { it + 1 })
+                        correctedSegments = applyCorrections(correctedSegments, corrections)
+                        addDiagnostic("Textpaket ${packageIndex + 1}/${packages.size}: ${corrections.size} sichere Korrekturen übernommen.")
                     }
-                    val contextBefore = neighboringContextBefore(
-                        correctedSegments,
-                        indexes.first(),
-                        NEIGHBOR_CONTEXT_SEGMENTS
-                    )
-                    val contextAfter = neighboringContextAfter(
-                        correctedSegments,
-                        indexes.last(),
-                        NEIGHBOR_CONTEXT_SEGMENTS
-                    )
-                    val label = "${formatClock(rangeStartMs)}–${formatClock(rangeEndMs)}"
-                    publishRunning(
-                        request = initialRequest,
-                        model = model,
-                        groupNumber = groupIndex + 1,
-                        groupCount = groups.size,
-                        correctedSegments = correctedSegments,
-                        status = "Texte werden mit KI überarbeitet …",
-                        activity = "Bereich $label wird lokal geglättet."
-                    )
-                    addDiagnostic("KI bearbeitet Bereich $label (${indexes.size} Segmente).")
-                    addDiagnostic(
-                        "${contextBefore.size + contextAfter.size} Nachbarsegmente dienen nur als Kontext."
-                    )
-
-                    val response = engine.generate(
-                        prompt = buildCorrectionPrompt(indexed, contextBefore, contextAfter),
-                        maximumOutputTokens = maximumCorrectionTokens(indexed)
-                    )
-                    val corrections = parseCorrectedSegments(
-                        response = response,
-                        expectedIndexes = indexes.map { it + 1 }
-                    )
-                    correctedSegments = applyCorrections(correctedSegments, corrections)
-                    addDiagnostic("Bereich $label wurde geprüft und übernommen.")
+                    addDiagnostic("Bereich $label vollständig geprüft.")
                     requestStore.write(
                         initialRequest.copy(
                             segments = correctedSegments,
@@ -242,7 +228,9 @@ class AiPostProcessingService : Service() {
 
     private fun addDiagnostic(message: String) {
         if (diagnostics.size >= 10) diagnostics.removeFirst()
-        diagnostics.addLast(message)
+        val clock = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.GERMANY)
+            .format(java.util.Date())
+        diagnostics.addLast("$clock · $message")
     }
 
     private fun ensureContinues() {
@@ -364,3 +352,6 @@ private fun formatClock(milliseconds: Long): String {
     val seconds = (milliseconds / 1_000L).coerceAtLeast(0L)
     return "%02d:%02d".format(seconds / 60L, seconds % 60L)
 }
+
+private fun formatGroupLabel(segments: List<WhisperSegment>, indexes: List<Int>): String =
+    "${formatClock(segments[indexes.first()].startMs)}–${formatClock(segments[indexes.last()].endMs)}"

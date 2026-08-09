@@ -249,7 +249,7 @@ private fun TranscriptGroupEditorActions(
         ) {
             OutlinedButton(
                 onClick = onAiEdit,
-                enabled = !state.isBusy && !state.isEditingTranscript,
+                enabled = state.isTranscriptReadyForAi && !state.isEditingTranscript,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),

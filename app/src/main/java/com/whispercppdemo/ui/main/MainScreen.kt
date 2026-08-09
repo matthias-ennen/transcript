@@ -787,6 +787,10 @@ private fun CancelTranscriptionDialog(
 internal val TranscriptUiState.isModelSelectionEnabled: Boolean
     get() = !isBusy && !isRecording
 
+internal val TranscriptUiState.isTranscriptReadyForAi: Boolean
+    get() = segments.isNotEmpty() && transcriptionDurationSeconds != null &&
+        !isBusy && !isTranscribing && !isRecording
+
 @Composable
 private fun LiveStatusLine(state: TranscriptUiState) {
     val estimateStatus = transcriptionEstimateStatus(state.transcriptionEstimateSeconds)

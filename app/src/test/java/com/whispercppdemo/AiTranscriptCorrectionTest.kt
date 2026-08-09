@@ -17,12 +17,13 @@ class AiTranscriptCorrectionTest {
     )
 
     @Test
-    fun promptCarriesStableMarkers() {
+    fun promptCarriesStableMarkersAndChangeOnlyProtocol() {
         val prompt = buildCorrectionPrompt(
             source.mapIndexed { index, segment -> IndexedTranscriptSegment(index, segment) }
         )
         assertTrue(prompt.contains("[[SEGMENT_0001]] hallo wie gehts"))
         assertTrue(prompt.contains("[[SEGMENT_0002]] mir geht es gut"))
+        assertTrue(prompt.contains("#NUMMER<TAB>KORRIGIERTER TEXT"))
     }
 
     @Test
@@ -41,26 +42,24 @@ class AiTranscriptCorrectionTest {
     }
 
     @Test
-    fun parserMapsOnlyExpectedMarkers() {
+    fun parserMapsOnlyChangedExpectedSegments() {
         val parsed = parseCorrectedSegments(
-            "[[SEGMENT_0001]] Hallo, wie geht's?\n[[SEGMENT_0002]] Mir geht es gut.",
+            "#0001\tHallo, wie geht's?",
             listOf(1, 2)
         )
         assertEquals("Hallo, wie geht's?", parsed[0])
-        assertEquals("Mir geht es gut.", parsed[1])
+        assertEquals(null, parsed[1])
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun parserRejectsMissingSegments() {
-        parseCorrectedSegments("[[SEGMENT_0001]] Hallo.", listOf(1, 2))
+    @Test
+    fun parserAllowsNoChanges() {
+        assertTrue(parseCorrectedSegments("NO_CHANGES", listOf(1, 2)).isEmpty())
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun parserRejectsLeakedContext() {
-        parseCorrectedSegments(
-            "[[SEGMENT_0001]] Hallo.\n[[VORHER_0000]] Fremder Kontext",
-            listOf(1)
-        )
+    @Test
+    fun parserKeepsValidChangesWhenResponseAlsoContainsInvalidLines() {
+        val parsed = parseCorrectedSegments("Hinweis\n#0001\tHallo.\n#9999\tFremd", listOf(1, 2))
+        assertEquals(mapOf(0 to "Hallo."), parsed)
     }
 
     @Test
@@ -73,7 +72,7 @@ class AiTranscriptCorrectionTest {
     }
 
     @Test
-    fun outputBudgetIncludesSegmentMarkerOverhead() {
+    fun outputBudgetStaysSmallForChangeOnlyProtocol() {
         val manyShortSegments = List(100) { index ->
             IndexedTranscriptSegment(
                 index,
@@ -81,6 +80,6 @@ class AiTranscriptCorrectionTest {
             )
         }
 
-        assertTrue(maximumCorrectionTokens(manyShortSegments) >= 1_300)
+        assertTrue(maximumCorrectionTokens(manyShortSegments) <= 768)
     }
 }

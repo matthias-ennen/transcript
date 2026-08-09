@@ -53,30 +53,30 @@ fun SettingsScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Whisper-Modellverwaltung", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Hier kannst du installierte Modelle und unvollständige Downloads entfernen, um Speicherplatz freizugeben.",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Text(
-            "Belegter Speicher: ${formatDownloadSize(totalBytes)}",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        state.modelInstallations.forEach { installation ->
-            ModelStorageCard(
-                installation = installation,
-                enabled = !state.isBusy && !state.isRecording,
-                onDelete = { modelToDelete = installation.model }
-            )
-        }
-
-        OutlinedButton(
-            onClick = { confirmDeleteAll = true },
-            enabled = totalBytes > 0L && !state.isBusy && !state.isRecording,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Alle Modelle löschen")
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Whisper-Modellverwaltung", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "Hier kannst du installierte Modelle und unvollständige Downloads entfernen, um Speicherplatz freizugeben.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text("Belegter Speicher: ${formatDownloadSize(totalBytes)}", style = MaterialTheme.typography.titleMedium)
+                state.modelInstallations.forEach { installation ->
+                    ModelStorageCard(
+                        installation = installation,
+                        enabled = !state.isBusy && !state.isRecording,
+                        onDelete = { modelToDelete = installation.model }
+                    )
+                }
+                OutlinedButton(
+                    onClick = { confirmDeleteAll = true },
+                    enabled = totalBytes > 0L && !state.isBusy && !state.isRecording,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Alle Modelle löschen") }
+            }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -123,10 +123,6 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-        }
-
-        if (state.isBusy) {
-            Text(state.status, style = MaterialTheme.typography.bodySmall)
         }
     }
 

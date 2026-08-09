@@ -154,6 +154,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(cannaBotCue = cue, cannaBotCueId = uiState.cannaBotCueId + 1L)
     }
 
+    private fun aiDiagnostic(message: String): String =
+        "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.GERMANY).format(java.util.Date())} · $message"
+
     init {
         modelsDirectory.mkdirs()
         aiModelsDirectory.mkdirs()
@@ -479,7 +482,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun startAiTranscriptEditing(groupStartMs: Long) {
-        if (uiState.isBusy || uiState.segments.isEmpty() || !uiState.selectedAiModelInstalled) return
+        if (!uiState.isTranscriptReadyForAi || !uiState.selectedAiModelInstalled) return
         if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
         uiState = uiState.copy(
             isEditingTranscript = true,
@@ -491,8 +494,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             error = null,
             status = "Texte werden mit KI überarbeitet …",
             activityDetail = "Die ausgewählte Gruppe wird lokal geprüft.",
-            diagnostics = (uiState.diagnostics +
-                "Manuelle KI-Nachbearbeitung mit ${uiState.selectedAiModel.modelLabel} gestartet.")
+            diagnostics = (uiState.diagnostics + aiDiagnostic(
+                "Manuelle KI-Nachbearbeitung mit ${uiState.selectedAiModel.modelLabel} gestartet."
+            ))
                 .takeLast(12),
             cannaBotMode = CannaBotMode.REVIEW
         )
@@ -1022,8 +1026,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     draftSegments = if (manual) state.segments else emptyList(),
                     isEditingTranscript = manual,
                     editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
-                    diagnostics = (state.diagnostics +
-                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen.").takeLast(12),
+                    diagnostics = (state.diagnostics + aiDiagnostic(
+                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen."
+                    )).takeLast(12),
                     error = null,
                     status = if (manual) {
                         "KI-Vorschlag ist fertig. Du kannst ihn weiter bearbeiten oder übernehmen."
@@ -1142,8 +1147,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     uiState = uiState.copy(
                         isAiPostProcessing = true,
                         activityDetail = "Whisper wurde entladen. Das KI-Modell wird vorbereitet.",
-                        diagnostics = (uiState.diagnostics +
-                            "Whisper-Speicher freigegeben; automatische KI-Nachbearbeitung gestartet.")
+                        diagnostics = (uiState.diagnostics + aiDiagnostic(
+                            "Whisper-Speicher freigegeben; automatische KI-Nachbearbeitung gestartet."
+                        ))
                             .takeLast(12)
                     )
                     AiPostProcessingService.startAutomatic(
@@ -1155,8 +1161,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 } else {
                     if (automaticAiMissingModel) {
                         uiState = uiState.copy(
-                            diagnostics = (uiState.diagnostics +
-                                "Automatische KI-Nachbearbeitung übersprungen: ausgewähltes Modell ist nicht installiert.")
+                            diagnostics = (uiState.diagnostics + aiDiagnostic(
+                                "Automatische KI-Nachbearbeitung übersprungen: ausgewähltes Modell ist nicht installiert."
+                            ))
                                 .takeLast(12)
                         )
                     }
