@@ -80,6 +80,8 @@ data class TranscriptUiState(
     val aiDownloadedBytes: Long = 0L,
     val aiDownloadTotalBytes: Long = 0L,
     val isAiPostProcessing: Boolean = false,
+    val isAiSelfTest: Boolean = false,
+    val aiSelfTestResponse: String? = null,
     val isBusy: Boolean = false,
     val isTranscribing: Boolean = false,
     val isCancellationRequested: Boolean = false,
@@ -503,6 +505,24 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             groupStartMs = groupStartMs,
             segments = uiState.segments
         )
+    }
+
+    fun startAiSelfTest() {
+        if (uiState.isBusy || !uiState.selectedAiModelInstalled) return
+        uiState = uiState.copy(
+            isBusy = true,
+            isAiSelfTest = true,
+            aiSelfTestResponse = null,
+            progress = null,
+            error = null,
+            status = "KI-Selbsttest wird vorbereitet …",
+            activityDetail = "${uiState.selectedAiModel.modelLabel} wird lokal geladen.",
+            diagnostics = (uiState.diagnostics +
+                "KI-Selbsttest mit ${uiState.selectedAiModel.modelLabel} gestartet.")
+                .takeLast(12),
+            cannaBotMode = CannaBotMode.REVIEW
+        )
+        AiPostProcessingService.startSelfTest(application, uiState.selectedAiModel)
     }
 
     fun updateTranscriptText(index: Int, text: String) {
@@ -976,6 +996,61 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private fun handleAiPostProcessingState(state: AiPostProcessingState) {
         when (state) {
             AiPostProcessingState.Idle -> Unit
+            is AiPostProcessingState.SelfTestStarting -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiSelfTest = true,
+                    progress = null,
+                    error = null,
+                    status = "KI-Modell wird geladen …",
+                    activityDetail = "${state.model.modelLabel} wird für den Selbsttest vorbereitet.",
+                    cannaBotMode = CannaBotMode.REVIEW
+                )
+            }
+            is AiPostProcessingState.SelfTestRunning -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiSelfTest = true,
+                    progress = null,
+                    error = null,
+                    status = state.status,
+                    activityDetail = state.activityDetail,
+                    diagnostics = state.diagnostics.takeLast(12),
+                    cannaBotMode = CannaBotMode.REVIEW
+                )
+            }
+            is AiPostProcessingState.SelfTestCompleted -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiSelfTest = false,
+                    progress = null,
+                    activityDetail = "Antwort vollständig empfangen: ${state.response.length} Zeichen.",
+                    diagnostics = (state.diagnostics +
+                        "KI-Selbsttest erfolgreich: ${state.response.length} Zeichen empfangen.")
+                        .takeLast(12),
+                    aiSelfTestResponse = state.response,
+                    error = null,
+                    status = "KI-Selbsttest erfolgreich.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.SUCCESS)
+                AiPostProcessingCoordinator.reset()
+            }
+            is AiPostProcessingState.SelfTestFailed -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiSelfTest = false,
+                    progress = null,
+                    activityDetail = null,
+                    diagnostics = state.diagnostics.takeLast(12),
+                    aiSelfTestResponse = null,
+                    error = state.message,
+                    status = "KI-Selbsttest fehlgeschlagen.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+                AiPostProcessingCoordinator.reset()
+            }
             is AiPostProcessingState.Starting -> {
                 uiState = uiState.copy(
                     isBusy = true,
@@ -1309,6 +1384,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             downloadingModel = null,
             downloadingAiModel = null,
             isAiPostProcessing = false,
+            isAiSelfTest = false,
             activityDetail = null,
             error = throwable.localizedMessage ?: throwable.javaClass.simpleName,
             status = "Vorgang fehlgeschlagen.",
