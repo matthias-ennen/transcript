@@ -112,7 +112,6 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     llama_backend_init();
     llama_model_params params = llama_model_default_params();
     params.n_gpu_layers = 0;
-    params.use_mmap = true;
     llama_model * model = llama_model_load_from_file(model_path.c_str(), params);
     if (!model) {
         log_error("Model load failed: " + model_path);
@@ -186,7 +185,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     std::string output;
     output.reserve(static_cast<size_t>(output_limit) * 4U);
     for (int generated = 0; generated < output_limit; ++generated) {
-        const llama_token token = llama_sampler_sample(sampler.get(), context.get(), -1);
+        llama_token token = llama_sampler_sample(sampler.get(), context.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) break;
         output += token_piece(vocab, token);
         llama_batch batch = llama_batch_get_one(&token, 1);
