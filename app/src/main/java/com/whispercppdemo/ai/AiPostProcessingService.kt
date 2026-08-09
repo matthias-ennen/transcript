@@ -33,9 +33,9 @@ private const val NOTIFICATION_ID = 2111
 private const val ACTION_START = "de.matthiasennen.transcript.START_AI_POSTPROCESSING"
 private const val ACTION_START_SELF_TEST = "de.matthiasennen.transcript.START_AI_SELF_TEST"
 private const val EXTRA_MODEL_ID = "model_id"
+private const val EXTRA_TEST_PROMPT = "test_prompt"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
 private const val TRANSCRIPT_GROUP_DURATION_MS = 5L * 60L * 1_000L
-private const val NEIGHBOR_CONTEXT_SEGMENTS = 8
 
 class AiPostProcessingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -54,15 +54,16 @@ class AiPostProcessingService : Service() {
         if (processingJob?.isActive == true) return START_REDELIVER_INTENT
         if (intent?.action == ACTION_START_SELF_TEST) {
             val model = AiModel.fromId(intent.getStringExtra(EXTRA_MODEL_ID))
+            val prompt = intent.getStringExtra(EXTRA_TEST_PROMPT).orEmpty()
             stopRequested.set(false)
             diagnostics.clear()
             AiPostProcessingCoordinator.update(AiPostProcessingState.SelfTestStarting(model))
             startForeground(
                 NOTIFICATION_ID,
-                buildNotification("KI-Selbsttest wird vorbereitet …", 0, true)
+                buildNotification("KI-Test wird vorbereitet …", 0, true)
             )
             processingJob = serviceScope.launch {
-                runSelfTest(model)
+                runSelfTest(model, prompt)
                 processingJob = null
             }
             return START_REDELIVER_INTENT
@@ -95,33 +96,34 @@ class AiPostProcessingService : Service() {
         super.onDestroy()
     }
 
-    private fun runSelfTest(model: AiModel) {
+    private fun runSelfTest(model: AiModel, prompt: String) {
         val startedAt = SystemClock.elapsedRealtime()
         try {
+            check(prompt.isNotBlank()) { "Bitte zuerst eine Frage oder Aufgabe eingeben." }
             val modelFile = File(File(filesDir, "ai-models"), model.fileName)
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
             }
-            addDiagnostic("KI-Selbsttest: ${model.modelLabel} wird lokal geladen.")
+            addDiagnostic("KI-Test: ${model.modelLabel} wird lokal geladen.")
             AiPostProcessingCoordinator.update(
                 AiPostProcessingState.SelfTestRunning(
                     model = model,
                     status = "KI-Modell wird geladen …",
-                    activityDetail = "${model.modelLabel} wird für den Selbsttest vorbereitet.",
+                    activityDetail = "${model.modelLabel} wird für den freien KI-Test vorbereitet.",
                     diagnostics = diagnostics.toList()
                 )
             )
             LocalAiEngine(modelFile.absolutePath).use { engine ->
-                addDiagnostic("KI-Modell geladen. Selbsttest wird an die KI gesendet.")
+                addDiagnostic("KI-Modell geladen. Eigene Anfrage wird an die KI gesendet.")
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.SelfTestRunning(
                         model = model,
-                        status = "Selbsttest wird an KI gesendet …",
-                        activityDetail = "Frage: Was ist der Mond?",
+                        status = "Anfrage wird an KI gesendet …",
+                        activityDetail = "Eigene Eingabe: ${prompt.length} Zeichen.",
                         diagnostics = diagnostics.toList()
                     )
                 )
-                val response = engine.generateSelfTest()
+                val response = engine.generateTest(prompt)
                 addDiagnostic("Erstes Antwortzeichen empfangen.")
                 addDiagnostic("Antwort vollständig empfangen: ${response.length} Zeichen.")
                 val durationSeconds = ((SystemClock.elapsedRealtime() - startedAt) / 1_000L)
@@ -135,14 +137,14 @@ class AiPostProcessingService : Service() {
                     )
                 )
                 finishWithNotification(
-                    "KI-Selbsttest erfolgreich",
+                    "KI-Test erfolgreich",
                     "Antwort vollständig empfangen: ${response.length} Zeichen."
                 )
             }
         } catch (throwable: Throwable) {
             if (!stopRequested.get() && throwable !is CancellationException) {
-                val message = throwable.localizedMessage ?: "Der KI-Selbsttest ist fehlgeschlagen."
-                addDiagnostic("KI-Selbsttest-Fehler: $message")
+                val message = throwable.localizedMessage ?: "Der KI-Test ist fehlgeschlagen."
+                addDiagnostic("KI-Test-Fehler: $message")
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.SelfTestFailed(
                         model = model,
@@ -150,7 +152,7 @@ class AiPostProcessingService : Service() {
                         diagnostics = diagnostics.toList()
                     )
                 )
-                finishWithNotification("KI-Selbsttest fehlgeschlagen", message)
+                finishWithNotification("KI-Test fehlgeschlagen", message)
             }
         }
     }
@@ -175,6 +177,8 @@ class AiPostProcessingService : Service() {
                 var checkedSegments = 0
                 var appliedCorrections = 0
                 var rejectedCorrections = 0
+                var latestTrace: AiCorrectionTrace? = null
+                val totalSegments = groups.sumOf(List<Int>::size)
 
                 groups.forEachIndexed { groupIndex, indexes ->
                     if (groupIndex < initialRequest.nextGroupIndex) return@forEachIndexed
@@ -184,64 +188,71 @@ class AiPostProcessingService : Service() {
                     val indexed = indexes.map { index ->
                         IndexedTranscriptSegment(index, correctedSegments[index])
                     }
-                    val contextBefore = neighboringContextBefore(
-                        correctedSegments,
-                        indexes.first(),
-                        NEIGHBOR_CONTEXT_SEGMENTS
-                    )
-                    val contextAfter = neighboringContextAfter(
-                        correctedSegments,
-                        indexes.last(),
-                        NEIGHBOR_CONTEXT_SEGMENTS
-                    )
                     val label = "${formatClock(rangeStartMs)}–${formatClock(rangeEndMs)}"
+                    addDiagnostic("Bereich $label: gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen.")
                     publishRunning(
                         request = initialRequest,
                         model = model,
-                        groupNumber = groupIndex + 1,
-                        groupCount = groups.size,
+                        groupNumber = checkedSegments,
+                        groupCount = totalSegments,
                         correctedSegments = correctedSegments,
-                        status = "KI prüft Texte …",
-                        activity = "Bereich $label: ${indexes.size} Segmente werden geprüft.",
+                        status = "KI liest Gesprächskontext …",
+                        activity = "Bereich $label wird einmal als Zusammenhang vorbereitet.",
                         checkedSegments = checkedSegments,
                         proposedCorrections = appliedCorrections,
-                        rejectedCorrections = rejectedCorrections
+                        rejectedCorrections = rejectedCorrections,
+                        latestTrace = latestTrace
                     )
-                    addDiagnostic("KI prüft Bereich $label (${indexes.size} Segmente).")
-                    addDiagnostic(
-                        "${contextBefore.size + contextAfter.size} Nachbarsegmente dienen nur als Kontext."
-                    )
+                    engine.prepareCorrectionContext(buildCorrectionContext(indexed))
+                    addDiagnostic("Gemeinsamer Kontext bereit. Zielsegmente werden einzeln geprüft.")
 
-                    val response = engine.generate(
-                        prompt = buildCorrectionPrompt(indexed, contextBefore, contextAfter),
-                        maximumOutputTokens = maximumCorrectionTokens(indexed)
-                    )
-                    val parsed = parseCorrectedSegments(
-                        response = response,
-                        expectedIndexes = indexes.map { it + 1 }
-                    )
-                    correctedSegments = applyCorrections(correctedSegments, parsed.corrections)
-                    checkedSegments += indexes.size
-                    appliedCorrections += parsed.corrections.size
-                    rejectedCorrections += parsed.rejectedEntries
-                    addDiagnostic("Bereich $label geprüft: ${parsed.corrections.size} Korrekturen erkannt.")
+                    indexes.forEach { index ->
+                        ensureContinues()
+                        val target = IndexedTranscriptSegment(index, correctedSegments[index])
+                        val response = engine.correctSegment(
+                            prompt = buildCorrectionTarget(target),
+                            maximumOutputTokens = maximumCorrectionTokens(target.segment.text)
+                        )
+                        val parsed = parseCorrectionResult(response, target.segment.text)
+                        if (parsed.changed) {
+                            correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
+                            appliedCorrections++
+                        }
+                        if (parsed.retainedOriginal) rejectedCorrections++
+                        checkedSegments++
+                        latestTrace = AiCorrectionTrace(
+                            segmentNumber = index + 1,
+                            originalText = target.segment.text,
+                            rawResponse = response,
+                            resultText = parsed.text,
+                            decision = when {
+                                parsed.retainedOriginal -> "Leeres oder nicht lesbares Ergebnis: Original beibehalten."
+                                parsed.changed -> "Nicht leeres Ergebnis ohne weitere Inhaltsprüfung als Vorschlag übernommen."
+                                else -> "Nicht leeres Ergebnis angenommen; Text blieb unverändert."
+                            }
+                        )
+                        addDiagnostic(
+                            "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag übernommen" else "unverändert"}."
+                        )
+                        publishRunning(
+                            request = initialRequest,
+                            model = model,
+                            groupNumber = checkedSegments,
+                            groupCount = totalSegments,
+                            correctedSegments = correctedSegments,
+                            status = "KI-Nachbearbeitung läuft …",
+                            activity = "$checkedSegments von $totalSegments Segmenten geprüft, $appliedCorrections Korrekturen erkannt.",
+                            checkedSegments = checkedSegments,
+                            proposedCorrections = appliedCorrections,
+                            rejectedCorrections = rejectedCorrections,
+                            latestTrace = latestTrace
+                        )
+                    }
                     requestStore.write(
                         initialRequest.copy(
                             segments = correctedSegments,
                             nextGroupIndex = groupIndex + 1
                         )
-                    )
-                    publishRunning(
-                        request = initialRequest,
-                        model = model,
-                        groupNumber = groupIndex + 1,
-                        groupCount = groups.size,
-                        correctedSegments = correctedSegments,
-                        status = "KI-Nachbearbeitung läuft …",
-                        activity = "$checkedSegments Segmente geprüft, $appliedCorrections Korrekturen erkannt.",
-                        checkedSegments = checkedSegments,
-                        proposedCorrections = appliedCorrections,
-                        rejectedCorrections = rejectedCorrections
                     )
                 }
 
@@ -258,7 +269,8 @@ class AiPostProcessingService : Service() {
                         diagnostics = diagnostics.toList(),
                         checkedSegments = checkedSegments,
                         appliedCorrections = appliedCorrections,
-                        rejectedCorrections = rejectedCorrections
+                        rejectedCorrections = rejectedCorrections,
+                        latestTrace = latestTrace
                     )
                 )
                 finishWithNotification(
@@ -315,7 +327,8 @@ class AiPostProcessingService : Service() {
         activity: String,
         checkedSegments: Int,
         proposedCorrections: Int,
-        rejectedCorrections: Int
+        rejectedCorrections: Int,
+        latestTrace: AiCorrectionTrace?
     ) {
         val progress = (groupNumber.toFloat() / groupCount.coerceAtLeast(1)).coerceIn(0f, 1f)
         AiPostProcessingCoordinator.update(
@@ -332,7 +345,8 @@ class AiPostProcessingService : Service() {
                 groupStartMs = request.groupStartMs,
                 checkedSegments = checkedSegments,
                 proposedCorrections = proposedCorrections,
-                rejectedCorrections = rejectedCorrections
+                rejectedCorrections = rejectedCorrections,
+                latestTrace = latestTrace
             )
         )
         getSystemService(NotificationManager::class.java).notify(
@@ -396,10 +410,11 @@ class AiPostProcessingService : Service() {
     }
 
     companion object {
-        fun startSelfTest(context: Context, model: AiModel) {
+        fun startSelfTest(context: Context, model: AiModel, prompt: String) {
             val intent = Intent(context, AiPostProcessingService::class.java).apply {
                 action = ACTION_START_SELF_TEST
                 putExtra(EXTRA_MODEL_ID, model.id)
+                putExtra(EXTRA_TEST_PROMPT, prompt)
             }
             ContextCompat.startForegroundService(context, intent)
         }
@@ -450,24 +465,6 @@ class AiPostProcessingService : Service() {
         }
     }
 }
-
-private fun neighboringContextBefore(
-    segments: List<WhisperSegment>,
-    firstTargetIndex: Int,
-    limit: Int
-): List<IndexedTranscriptSegment> =
-    ((firstTargetIndex - limit).coerceAtLeast(0) until firstTargetIndex)
-        .filter { segments[it].text.isNotBlank() }
-        .map { IndexedTranscriptSegment(it, segments[it]) }
-
-private fun neighboringContextAfter(
-    segments: List<WhisperSegment>,
-    lastTargetIndex: Int,
-    limit: Int
-): List<IndexedTranscriptSegment> =
-    ((lastTargetIndex + 1)..(lastTargetIndex + limit).coerceAtMost(segments.lastIndex))
-        .filter { it in segments.indices && segments[it].text.isNotBlank() }
-        .map { IndexedTranscriptSegment(it, segments[it]) }
 
 private fun formatClock(milliseconds: Long): String {
     val seconds = (milliseconds / 1_000L).coerceAtLeast(0L)

@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -535,8 +536,10 @@ private fun MainContent(
             LiveStatusLine(state)
             AiSelfTestCard(
                 state = state,
+                onPromptChange = viewModel::updateAiTestPrompt,
                 onStart = viewModel::startAiSelfTest
             )
+            state.latestAiCorrectionTrace?.let { AiCorrectionTraceCard(it) }
             if (state.isTranscribing) {
                 Text(
                     transcriptionRuntimeDisplay(
@@ -883,6 +886,7 @@ private fun LiveStatusLine(state: TranscriptUiState) {
 @Composable
 private fun AiSelfTestCard(
     state: TranscriptUiState,
+    onPromptChange: (String) -> Unit,
     onStart: () -> Unit
 ) {
     var responseExpanded by remember { mutableStateOf(false) }
@@ -892,17 +896,27 @@ private fun AiSelfTestCard(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("KI-Selbsttest", style = MaterialTheme.typography.titleSmall)
+            Text("KI-Testbereich", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Fragt das ausgewählte lokale KI-Modell: „Was ist der Mond?“",
+                "Hier kannst du dem ausgewählten lokalen KI-Modell eine eigene Frage oder Aufgabe geben.",
                 style = MaterialTheme.typography.bodySmall
+            )
+            OutlinedTextField(
+                value = state.aiTestPrompt,
+                onValueChange = onPromptChange,
+                label = { Text("Frage oder Aufgabe") },
+                placeholder = { Text("Eigene Eingabe für die KI …") },
+                minLines = 3,
+                maxLines = 8,
+                enabled = !state.isBusy,
+                modifier = Modifier.fillMaxWidth()
             )
             Button(
                 onClick = onStart,
-                enabled = modelInstalled && !state.isBusy,
+                enabled = modelInstalled && !state.isBusy && state.aiTestPrompt.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (state.isAiSelfTest) "KI-Selbsttest läuft …" else "KI-Selbsttest starten")
+                Text(if (state.isAiSelfTest) "Anfrage läuft …" else "Anfrage an KI senden")
             }
             if (!modelInstalled) {
                 Text(
@@ -921,6 +935,34 @@ private fun AiSelfTestCard(
                 if (responseExpanded) {
                     Text(response, style = MaterialTheme.typography.bodyMedium)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiCorrectionTraceCard(trace: de.matthiasennen.transcript.ai.AiCorrectionTrace) {
+    var expanded by remember { mutableStateOf(false) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Letzte KI-Korrektur · Segment ${trace.segmentNumber}", style = MaterialTheme.typography.titleSmall)
+            Text(trace.decision, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (expanded) "Interaktion ausblenden" else "Interaktion anzeigen")
+            }
+            if (expanded) {
+                Text("Whisper-Original", style = MaterialTheme.typography.labelLarge)
+                Text(trace.originalText, style = MaterialTheme.typography.bodyMedium)
+                Text("KI-Rohantwort", style = MaterialTheme.typography.labelLarge)
+                Text(trace.rawResponse, style = MaterialTheme.typography.bodyMedium)
+                Text("Von der App verwendetes Ergebnis", style = MaterialTheme.typography.labelLarge)
+                Text(trace.resultText, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }

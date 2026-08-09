@@ -44,7 +44,7 @@ jobs:
       - name: Set automatic APK version
         run: |
           echo "TRANSCRIPT_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "TRANSCRIPT_VERSION_NAME=0.4.${GITHUB_RUN_NUMBER}-signed" >> "$GITHUB_ENV"
+          echo "TRANSCRIPT_VERSION_NAME=0.5.${GITHUB_RUN_NUMBER}-signed" >> "$GITHUB_ENV"
 
       - name: Restore permanent APK signing key
         env:

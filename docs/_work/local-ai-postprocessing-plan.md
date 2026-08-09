@@ -24,15 +24,16 @@ in den Einstellungen. Unter jeder geöffneten Transkriptgruppe stehen links
    korrigiert nur diese Gruppe. Das Ergebnis kann anschließend weiter manuell
    geändert und erst über **Änderungen übernehmen** gespeichert werden.
 5. Zeitstempel, Reihenfolge und Segmentanzahl bleiben unverändert. Der feste,
-   versionierte Arbeitsrahmen `transcript-correction-v1` erlaubt nur konservative
-   Textkorrekturen. Die KI liefert ausschließlich echte Änderungen als kleine
-   `[[PATCH_0001]]<Tab>Text`-Zeilen zurück; die App behält das Original und
-   übernimmt jede gültige Änderung einzeln. Ungültige Einzelzeilen werden
-   verworfen, ohne andere gültige Änderungen zu verlieren.
-6. Bis zu acht Textsegmente vor und nach dem aktiven Bereich werden als ausdrücklich
-   schreibgeschützter Kontext mitgegeben. Die KI darf nur sichere Rechtschreibung,
-   Zeichensetzung und eindeutig erkannte Wortfehler korrigieren. Bei Unsicherheit,
-   Gesang, Dialekt, Fülllauten oder Gebrabbel bleibt der Originaltext unverändert.
+   versionierte Arbeitsrahmen `transcript-correction-v2` beschreibt den gesamten
+   Fünf-Minuten-Bereich einmal als schreibgeschützten Whisper-Rohkontext. Danach
+   wird jedes Segment einzeln gegen genau diesen gemeinsamen Ausgangskontext
+   geprüft; vorherige KI-Antworten fließen nicht in die nächste Prüfung ein.
+6. Die native `llama.cpp`-Grammatik begrenzt jede Korrekturantwort technisch auf
+   genau `{"result":"..."}`. Die App ordnet die Antwort selbst dem aktuell
+   geprüften Segment zu. In dieser ersten Erprobungsstufe greift bewusst nur eine
+   inhaltliche Sicherheitsregel: Ist `result` leer, bleibt das Whisper-Original
+   erhalten. Längen-, Ähnlichkeits- und Fremdkontextprüfungen folgen erst nach den
+   Praxistests.
 7. Während der Korrektur zeigt die bestehende Statuszeile pulsierende Meldungen,
    CannaBot verwendet die Review-/Tablet-Animation und Diagnosemeldungen erklären
    Modellladung, Gruppe und Validierung. Nach Erfolg folgt die vorhandene Sequenz
@@ -49,9 +50,21 @@ in den Einstellungen. Unter jeder geöffneten Transkriptgruppe stehen links
 Whisper und das Korrekturmodell werden nicht gleichzeitig geladen. Die automatische
 KI-Stufe beginnt erst nach der vollständigen Freigabe des Whisper-Kontexts.
 
+## Freier KI-Testbereich
+
+- Die feste Mondfrage wird durch ein mehrzeiliges Eingabefeld ersetzt.
+- Der unveränderte Feldinhalt geht an das aktuell ausgewählte lokale KI-Modell.
+- Die vollständige Modellantwort lässt sich weiterhin ein- und ausblenden.
+- Eingabe und Antwort bleiben beim Modellwechsel sichtbar, damit die drei Modelle
+  mit demselben Auftrag verglichen werden können.
+
 ## Prüfpunkte
 
-- Markerparser übernimmt nur vollständige, exakt zuordenbare Antworten.
+- Strukturierte Korrekturantworten werden zuverlässig ausgelesen.
+- Leere Ergebnisse behalten das Original; alle anderen Inhalte werden in dieser
+  Etappe ohne weitere Inhaltsprüfung als Vorschlag übernommen.
+- Der gemeinsame Gruppen-Kontext wird nur einmal dekodiert und vor jeder
+  Segmentaufgabe auf denselben Ausgangszustand zurückgesetzt.
 - Schalter und gewähltes Modell bleiben nach App-Neustart erhalten.
 - Unvollständige Downloads sind fortsetzbar und löschbar.
 - Manuelle KI-Korrektur verändert nur die aktive Gruppe und bleibt ein Entwurf.
@@ -93,3 +106,10 @@ Begriffe und enthalten weiterhin ihren Zeitstempel.
 Der APK-Workflow wird für jeden veröffentlichten Stand des Agent-Branches erneut
 ausgeführt. Die Prüfung umfasst JVM-Tests, Kotlin-/Compose-Kompilierung, native
 Bibliotheken, Signatur und den Artefakt-Upload.
+
+## Arbeitsstand 09.08.2026
+
+Der v2-Umbau wird zunächst auf `agent/simple-transcript-finalization` umgesetzt und
+vollständig geprüft. Danach wird der Gesamtstand kontrolliert nach `main`
+übernommen. Der abschließende signierte APK-Workflow muss auf dem resultierenden
+`main`-Commit laufen.

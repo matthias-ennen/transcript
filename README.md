@@ -36,6 +36,7 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - optionale lokale KI-Nachbearbeitung mit drei auswählbaren Qwen3.5-Größen
 - automatische KI-Korrektur nach dem Entladen von Whisper
 - gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
+- freier KI-Testbereich für eigene Fragen und den direkten Modellvergleich
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
@@ -104,10 +105,18 @@ verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
 Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
 App, wenn dadurch ein geänderter Entwurf verloren ginge.
 
-Für jede KI-Gruppe werden Nachbarsegmente davor und danach als reiner Kontext
-mitgegeben. Der Korrekturauftrag verbietet Umformulierungen und lässt Namen,
-Gesang, Dialekt, Fülllaute, Gebrabbel und andere unsichere Stellen unverändert.
-Nur Antworten mit vollständig erhaltenen Segmentmarken werden akzeptiert.
+Die vollständige Fünf-Minuten-Gruppe wird einmal als gemeinsamer, schreibgeschützter
+Whisper-Rohkontext an das lokale Modell übergeben. Danach prüft die KI jedes
+Zielsegment einzeln gegen denselben Ausgangskontext. Vorherige Antworten wirken
+nicht auf das nächste Segment ein. `llama.cpp` begrenzt die Antwort technisch auf
+ein einziges Ergebnisfeld. In der aktuellen Erprobungsstufe behält die App nur bei
+einem leeren oder nicht lesbaren Ergebnis das Original; weitere inhaltliche
+Plausibilitätsprüfungen werden erst nach den Praxistests ergänzt.
+
+Die Kachel **KI-Testbereich** enthält statt einer fest eingebauten Testfrage ein
+mehrzeiliges Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an
+das ausgewählte Qwen-Modell senden; die vollständige Antwort kann anschließend
+ein- und ausgeblendet werden.
 
 ## Status und Diagnose während der Transkription
 

@@ -6,6 +6,14 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class AiPostProcessingMode { AUTOMATIC, MANUAL_GROUP }
 
+data class AiCorrectionTrace(
+    val segmentNumber: Int,
+    val originalText: String,
+    val rawResponse: String,
+    val resultText: String,
+    val decision: String
+)
+
 sealed interface AiPostProcessingState {
     data object Idle : AiPostProcessingState
 
@@ -49,7 +57,8 @@ sealed interface AiPostProcessingState {
         val groupStartMs: Long?,
         val checkedSegments: Int,
         val proposedCorrections: Int,
-        val rejectedCorrections: Int
+        val rejectedCorrections: Int,
+        val latestTrace: AiCorrectionTrace?
     ) : AiPostProcessingState
 
     data class Completed(
@@ -61,7 +70,8 @@ sealed interface AiPostProcessingState {
         val diagnostics: List<String>,
         val checkedSegments: Int,
         val appliedCorrections: Int,
-        val rejectedCorrections: Int
+        val rejectedCorrections: Int,
+        val latestTrace: AiCorrectionTrace?
     ) : AiPostProcessingState
 
     data class Failed(

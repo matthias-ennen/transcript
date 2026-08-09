@@ -18,6 +18,7 @@ import de.matthiasennen.transcript.ai.AiModelDownloadCoordinator
 import de.matthiasennen.transcript.ai.AiModelDownloadService
 import de.matthiasennen.transcript.ai.AiModelDownloadState
 import de.matthiasennen.transcript.ai.AiModelInstallation
+import de.matthiasennen.transcript.ai.AiCorrectionTrace
 import de.matthiasennen.transcript.ai.AiPostProcessingCoordinator
 import de.matthiasennen.transcript.ai.AiPostProcessingMode
 import de.matthiasennen.transcript.ai.AiPostProcessingService
@@ -81,7 +82,9 @@ data class TranscriptUiState(
     val aiDownloadTotalBytes: Long = 0L,
     val isAiPostProcessing: Boolean = false,
     val isAiSelfTest: Boolean = false,
+    val aiTestPrompt: String = "",
     val aiSelfTestResponse: String? = null,
+    val latestAiCorrectionTrace: AiCorrectionTrace? = null,
     val isBusy: Boolean = false,
     val isTranscribing: Boolean = false,
     val isCancellationRequested: Boolean = false,
@@ -496,6 +499,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             diagnostics = (uiState.diagnostics +
                 "Manuelle KI-Nachbearbeitung mit ${uiState.selectedAiModel.modelLabel} gestartet.")
                 .takeLast(12),
+            latestAiCorrectionTrace = null,
             cannaBotMode = CannaBotMode.REVIEW
         )
         AiPostProcessingService.startManualGroup(
@@ -507,22 +511,30 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
+    fun updateAiTestPrompt(prompt: String) {
+        uiState = uiState.copy(aiTestPrompt = prompt)
+    }
+
     fun startAiSelfTest() {
-        if (uiState.isBusy || !uiState.selectedAiModelInstalled) return
+        if (uiState.isBusy || !uiState.selectedAiModelInstalled || uiState.aiTestPrompt.isBlank()) return
         uiState = uiState.copy(
             isBusy = true,
             isAiSelfTest = true,
             aiSelfTestResponse = null,
             progress = null,
             error = null,
-            status = "KI-Selbsttest wird vorbereitet …",
+            status = "KI-Test wird vorbereitet …",
             activityDetail = "${uiState.selectedAiModel.modelLabel} wird lokal geladen.",
             diagnostics = (uiState.diagnostics +
-                "KI-Selbsttest mit ${uiState.selectedAiModel.modelLabel} gestartet.")
+                "Freier KI-Test mit ${uiState.selectedAiModel.modelLabel} gestartet.")
                 .takeLast(12),
             cannaBotMode = CannaBotMode.REVIEW
         )
-        AiPostProcessingService.startSelfTest(application, uiState.selectedAiModel)
+        AiPostProcessingService.startSelfTest(
+            application,
+            uiState.selectedAiModel,
+            uiState.aiTestPrompt
+        )
     }
 
     fun updateTranscriptText(index: Int, text: String) {
@@ -1003,7 +1015,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     error = null,
                     status = "KI-Modell wird geladen …",
-                    activityDetail = "${state.model.modelLabel} wird für den Selbsttest vorbereitet.",
+                    activityDetail = "${state.model.modelLabel} wird für den freien KI-Test vorbereitet.",
                     cannaBotMode = CannaBotMode.REVIEW
                 )
             }
@@ -1026,11 +1038,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     activityDetail = "Antwort vollständig empfangen: ${state.response.length} Zeichen.",
                     diagnostics = (state.diagnostics +
-                        "KI-Selbsttest erfolgreich: ${state.response.length} Zeichen empfangen.")
+                        "KI-Test erfolgreich: ${state.response.length} Zeichen empfangen.")
                         .takeLast(12),
                     aiSelfTestResponse = state.response,
                     error = null,
-                    status = "KI-Selbsttest erfolgreich.",
+                    status = "KI-Test erfolgreich.",
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.SUCCESS)
@@ -1045,7 +1057,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     diagnostics = state.diagnostics.takeLast(12),
                     aiSelfTestResponse = null,
                     error = state.message,
-                    status = "KI-Selbsttest fehlgeschlagen.",
+                    status = "KI-Test fehlgeschlagen.",
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.FAILED)
@@ -1059,6 +1071,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     error = null,
                     status = "Texte werden mit KI überarbeitet …",
                     activityDetail = "${state.model.modelLabel} wird lokal geladen.",
+                    latestAiCorrectionTrace = null,
                     cannaBotMode = CannaBotMode.REVIEW
                 )
             }
@@ -1082,6 +1095,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     diagnostics = state.diagnostics.takeLast(12),
                     segments = nextSegments,
                     draftSegments = nextDraft,
+                    latestAiCorrectionTrace = state.latestTrace,
                     error = null,
                     cannaBotMode = CannaBotMode.REVIEW
                 )
@@ -1098,7 +1112,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isEditingTranscript = manual,
                     editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
                     diagnostics = (state.diagnostics +
-                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen ${if (manual) "im Entwurf" else "übernommen"}.${if (state.rejectedCorrections > 0) " ${state.rejectedCorrections} ungültige Einträge verworfen." else ""}").takeLast(12),
+                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen ${if (manual) "im Entwurf" else "übernommen"}.${if (state.rejectedCorrections > 0) " ${state.rejectedCorrections} leere oder nicht lesbare Ergebnisse; Original beibehalten." else ""}").takeLast(12),
+                    latestAiCorrectionTrace = state.latestTrace,
                     error = null,
                     status = if (manual) {
                         "KI-Prüfung abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen im Entwurf."

@@ -2,11 +2,13 @@ package de.matthiasennen.transcript.ui.main
 
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ai.IndexedTranscriptSegment
-import de.matthiasennen.transcript.ai.applyCorrections
-import de.matthiasennen.transcript.ai.buildCorrectionPrompt
+import de.matthiasennen.transcript.ai.applyCorrection
+import de.matthiasennen.transcript.ai.buildCorrectionContext
+import de.matthiasennen.transcript.ai.buildCorrectionTarget
 import de.matthiasennen.transcript.ai.maximumCorrectionTokens
-import de.matthiasennen.transcript.ai.parseCorrectedSegments
+import de.matthiasennen.transcript.ai.parseCorrectionResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,56 +19,70 @@ class AiTranscriptCorrectionTest {
     )
 
     @Test
-    fun promptCarriesStableMarkers() {
-        val prompt = buildCorrectionPrompt(
+    fun contextCarriesCompleteWhisperGroupAsJson() {
+        val prompt = buildCorrectionContext(
             source.mapIndexed { index, segment -> IndexedTranscriptSegment(index, segment) }
         )
-        assertTrue(prompt.contains("#1 hallo wie gehts"))
-        assertTrue(prompt.contains("#2 mir geht es gut"))
-        assertTrue(prompt.contains("[[PATCH_0001]]<TAB>"))
+
+        assertTrue(prompt.contains("transcript-correction-v2"))
+        assertTrue(prompt.contains("\"source\":\"whisper_raw\""))
+        assertTrue(prompt.contains("\"id\":1,\"start_ms\":0,\"end_ms\":1000,\"text\":\"hallo wie gehts\""))
+        assertTrue(prompt.contains("\"id\":2"))
+        assertTrue(prompt.contains("genau ein Zielsegment"))
     }
 
     @Test
-    fun promptUsesNeighborsAsReadOnlyContext() {
-        val prompt = buildCorrectionPrompt(
-            segments = listOf(IndexedTranscriptSegment(1, source[1])),
-            contextBefore = listOf(IndexedTranscriptSegment(0, source[0])),
-            contextAfter = listOf(
-                IndexedTranscriptSegment(2, WhisperSegment(2_000L, 3_000L, "bis später"))
-            )
+    fun targetContainsOnlyCurrentSegmentAndSimpleInstruction() {
+        val target = buildCorrectionTarget(IndexedTranscriptSegment(1, source[1]))
+
+        assertTrue(target.contains("\"target_id\":2"))
+        assertTrue(target.contains("\"whisper_raw_text\":\"mir geht es gut\""))
+        assertFalse(target.contains("hallo wie gehts"))
+    }
+
+    @Test
+    fun parserAcceptsAnyNonEmptyResultWithoutContentRestrictions() {
+        val parsed = parseCorrectionResult(
+            "{\"result\":\"Eine deutlich längere, frei formulierte Antwort.\"}",
+            source[0].text
         )
-        assertTrue(prompt.contains("#1 hallo wie gehts"))
-        assertTrue(prompt.contains("#2 mir geht es gut"))
-        assertTrue(prompt.contains("#3 bis später"))
-        assertTrue(prompt.contains("Bei Unsicherheit nichts ändern"))
+
+        assertEquals("Eine deutlich längere, frei formulierte Antwort.", parsed.text)
+        assertTrue(parsed.changed)
+        assertFalse(parsed.retainedOriginal)
     }
 
     @Test
-    fun parserMapsOnlyExpectedMarkers() {
-        val parsed = parseCorrectedSegments(
-            "[[PATCH_0001]]\tHallo, wie geht's?\n[[PATCH_0002]]\tMir geht es gut.",
-            listOf(1, 2)
+    fun parserKeepsOriginalOnlyForEmptyResult() {
+        val parsed = parseCorrectionResult("{\"result\":\"\"}", source[0].text)
+
+        assertEquals(source[0].text, parsed.text)
+        assertFalse(parsed.changed)
+        assertTrue(parsed.retainedOriginal)
+    }
+
+    @Test
+    fun parserKeepsOriginalWhenEnvelopeCannotBeRead() {
+        val parsed = parseCorrectionResult("keine strukturierte Antwort", source[0].text)
+
+        assertEquals(source[0].text, parsed.text)
+        assertTrue(parsed.retainedOriginal)
+    }
+
+    @Test
+    fun parserDecodesJsonEscapes() {
+        val parsed = parseCorrectionResult(
+            "{\"result\":\"Er sagte: \\\"Hallo\\\".\\nDann ging er.\"}",
+            source[0].text
         )
-        assertEquals("Hallo, wie geht's?", parsed.corrections[0])
-        assertEquals("Mir geht es gut.", parsed.corrections[1])
+
+        assertEquals("Er sagte: \"Hallo\".\nDann ging er.", parsed.text)
     }
 
     @Test
-    fun parserAcceptsOnlyActualChanges() {
-        val parsed = parseCorrectedSegments("[[PATCH_0001]]\tHallo.", listOf(1, 2))
-        assertEquals(1, parsed.corrections.size)
-    }
+    fun correctionPreservesTimestampsAndUntouchedSegments() {
+        val updated = applyCorrection(source, 1, "Mir geht es sehr gut.")
 
-    @Test
-    fun parserKeepsValidChangesWhenOneLineIsInvalid() {
-        val parsed = parseCorrectedSegments("[[PATCH_0001]]\tHallo.\n[[PATCH_0009]]\tFremd", listOf(1))
-        assertEquals("Hallo.", parsed.corrections[0])
-        assertEquals(1, parsed.rejectedEntries)
-    }
-
-    @Test
-    fun correctionsPreserveTimestampsAndUntouchedSegments() {
-        val updated = applyCorrections(source, mapOf(1 to "Mir geht es sehr gut."))
         assertEquals(source[0], updated[0])
         assertEquals(1_000L, updated[1].startMs)
         assertEquals(2_000L, updated[1].endMs)
@@ -74,14 +90,8 @@ class AiTranscriptCorrectionTest {
     }
 
     @Test
-    fun outputBudgetIncludesSegmentMarkerOverhead() {
-        val manyShortSegments = List(100) { index ->
-            IndexedTranscriptSegment(
-                index,
-                WhisperSegment(index * 1_000L, (index + 1) * 1_000L, "kurzer Text")
-            )
-        }
-
-        assertTrue(maximumCorrectionTokens(manyShortSegments) <= 512)
+    fun outputBudgetRemainsSmallForShortTargetSegments() {
+        assertEquals(64, maximumCorrectionTokens("kurzer Text"))
+        assertTrue(maximumCorrectionTokens("x".repeat(2_000)) <= 256)
     }
 }

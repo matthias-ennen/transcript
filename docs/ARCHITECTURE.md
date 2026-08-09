@@ -122,11 +122,19 @@ Einstellungen. `AiPostProcessingService` speichert seinen Gruppenfortschritt
 atomar und verwendet nie gleichzeitig Speicher mit einem aktiven Whisper-Kontext.
 Whisper- und KI-Modelldateien sind von Cloud-Backup und Gerätetransfer ausgeschlossen.
 
-Jeder KI-Auftrag enthält die vollständige aktive Fünf-Minuten-Gruppe sowie bis zu
-acht Nachbarsegmente davor und danach als schreibgeschützten Kontext. Der Parser
-akzeptiert ausschließlich dieselben Zielmarker in derselben Reihenfolge und genau
-eine Textzeile pro Marker. Unsichere Ausgaben oder ausgegebene Kontextzeilen werden
-vollständig verworfen; Zeitstempel werden der KI nie zur Mutation überlassen.
+Eine KI-Korrektursitzung dekodiert die vollständige aktive Fünf-Minuten-Gruppe
+einmal als schreibgeschützten Whisper-Rohkontext. Für jedes Segment wird der native
+KV-Kontext auf genau diesen gemeinsamen Ausgangszustand zurückgesetzt und nur die
+kleine Zielaufgabe ergänzt. So werden Kontextkosten nicht wiederholt und frühere
+Modellantworten können die nächste Prüfung nicht beeinflussen.
+
+Der `llama.cpp`-Grammatik-Sampler erzwingt für Korrekturen genau ein JSON-Feld
+`result`; Segmentnummern und Zeitstempel bleiben vollständig in der App. Die erste
+Erprobungsstufe verwirft inhaltlich nur leere beziehungsweise nicht auslesbare
+Ergebnisse und behält dann das Original. Längen-, Ähnlichkeits- und
+Fremdkontextprüfungen sind bewusst noch nicht aktiviert. Der freie KI-Testbereich
+verwendet einen getrennten, unbeschränkten Antwortpfad und übernimmt keine
+Korrekturregeln.
 
 ## Build und Veröffentlichung
 

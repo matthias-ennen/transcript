@@ -3,8 +3,9 @@ package de.matthiasennen.transcript.ai
 import java.io.Closeable
 
 /**
- * Small lifecycle wrapper around llama.cpp. A model is mapped once; every call
- * receives a fresh context so transcript groups cannot leak into each other.
+ * Small lifecycle wrapper around llama.cpp. The model is mapped once. Free test
+ * prompts use an isolated context; transcript correction keeps one group context
+ * cached and resets to that exact base before every target segment.
  */
 class LocalAiEngine(
     modelPath: String,
@@ -17,7 +18,7 @@ class LocalAiEngine(
         check(handle != 0L) { "Das lokale KI-Modell konnte nicht geladen werden." }
     }
 
-    fun generate(prompt: String, maximumOutputTokens: Int): String {
+    private fun generate(prompt: String, maximumOutputTokens: Int): String {
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
         require(prompt.isNotBlank()) { "Der KI-Auftrag darf nicht leer sein." }
         return LocalAiNative.generate(handle, prompt, maximumOutputTokens)
@@ -26,13 +27,27 @@ class LocalAiEngine(
             ?: error("Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.")
     }
 
-    fun generateSelfTest(): String = generate(
-        prompt = """[[SELF_TEST]]
-            Antworte in genau einem kurzen deutschen Satz:
-            Was ist der Mond?
-        """.trimIndent(),
-        maximumOutputTokens = 96
+    fun generateTest(prompt: String): String = generate(
+        prompt = "[[FREE_TEST]]$prompt",
+        maximumOutputTokens = 512
     )
+
+    fun prepareCorrectionContext(prompt: String) {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        require(prompt.isNotBlank()) { "Der Gesprächskontext darf nicht leer sein." }
+        check(LocalAiNative.prepareCorrectionContext(handle, prompt)) {
+            "Der gemeinsame Gesprächskontext konnte nicht vorbereitet werden."
+        }
+    }
+
+    fun correctSegment(prompt: String, maximumOutputTokens: Int): String {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        require(prompt.isNotBlank()) { "Das Zielsegment darf nicht leer sein." }
+        return LocalAiNative.generateCorrection(handle, prompt, maximumOutputTokens)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: "{\"result\":\"\"}"
+    }
 
     override fun close() {
         val activeHandle = handle
@@ -54,5 +69,11 @@ internal object LocalAiNative {
 
     external fun create(modelPath: String, contextSize: Int, threadCount: Int): Long
     external fun generate(handle: Long, prompt: String, maximumOutputTokens: Int): String?
+    external fun prepareCorrectionContext(handle: Long, prompt: String): Boolean
+    external fun generateCorrection(
+        handle: Long,
+        prompt: String,
+        maximumOutputTokens: Int
+    ): String?
     external fun release(handle: Long)
 }
