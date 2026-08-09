@@ -5,11 +5,17 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="file" path="models/" />
+        <exclude domain="file" path="ai-models/" />
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
         <include .../>
         <exclude .../>
         -->
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="models/" />
+        <exclude domain="file" path="ai-models/" />
+    </device-transfer>
     <!--
     <device-transfer>
         <include .../>

@@ -191,6 +191,14 @@ class TranscriptionService : Service() {
                 detectedLanguage = checkpoint.detectedLanguage.orEmpty(),
                 transcriptionDurationSeconds = elapsedSeconds
             )
+            // The local correction model can require several additional GB.
+            // Release Whisper before announcing completion so the ViewModel can
+            // safely start automatic AI post-processing without both models
+            // overlapping in memory.
+            val completedWhisperContext = activeWhisperContext
+            activeWhisperContext = null
+            completedWhisperContext?.release()
+            System.gc()
             TranscriptionCoordinator.update(completed)
             finishWithNotification(
                 title = "Transkription abgeschlossen",
