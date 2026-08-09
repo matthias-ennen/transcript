@@ -3,12 +3,20 @@
 #include <algorithm>
 #include <chrono>
 #include <codecvt>
+#include <exception>
 #include <locale>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "chat.h"
+#include <nlohmann/json.hpp>
+
+#include "jinja/lexer.h"
+#include "jinja/parser.h"
+#include "jinja/runtime.h"
+#include "jinja/value.h"
 #include "llama.h"
 
 namespace {
@@ -36,9 +44,27 @@ const std::string CORRECTION_SYSTEM_PROMPT =
     "Gib keine Erklärung, Analyse, Segmentnummer, Markdown-Formatierung, weiteren "
     "Felder oder sonstigen Text aus.";
 
+std::string token_piece(const llama_vocab * vocab, llama_token token);
+
+struct LocalChatTemplate {
+    std::string source;
+    jinja::program program;
+    std::string bos_token;
+    std::string eos_token;
+
+    LocalChatTemplate(
+        std::string source_value,
+        std::string bos_token_value,
+        std::string eos_token_value)
+        : source(std::move(source_value)),
+          program(jinja::parse_from_tokens(jinja::lexer().tokenize(source))),
+          bos_token(std::move(bos_token_value)),
+          eos_token(std::move(eos_token_value)) {}
+};
+
 struct LocalEngine {
     llama_model * model = nullptr;
-    common_chat_templates_ptr chat_templates;
+    std::unique_ptr<LocalChatTemplate> chat_template;
     int context_size = 4096;
     int thread_count = 4;
     llama_context * correction_context = nullptr;
@@ -108,27 +134,37 @@ jobjectArray to_java_generation_result(
     return result;
 }
 
-common_chat_msg chat_message(const std::string & role, const std::string & content) {
-    common_chat_msg message;
-    message.role = role;
-    message.content = content;
-    return message;
-}
-
 RenderedChat render_chat(
     LocalEngine * engine,
-    const std::vector<common_chat_msg> & messages,
+    const std::vector<std::pair<std::string, std::string>> & messages,
     bool add_assistant) {
-    if (!engine || !engine->chat_templates) return {};
-    common_chat_templates_inputs inputs;
-    inputs.messages = messages;
-    inputs.add_generation_prompt = add_assistant;
-    inputs.use_jinja = true;
-    inputs.enable_thinking = false;
-    const common_chat_params params = common_chat_templates_apply(
-        engine->chat_templates.get(),
-        inputs);
-    return { params.prompt, true };
+    if (!engine || !engine->chat_template) return {};
+    nlohmann::ordered_json message_values = nlohmann::ordered_json::array();
+    for (const auto & message : messages) {
+        message_values.push_back({
+            {"role", message.first},
+            {"content", message.second},
+        });
+    }
+    nlohmann::ordered_json inputs = {
+        {"messages", message_values},
+        {"bos_token", engine->chat_template->bos_token},
+        {"eos_token", engine->chat_template->eos_token},
+        {"enable_thinking", false},
+    };
+    if (add_assistant) inputs["add_generation_prompt"] = true;
+
+    try {
+        jinja::context context(engine->chat_template->source);
+        jinja::global_from_json(context, inputs, false);
+        jinja::runtime runtime(context);
+        const jinja::value result = runtime.execute(engine->chat_template->program);
+        const auto parts = jinja::runtime::gather_string_parts(result);
+        return { parts->as_string().str(), true };
+    } catch (const std::exception & exception) {
+        log_error(std::string("Chat template rendering failed: ") + exception.what());
+        return {};
+    }
 }
 
 RenderedChat format_free_prompt(LocalEngine * engine, const std::string & marked_prompt) {
@@ -140,9 +176,9 @@ RenderedChat format_free_prompt(LocalEngine * engine, const std::string & marked
         "Du bist ein vollständig lokaler KI-Assistent. Bearbeite die Benutzeranfrage "
         "direkt. Antworte in der Sprache der Anfrage. Es gibt für diesen freien "
         "KI-Test keine besondere Transkript-Korrekturstruktur.";
-    const std::vector<common_chat_msg> messages = {
-        chat_message("system", system_prompt),
-        chat_message("user", user_prompt),
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", system_prompt},
+        {"user", user_prompt},
     };
     RenderedChat rendered = render_chat(engine, messages, true);
     if (!rendered.prompt.empty()) return rendered;
@@ -151,10 +187,10 @@ RenderedChat format_free_prompt(LocalEngine * engine, const std::string & marked
 
 std::string format_correction_base(LocalEngine * engine, const std::string & common_prompt) {
     const std::string acknowledgement = "Gesprächskontext gelesen.";
-    const std::vector<common_chat_msg> messages = {
-        chat_message("system", CORRECTION_SYSTEM_PROMPT),
-        chat_message("user", common_prompt),
-        chat_message("assistant", acknowledgement),
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", CORRECTION_SYSTEM_PROMPT},
+        {"user", common_prompt},
+        {"assistant", acknowledgement},
     };
     return render_chat(engine, messages, false).prompt;
 }
@@ -164,11 +200,11 @@ std::string format_correction_with_target(
     const std::string & common_prompt,
     const std::string & target_prompt) {
     const std::string acknowledgement = "Gesprächskontext gelesen.";
-    const std::vector<common_chat_msg> messages = {
-        chat_message("system", CORRECTION_SYSTEM_PROMPT),
-        chat_message("user", common_prompt),
-        chat_message("assistant", acknowledgement),
-        chat_message("user", target_prompt),
+    const std::vector<std::pair<std::string, std::string>> messages = {
+        {"system", CORRECTION_SYSTEM_PROMPT},
+        {"user", common_prompt},
+        {"assistant", acknowledgement},
+        {"user", target_prompt},
     };
     return render_chat(engine, messages, true).prompt;
 }
@@ -375,7 +411,17 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     engine->context_size = std::max(2048, static_cast<int>(context_size));
     engine->thread_count = std::clamp(static_cast<int>(thread_count), 2, 8);
     try {
-        engine->chat_templates = common_chat_templates_init(model, "");
+        const char * source = llama_model_chat_template(model, nullptr);
+        if (!source || source[0] == '\0') {
+            throw std::runtime_error("Das GGUF-Modell enthält keine Chatvorlage.");
+        }
+        const llama_vocab * vocab = llama_model_get_vocab(model);
+        const llama_token bos = llama_vocab_bos(vocab);
+        const llama_token eos = llama_vocab_eos(vocab);
+        engine->chat_template = std::make_unique<LocalChatTemplate>(
+            source,
+            bos == LLAMA_TOKEN_NULL ? std::string() : token_piece(vocab, bos),
+            eos == LLAMA_TOKEN_NULL ? std::string() : token_piece(vocab, eos));
     } catch (const std::exception & exception) {
         log_error(std::string("Chat template initialization failed: ") + exception.what());
         llama_model_free(model);
@@ -541,7 +587,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_release(
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine) return;
     clear_correction_session(engine);
-    engine->chat_templates.reset();
+    engine->chat_template.reset();
     if (engine->model) llama_model_free(engine->model);
     delete engine;
     llama_backend_free();
