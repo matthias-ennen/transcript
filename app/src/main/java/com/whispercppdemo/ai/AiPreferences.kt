@@ -16,11 +16,14 @@ data class AiPreferencesSnapshot(
 class AiPreferences(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    fun load(): AiPreferencesSnapshot = AiPreferencesSnapshot(
-        enabled = preferences.getBoolean(ENABLED_KEY, false),
-        automatic = preferences.getBoolean(AUTOMATIC_KEY, false),
-        selectedModel = AiModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
-    )
+    fun load(): AiPreferencesSnapshot {
+        val enabled = preferences.getBoolean(ENABLED_KEY, false)
+        return AiPreferencesSnapshot(
+            enabled = enabled,
+            automatic = enabled && preferences.getBoolean(AUTOMATIC_KEY, false),
+            selectedModel = AiModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
+        )
+    }
 
     fun setEnabled(enabled: Boolean) {
         preferences.edit()

@@ -12,6 +12,7 @@
 namespace {
 
 constexpr const char * TAG = "TranscriptLocalAI";
+constexpr int PROMPT_BATCH_SIZE = 1024;
 
 struct LocalEngine {
     llama_model * model = nullptr;
@@ -115,6 +116,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     llama_model * model = llama_model_load_from_file(model_path.c_str(), params);
     if (!model) {
         log_error("Model load failed: " + model_path);
+        llama_backend_free();
         return 0;
     }
 
@@ -137,15 +139,18 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt);
     if (prompt_tokens.empty()) return nullptr;
 
-    const int output_limit = std::clamp(static_cast<int>(maximum_output_tokens), 64, 4096);
-    if (static_cast<int>(prompt_tokens.size()) + output_limit >= engine->context_size) {
-        log_error("Prompt and output exceed the configured context.");
+    const int remaining_context = engine->context_size - static_cast<int>(prompt_tokens.size()) - 1;
+    if (remaining_context < 64) {
+        log_error("Prompt leaves too little context for a corrected response.");
         return nullptr;
     }
+    const int output_limit = std::min(
+        std::clamp(static_cast<int>(maximum_output_tokens), 64, 4096),
+        remaining_context);
 
     llama_context_params context_params = llama_context_default_params();
     context_params.n_ctx = engine->context_size;
-    context_params.n_batch = std::min(engine->context_size, 1024);
+    context_params.n_batch = std::min(engine->context_size, PROMPT_BATCH_SIZE);
     context_params.n_ubatch = std::min(engine->context_size, 512);
     context_params.n_threads = engine->thread_count;
     context_params.n_threads_batch = engine->thread_count;
@@ -164,9 +169,19 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_temp(0.10f));
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(0x51A17U));
 
-    llama_batch batch = llama_batch_get_one(
-        prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
-    if (llama_decode(context.get(), batch) != 0) return nullptr;
+    size_t prompt_offset = 0;
+    while (prompt_offset < prompt_tokens.size()) {
+        const size_t tokens_left = prompt_tokens.size() - prompt_offset;
+        const int32_t current_batch_size = static_cast<int32_t>(
+            std::min(tokens_left, static_cast<size_t>(PROMPT_BATCH_SIZE)));
+        llama_batch batch = llama_batch_get_one(
+            prompt_tokens.data() + prompt_offset, current_batch_size);
+        if (llama_decode(context.get(), batch) != 0) {
+            log_error("Prompt decoding failed at token offset " + std::to_string(prompt_offset));
+            return nullptr;
+        }
+        prompt_offset += static_cast<size_t>(current_batch_size);
+    }
 
     std::string output;
     output.reserve(static_cast<size_t>(output_limit) * 4U);
@@ -174,7 +189,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         const llama_token token = llama_sampler_sample(sampler.get(), context.get(), -1);
         if (llama_vocab_is_eog(vocab, token)) break;
         output += token_piece(vocab, token);
-        batch = llama_batch_get_one(&token, 1);
+        llama_batch batch = llama_batch_get_one(&token, 1);
         if (llama_decode(context.get(), batch) != 0) return nullptr;
     }
     return output.empty() ? nullptr : to_java(env, output);
