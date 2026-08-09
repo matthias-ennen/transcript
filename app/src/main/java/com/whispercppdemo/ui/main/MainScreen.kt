@@ -533,6 +533,10 @@ private fun MainContent(
             }
 
             LiveStatusLine(state)
+            AiSelfTestCard(
+                state = state,
+                onStart = viewModel::startAiSelfTest
+            )
             if (state.isTranscribing) {
                 Text(
                     transcriptionRuntimeDisplay(
@@ -873,6 +877,52 @@ private fun LiveStatusLine(state: TranscriptUiState) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
         )
+    }
+}
+
+@Composable
+private fun AiSelfTestCard(
+    state: TranscriptUiState,
+    onStart: () -> Unit
+) {
+    var responseExpanded by remember { mutableStateOf(false) }
+    val modelInstalled = state.selectedAiModelInstalled
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("KI-Selbsttest", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Fragt das ausgewählte lokale KI-Modell: „Was ist der Mond?“",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Button(
+                onClick = onStart,
+                enabled = modelInstalled && !state.isBusy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (state.isAiSelfTest) "KI-Selbsttest läuft …" else "KI-Selbsttest starten")
+            }
+            if (!modelInstalled) {
+                Text(
+                    "Bitte zuerst das ausgewählte KI-Modell in den Einstellungen herunterladen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            state.aiSelfTestResponse?.let { response ->
+                OutlinedButton(
+                    onClick = { responseExpanded = !responseExpanded },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (responseExpanded) "KI-Antwort ausblenden" else "KI-Antwort anzeigen")
+                }
+                if (responseExpanded) {
+                    Text(response, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
     }
 }
 
