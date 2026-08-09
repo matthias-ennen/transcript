@@ -479,7 +479,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun startAiTranscriptEditing(groupStartMs: Long) {
-        if (uiState.isBusy || uiState.segments.isEmpty() || !uiState.selectedAiModelInstalled) return
+        if (uiState.isBusy || uiState.completedModel == null || uiState.segments.isEmpty() || !uiState.selectedAiModelInstalled) return
         if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
         uiState = uiState.copy(
             isEditingTranscript = true,
@@ -1023,12 +1023,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isEditingTranscript = manual,
                     editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
                     diagnostics = (state.diagnostics +
-                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen.").takeLast(12),
+                        "KI-Nachbearbeitung in ${state.durationSeconds} s abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen ${if (manual) "im Entwurf" else "übernommen"}.${if (state.rejectedCorrections > 0) " ${state.rejectedCorrections} ungültige Einträge verworfen." else ""}").takeLast(12),
                     error = null,
                     status = if (manual) {
-                        "KI-Vorschlag ist fertig. Du kannst ihn weiter bearbeiten oder übernehmen."
+                        "KI-Prüfung abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen im Entwurf."
                     } else {
-                        "KI-Nachbearbeitung abgeschlossen. ${state.segments.size} Textabschnitte sind aktualisiert."
+                        "KI-Prüfung abgeschlossen: ${state.checkedSegments} Segmente geprüft, ${state.appliedCorrections} Korrekturen übernommen."
                     },
                     cannaBotMode = CannaBotMode.IDLE
                 )

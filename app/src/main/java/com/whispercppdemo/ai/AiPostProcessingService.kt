@@ -23,6 +23,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val CHANNEL_ID = "local_ai_postprocessing"
@@ -92,6 +95,9 @@ class AiPostProcessingService : Service() {
                 var correctedSegments = initialRequest.segments
                 val groups = targetGroups(initialRequest)
                 check(groups.isNotEmpty()) { "Für die KI-Nachbearbeitung wurde kein Text gefunden." }
+                var checkedSegments = 0
+                var appliedCorrections = 0
+                var rejectedCorrections = 0
 
                 groups.forEachIndexed { groupIndex, indexes ->
                     if (groupIndex < initialRequest.nextGroupIndex) return@forEachIndexed
@@ -118,10 +124,13 @@ class AiPostProcessingService : Service() {
                         groupNumber = groupIndex + 1,
                         groupCount = groups.size,
                         correctedSegments = correctedSegments,
-                        status = "Texte werden mit KI überarbeitet …",
-                        activity = "Bereich $label wird lokal geglättet."
+                        status = "KI prüft Texte …",
+                        activity = "Bereich $label: ${indexes.size} Segmente werden geprüft.",
+                        checkedSegments = checkedSegments,
+                        proposedCorrections = appliedCorrections,
+                        rejectedCorrections = rejectedCorrections
                     )
-                    addDiagnostic("KI bearbeitet Bereich $label (${indexes.size} Segmente).")
+                    addDiagnostic("KI prüft Bereich $label (${indexes.size} Segmente).")
                     addDiagnostic(
                         "${contextBefore.size + contextAfter.size} Nachbarsegmente dienen nur als Kontext."
                     )
@@ -130,12 +139,15 @@ class AiPostProcessingService : Service() {
                         prompt = buildCorrectionPrompt(indexed, contextBefore, contextAfter),
                         maximumOutputTokens = maximumCorrectionTokens(indexed)
                     )
-                    val corrections = parseCorrectedSegments(
+                    val parsed = parseCorrectedSegments(
                         response = response,
                         expectedIndexes = indexes.map { it + 1 }
                     )
-                    correctedSegments = applyCorrections(correctedSegments, corrections)
-                    addDiagnostic("Bereich $label wurde geprüft und übernommen.")
+                    correctedSegments = applyCorrections(correctedSegments, parsed.corrections)
+                    checkedSegments += indexes.size
+                    appliedCorrections += parsed.corrections.size
+                    rejectedCorrections += parsed.rejectedEntries
+                    addDiagnostic("Bereich $label geprüft: ${parsed.corrections.size} Korrekturen erkannt.")
                     requestStore.write(
                         initialRequest.copy(
                             segments = correctedSegments,
@@ -149,7 +161,10 @@ class AiPostProcessingService : Service() {
                         groupCount = groups.size,
                         correctedSegments = correctedSegments,
                         status = "KI-Nachbearbeitung läuft …",
-                        activity = "Bereich $label ist fertig geprüft."
+                        activity = "$checkedSegments Segmente geprüft, $appliedCorrections Korrekturen erkannt.",
+                        checkedSegments = checkedSegments,
+                        proposedCorrections = appliedCorrections,
+                        rejectedCorrections = rejectedCorrections
                     )
                 }
 
@@ -163,12 +178,15 @@ class AiPostProcessingService : Service() {
                         segments = correctedSegments,
                         groupStartMs = initialRequest.groupStartMs,
                         durationSeconds = durationSeconds,
-                        diagnostics = diagnostics.toList()
+                        diagnostics = diagnostics.toList(),
+                        checkedSegments = checkedSegments,
+                        appliedCorrections = appliedCorrections,
+                        rejectedCorrections = rejectedCorrections
                     )
                 )
                 finishWithNotification(
                     "KI-Nachbearbeitung abgeschlossen",
-                    "${groups.size} Bereich(e) wurden lokal überarbeitet."
+                    "$checkedSegments Segmente geprüft, $appliedCorrections Korrekturen übernommen."
                 )
             }
         } catch (throwable: Throwable) {
@@ -217,7 +235,10 @@ class AiPostProcessingService : Service() {
         groupCount: Int,
         correctedSegments: List<WhisperSegment>,
         status: String,
-        activity: String
+        activity: String,
+        checkedSegments: Int,
+        proposedCorrections: Int,
+        rejectedCorrections: Int
     ) {
         val progress = (groupNumber.toFloat() / groupCount.coerceAtLeast(1)).coerceIn(0f, 1f)
         AiPostProcessingCoordinator.update(
@@ -231,7 +252,10 @@ class AiPostProcessingService : Service() {
                 activityDetail = activity,
                 diagnostics = diagnostics.toList(),
                 correctedSegments = correctedSegments,
-                groupStartMs = request.groupStartMs
+                groupStartMs = request.groupStartMs,
+                checkedSegments = checkedSegments,
+                proposedCorrections = proposedCorrections,
+                rejectedCorrections = rejectedCorrections
             )
         )
         getSystemService(NotificationManager::class.java).notify(
@@ -242,7 +266,7 @@ class AiPostProcessingService : Service() {
 
     private fun addDiagnostic(message: String) {
         if (diagnostics.size >= 10) diagnostics.removeFirst()
-        diagnostics.addLast(message)
+        diagnostics.addLast("${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())} · $message")
     }
 
     private fun ensureContinues() {

@@ -21,8 +21,9 @@ class AiTranscriptCorrectionTest {
         val prompt = buildCorrectionPrompt(
             source.mapIndexed { index, segment -> IndexedTranscriptSegment(index, segment) }
         )
-        assertTrue(prompt.contains("[[SEGMENT_0001]] hallo wie gehts"))
-        assertTrue(prompt.contains("[[SEGMENT_0002]] mir geht es gut"))
+        assertTrue(prompt.contains("#1 hallo wie gehts"))
+        assertTrue(prompt.contains("#2 mir geht es gut"))
+        assertTrue(prompt.contains("[[PATCH_0001]]<TAB>"))
     }
 
     @Test
@@ -34,33 +35,33 @@ class AiTranscriptCorrectionTest {
                 IndexedTranscriptSegment(2, WhisperSegment(2_000L, 3_000L, "bis später"))
             )
         )
-        assertTrue(prompt.contains("[[VORHER_0001]] hallo wie gehts"))
-        assertTrue(prompt.contains("[[SEGMENT_0002]] mir geht es gut"))
-        assertTrue(prompt.contains("[[NACHHER_0003]] bis später"))
-        assertTrue(prompt.contains("Bei Unsicherheit bleibt der Originaltext exakt stehen"))
+        assertTrue(prompt.contains("#1 hallo wie gehts"))
+        assertTrue(prompt.contains("#2 mir geht es gut"))
+        assertTrue(prompt.contains("#3 bis später"))
+        assertTrue(prompt.contains("Bei Unsicherheit nichts ändern"))
     }
 
     @Test
     fun parserMapsOnlyExpectedMarkers() {
         val parsed = parseCorrectedSegments(
-            "[[SEGMENT_0001]] Hallo, wie geht's?\n[[SEGMENT_0002]] Mir geht es gut.",
+            "[[PATCH_0001]]\tHallo, wie geht's?\n[[PATCH_0002]]\tMir geht es gut.",
             listOf(1, 2)
         )
-        assertEquals("Hallo, wie geht's?", parsed[0])
-        assertEquals("Mir geht es gut.", parsed[1])
+        assertEquals("Hallo, wie geht's?", parsed.corrections[0])
+        assertEquals("Mir geht es gut.", parsed.corrections[1])
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun parserRejectsMissingSegments() {
-        parseCorrectedSegments("[[SEGMENT_0001]] Hallo.", listOf(1, 2))
+    @Test
+    fun parserAcceptsOnlyActualChanges() {
+        val parsed = parseCorrectedSegments("[[PATCH_0001]]\tHallo.", listOf(1, 2))
+        assertEquals(1, parsed.corrections.size)
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun parserRejectsLeakedContext() {
-        parseCorrectedSegments(
-            "[[SEGMENT_0001]] Hallo.\n[[VORHER_0000]] Fremder Kontext",
-            listOf(1)
-        )
+    @Test
+    fun parserKeepsValidChangesWhenOneLineIsInvalid() {
+        val parsed = parseCorrectedSegments("[[PATCH_0001]]\tHallo.\n[[PATCH_0009]]\tFremd", listOf(1))
+        assertEquals("Hallo.", parsed.corrections[0])
+        assertEquals(1, parsed.rejectedEntries)
     }
 
     @Test
@@ -81,6 +82,6 @@ class AiTranscriptCorrectionTest {
             )
         }
 
-        assertTrue(maximumCorrectionTokens(manyShortSegments) >= 1_300)
+        assertTrue(maximumCorrectionTokens(manyShortSegments) <= 512)
     }
 }

@@ -24,7 +24,10 @@ sealed interface AiPostProcessingState {
         val activityDetail: String,
         val diagnostics: List<String>,
         val correctedSegments: List<WhisperSegment>,
-        val groupStartMs: Long?
+        val groupStartMs: Long?,
+        val checkedSegments: Int,
+        val proposedCorrections: Int,
+        val rejectedCorrections: Int
     ) : AiPostProcessingState
 
     data class Completed(
@@ -33,7 +36,10 @@ sealed interface AiPostProcessingState {
         val segments: List<WhisperSegment>,
         val groupStartMs: Long?,
         val durationSeconds: Long,
-        val diagnostics: List<String>
+        val diagnostics: List<String>,
+        val checkedSegments: Int,
+        val appliedCorrections: Int,
+        val rejectedCorrections: Int
     ) : AiPostProcessingState
 
     data class Failed(

@@ -23,9 +23,12 @@ in den Einstellungen. Unter jeder geöffneten Transkriptgruppe stehen links
 4. **KI-Nachbearbeitung** öffnet die Fünf-Minuten-Gruppe sofort als Entwurf und
    korrigiert nur diese Gruppe. Das Ergebnis kann anschließend weiter manuell
    geändert und erst über **Änderungen übernehmen** gespeichert werden.
-5. Zeitstempel, Reihenfolge und Segmentanzahl bleiben unverändert. Die KI bekommt
-   stabile Segmentmarker; Ergebnisse mit fehlenden oder veränderten Markern werden
-   verworfen.
+5. Zeitstempel, Reihenfolge und Segmentanzahl bleiben unverändert. Der feste,
+   versionierte Arbeitsrahmen `transcript-correction-v1` erlaubt nur konservative
+   Textkorrekturen. Die KI liefert ausschließlich echte Änderungen als kleine
+   `[[PATCH_0001]]<Tab>Text`-Zeilen zurück; die App behält das Original und
+   übernimmt jede gültige Änderung einzeln. Ungültige Einzelzeilen werden
+   verworfen, ohne andere gültige Änderungen zu verlieren.
 6. Bis zu acht Textsegmente vor und nach dem aktiven Bereich werden als ausdrücklich
    schreibgeschützter Kontext mitgegeben. Die KI darf nur sichere Rechtschreibung,
    Zeichensetzung und eindeutig erkannte Wortfehler korrigieren. Bei Unsicherheit,
@@ -55,6 +58,8 @@ KI-Stufe beginnt erst nach der vollständigen Freigabe des Whisper-Kontexts.
 - Automatische KI-Korrektur aktualisiert das gesamte Transkript gruppenweise.
 - Status, Diagnose und CannaBot-Zustände wechseln bei Start, Fortschritt, Erfolg
   und Fehler nachvollziehbar.
+- Die Statuszeile unterscheidet immer zwischen geprüften Segmenten, erkannten
+  Korrekturen, übernommenen Korrekturen und verworfenen Rückgaben.
 - JVM-Tests, Kotlin-/Compose-Build, nativer whisper.cpp-/llama.cpp-Build,
   Signierung und APK-Upload sind grün.
 
@@ -64,3 +69,21 @@ Die Integration macht die drei Modelle auf dem Zielgerät vergleichbar. Ob 0,8B,
 2B oder 4B den gewünschten Qualitätsgewinn liefert, wird anschließend mit derselben
 echten deutschen Transkriptpassage geprüft. Die App behauptet vor diesem Test keine
 bestimmte Korrekturqualität.
+
+## Backlog: präzise KI-Fortschrittsanzeige
+
+Die Statuszeile und die Diagnosekachel dürfen **geprüfte Zielsegmente** nicht als
+**überarbeitete Segmente** bezeichnen. Die App führt und zeigt getrennte Zähler:
+
+- `geprüft`: alle Segmente, die das KI-Modell im aktuellen Lauf bewertet hat;
+- `Korrekturen vorgeschlagen`: alle gültigen Änderungen, die das Modell
+  zurückgeliefert hat;
+- manuell: `Korrekturen im Entwurf`, bis der Benutzer sie über
+  **Änderungen übernehmen** speichert;
+- automatisch: `Korrekturen übernommen`, sobald die App sie gespeichert hat;
+- `verworfen`: ungültige oder nicht sicher zuordenbare Einzeländerungen.
+
+Beispiel für die Abschlusssmeldung: „KI-Prüfung abgeschlossen: 65 Segmente
+geprüft, 4 Korrekturen übernommen.“ Sie darf nicht behaupten, alle 65 Segmente
+seien überarbeitet worden. Zwischenstände und Diagnoseeinträge verwenden dieselben
+Begriffe und enthalten weiterhin ihren Zeitstempel.

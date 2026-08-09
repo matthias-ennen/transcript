@@ -8,7 +8,7 @@ import java.io.Closeable
  */
 class LocalAiEngine(
     modelPath: String,
-    contextSize: Int = 8_192,
+    contextSize: Int = 4_096,
     threadCount: Int = preferredThreadCount()
 ) : Closeable {
     private var handle: Long = LocalAiNative.create(modelPath, contextSize, threadCount)
