@@ -3,6 +3,7 @@ package de.matthiasennen.transcript.ui.main
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,9 +24,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.BuildConfig
 import de.matthiasennen.transcript.ai.AiModel
@@ -34,6 +37,7 @@ import de.matthiasennen.transcript.ai.AiModelInstallation
 @Composable
 fun SettingsScreen(
     state: TranscriptUiState,
+    onOpenAiDiagnostics: () -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
@@ -82,6 +86,17 @@ fun SettingsScreen(
                     "Lokale KI glättet erkannte Texte, ohne Transkripte an einen Server zu senden.",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                TextButton(
+                    onClick = onOpenAiDiagnostics,
+                    modifier = Modifier.align(Alignment.Start),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        "KI-Diagnose-Seite",
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                }
                 AiSettingSwitch(
                     title = "KI-Nachbearbeitung aktivieren",
                     description = "Schaltet die optionale lokale Textkorrektur frei.",

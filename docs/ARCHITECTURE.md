@@ -136,6 +136,13 @@ Fremdkontextprüfungen sind bewusst noch nicht aktiviert. Der freie KI-Testberei
 verwendet einen getrennten, unbeschränkten Antwortpfad und übernimmt keine
 Korrekturregeln.
 
+`AiDiagnosticsScreen` ist eine dauerhafte Unterseite, die ausschließlich aus dem
+KI-Bereich der Einstellungen geöffnet wird. Sie verwendet dieselbe
+`LiveStatusLine`-Komponente wie die Hauptseite, enthält den freien KI-Testbereich
+und zeigt das allgemeine Diagnoseprotokoll am Seitenende. Testbereich und
+Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
+**Verlassen**-Button führt zurück zu den Einstellungen.
+
 `AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
 Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
 Korrekturläufe verwenden dieselbe Modellabbildung. Jeder freie Test erzeugt dabei

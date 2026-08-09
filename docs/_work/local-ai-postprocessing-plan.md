@@ -52,6 +52,14 @@ KI-Stufe beginnt erst nach der vollständigen Freigabe des Whisper-Kontexts.
 
 ## Freier KI-Testbereich
 
+- Der Testbereich liegt dauerhaft auf der eigenen Seite **KI-Diagnose**.
+- Die Seite wird über **KI-Diagnose-Seite** oberhalb der beiden KI-Schalter in
+  den Einstellungen geöffnet und über **Verlassen** zu den Einstellungen
+  geschlossen.
+- Oberhalb des Testbereichs verwendet die Seite dieselbe CannaBot-Statuszeile wie
+  die Hauptseite; unterhalb steht die allgemeine Diagnose-Logkarte.
+- Testbereich und allgemeine Diagnose-Logkarte werden auf der Hauptseite nicht
+  doppelt angezeigt.
 - Die feste Mondfrage wird durch ein mehrzeiliges Eingabefeld ersetzt.
 - Der unveränderte Feldinhalt geht an das aktuell ausgewählte lokale KI-Modell.
 - Die vollständige Modellantwort lässt sich weiterhin ein- und ausblenden.

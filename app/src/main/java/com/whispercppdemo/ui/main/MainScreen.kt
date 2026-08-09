@@ -40,7 +40,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -69,7 +68,6 @@ import androidx.core.content.ContextCompat
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.ai.AiModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val languages = listOf(
@@ -132,6 +130,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         when (page) {
             AppPage.SETTINGS -> SettingsScreen(
                 state = state,
+                onOpenAiDiagnostics = { page = AppPage.AI_DIAGNOSTICS },
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
@@ -155,6 +154,12 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.ABOUT -> AboutScreen(
+                modifier = Modifier.padding(innerPadding)
+            )
+            AppPage.AI_DIAGNOSTICS -> AiDiagnosticsScreen(
+                state = state,
+                onPromptChange = viewModel::updateAiTestPrompt,
+                onStart = viewModel::startAiSelfTest,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.MAIN -> MainContent(
@@ -206,7 +211,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     }
 }
 
-private enum class AppPage { MAIN, SETTINGS, ABOUT }
+private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -223,39 +228,54 @@ private fun TranscriptTopBar(
             }
         },
         navigationIcon = {
-            if (page != AppPage.MAIN) {
+            if (page != AppPage.MAIN && page != AppPage.AI_DIAGNOSTICS) {
                 IconButton(onClick = { onNavigate(AppPage.MAIN) }) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
                 }
             }
         },
         actions = {
-            if (page == AppPage.MAIN) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(0.dp)
-                ) {
-                    AppLanguageSelector(
-                        selected = appLanguage,
-                        onSelected = onAppLanguageSelected
-                    )
-                    IconButton(
-                        onClick = { onNavigate(AppPage.SETTINGS) },
-                        modifier = Modifier
-                            .width(42.dp)
-                            .height(44.dp)
+            when (page) {
+                AppPage.MAIN -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
-                    }
-                    IconButton(
-                        onClick = { onNavigate(AppPage.ABOUT) },
-                        modifier = Modifier
-                            .width(42.dp)
-                            .height(44.dp)
-                    ) {
-                        Icon(Icons.Default.Info, contentDescription = "Über die App")
+                        AppLanguageSelector(
+                            selected = appLanguage,
+                            onSelected = onAppLanguageSelected
+                        )
+                        IconButton(
+                            onClick = { onNavigate(AppPage.SETTINGS) },
+                            modifier = Modifier
+                                .width(42.dp)
+                                .height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = "Einstellungen")
+                        }
+                        IconButton(
+                            onClick = { onNavigate(AppPage.ABOUT) },
+                            modifier = Modifier
+                                .width(42.dp)
+                                .height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = "Über die App")
+                        }
                     }
                 }
+                AppPage.AI_DIAGNOSTICS -> {
+                    OutlinedButton(
+                        onClick = { onNavigate(AppPage.SETTINGS) },
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .height(40.dp),
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text("Verlassen")
+                    }
+                }
+                else -> Unit
             }
         }
     )
@@ -304,6 +324,7 @@ private val AppPage.title: String
     get() = when (this) {
         AppPage.MAIN -> "Simple Transcript"
         AppPage.SETTINGS -> "Einstellungen"
+        AppPage.AI_DIAGNOSTICS -> "KI-Diagnose"
         AppPage.ABOUT -> "Über die App"
     }
 
@@ -534,11 +555,6 @@ private fun MainContent(
             }
 
             LiveStatusLine(state)
-            AiSelfTestCard(
-                state = state,
-                onPromptChange = viewModel::updateAiTestPrompt,
-                onStart = viewModel::startAiSelfTest
-            )
             state.latestAiCorrectionTrace?.let { AiCorrectionTraceCard(it) }
             if (state.isTranscribing) {
                 Text(
@@ -553,20 +569,6 @@ private fun MainContent(
 
             if (state.segments.isNotEmpty()) {
                 TranscriptResultSummary(state)
-            }
-
-            if (state.diagnostics.isNotEmpty()) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text("Diagnose", style = MaterialTheme.typography.titleSmall)
-                        state.diagnostics.forEach { entry ->
-                            Text(entry, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
             }
 
             if (state.segments.isNotEmpty()) {
@@ -793,193 +795,6 @@ private fun CancelTranscriptionDialog(
 
 internal val TranscriptUiState.isModelSelectionEnabled: Boolean
     get() = !isBusy && !isRecording
-
-@Composable
-private fun LiveStatusLine(state: TranscriptUiState) {
-    val estimateStatus = transcriptionEstimateStatus(state.transcriptionEstimateSeconds)
-    val alternatesReadyStatus =
-        state.cannaBotMode == CannaBotMode.REVIEW &&
-            state.selectedAudio != null &&
-            state.segments.isEmpty() &&
-            state.error == null &&
-            estimateStatus != null
-    val announcesChangedModelEstimate =
-        state.runtimeEstimateAnnouncementId > 0L &&
-            state.modelReady &&
-            state.selectedAudio != null &&
-            !state.isBusy &&
-            !state.isRecording &&
-            !state.isTranscribing &&
-            state.error == null &&
-            estimateStatus != null
-    val isActiveOperation = state.isBusy || state.isRecording || state.isPlaying ||
-        state.isWaveformLoading
-    val primaryStatus = if (alternatesReadyStatus) {
-        state.mediaReadyStatus ?: state.status
-    } else {
-        state.status
-    }
-    val activityStatus = state.activityDetail
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() && it != primaryStatus }
-    val alternateStatus = when {
-        announcesChangedModelEstimate -> estimateStatus
-        alternatesReadyStatus -> estimateStatus
-        isActiveOperation -> activityStatus
-        else -> null
-    }
-    var showAlternate by remember { mutableStateOf(false) }
-    var handledEstimateAnnouncementId by remember { mutableStateOf(0L) }
-    LaunchedEffect(
-        primaryStatus,
-        alternateStatus,
-        announcesChangedModelEstimate,
-        state.runtimeEstimateAnnouncementId
-    ) {
-        if (alternateStatus == null) {
-            showAlternate = false
-            return@LaunchedEffect
-        }
-        if (
-            announcesChangedModelEstimate &&
-            state.runtimeEstimateAnnouncementId != handledEstimateAnnouncementId
-        ) {
-            handledEstimateAnnouncementId = state.runtimeEstimateAnnouncementId
-            showAlternate = true
-        }
-        while (true) {
-            delay(3_600L)
-            showAlternate = !showAlternate
-        }
-    }
-    val isActive = isActiveOperation || alternatesReadyStatus || announcesChangedModelEstimate
-    val transition = rememberInfiniteTransition(label = "status-pulse")
-    val alpha = if (isActive) {
-        transition.animateFloat(
-            initialValue = 0.20f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1_800),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "status-alpha"
-        ).value
-    } else {
-        1f
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        CannaBotStatusAnimation(state)
-        Text(
-            text = if (showAlternate) alternateStatus.orEmpty() else primaryStatus,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
-        )
-    }
-}
-
-@Composable
-private fun AiSelfTestCard(
-    state: TranscriptUiState,
-    onPromptChange: (String) -> Unit,
-    onStart: () -> Unit
-) {
-    var responseExpanded by remember { mutableStateOf(false) }
-    val modelInstalled = state.selectedAiModelInstalled
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("KI-Testbereich", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Hier kannst du dem ausgewählten lokalen KI-Modell eine eigene Frage oder Aufgabe geben.",
-                style = MaterialTheme.typography.bodySmall
-            )
-            OutlinedTextField(
-                value = state.aiTestPrompt,
-                onValueChange = onPromptChange,
-                label = { Text("Frage oder Aufgabe") },
-                placeholder = { Text("Eigene Eingabe für die KI …") },
-                minLines = 3,
-                maxLines = 8,
-                enabled = !state.isBusy,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(
-                onClick = onStart,
-                enabled = modelInstalled && !state.isBusy && state.aiTestPrompt.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (state.isAiSelfTest) "Anfrage läuft …" else "Anfrage an KI senden")
-            }
-            if (!modelInstalled) {
-                Text(
-                    "Bitte zuerst das ausgewählte KI-Modell in den Einstellungen herunterladen.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-            state.aiSelfTestResponse?.let { response ->
-                state.aiSelfTestMetrics?.let { metrics ->
-                    Text(
-                        "Messwerte · ${state.aiSelfTestModel?.modelLabel ?: state.selectedAiModel.modelLabel}",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    Text(
-                        buildString {
-                            append("Modell: ")
-                            append(
-                                if (metrics.modelAlreadyLoaded) {
-                                    "bereits im RAM"
-                                } else {
-                                    "neu geladen (${metrics.modelLoadMs} ms)"
-                                }
-                            )
-                            append("\nModellladezeit: ${metrics.modelLoadMs} ms")
-                            append("\nPromptverarbeitung: ${metrics.promptProcessingMs} ms")
-                            append("\nZeit bis zum ersten Token: ${metrics.timeToFirstTokenMs} ms")
-                            append("\nAntworterzeugung: ${metrics.answerGenerationMs} ms")
-                            append("\nGesamtdauer: ${metrics.totalMs} ms")
-                            append("\nTokens: ${metrics.promptTokens} Eingabe · ${metrics.generatedTokens} Antwort")
-                            append("\nBeendigung: ${aiFinishReasonLabel(metrics.finishReason)}")
-                            append(
-                                if (metrics.thinkingDisabled) {
-                                    "\nThinking: technisch deaktiviert"
-                                } else {
-                                    "\nThinking: von der Modellvorlage nicht bestätigt"
-                                }
-                            )
-                        },
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                OutlinedButton(
-                    onClick = { responseExpanded = !responseExpanded },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (responseExpanded) "KI-Antwort ausblenden" else "KI-Antwort anzeigen")
-                }
-                if (responseExpanded) {
-                    Text(response, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-    }
-}
-
-private fun aiFinishReasonLabel(reason: String): String = when (reason) {
-    "eog" -> "reguläres Modellende"
-    "token_limit" -> "Antwortlimit erreicht"
-    "structured_result" -> "vollständiges Ergebnis"
-    "decode_error" -> "Dekodierungsfehler"
-    else -> reason
-}
 
 @Composable
 private fun AiCorrectionTraceCard(trace: de.matthiasennen.transcript.ai.AiCorrectionTrace) {
