@@ -14,6 +14,28 @@ sealed interface AiPostProcessingState {
         val model: AiModel
     ) : AiPostProcessingState
 
+    data class SelfTestStarting(val model: AiModel) : AiPostProcessingState
+
+    data class SelfTestRunning(
+        val model: AiModel,
+        val status: String,
+        val activityDetail: String,
+        val diagnostics: List<String>
+    ) : AiPostProcessingState
+
+    data class SelfTestCompleted(
+        val model: AiModel,
+        val response: String,
+        val durationSeconds: Long,
+        val diagnostics: List<String>
+    ) : AiPostProcessingState
+
+    data class SelfTestFailed(
+        val model: AiModel,
+        val message: String,
+        val diagnostics: List<String>
+    ) : AiPostProcessingState
+
     data class Running(
         val mode: AiPostProcessingMode,
         val model: AiModel,
