@@ -26,6 +26,14 @@ class LocalAiEngine(
             ?: error("Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.")
     }
 
+    fun generateSelfTest(): String = generate(
+        prompt = """[[SELF_TEST]]
+            Antworte in genau einem kurzen deutschen Satz:
+            Was ist der Mond?
+        """.trimIndent(),
+        maximumOutputTokens = 96
+    )
+
     override fun close() {
         val activeHandle = handle
         handle = 0L
