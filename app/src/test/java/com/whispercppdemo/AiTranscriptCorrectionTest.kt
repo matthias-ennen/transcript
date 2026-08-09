@@ -29,6 +29,7 @@ class AiTranscriptCorrectionTest {
         assertTrue(prompt.contains("\"id\":1,\"start_ms\":0,\"end_ms\":1000,\"text\":\"hallo wie gehts\""))
         assertTrue(prompt.contains("\"id\":2"))
         assertTrue(prompt.contains("genau ein Zielsegment"))
+        assertFalse(prompt.contains("/no_think"))
     }
 
     @Test
@@ -38,6 +39,7 @@ class AiTranscriptCorrectionTest {
         assertTrue(target.contains("\"target_id\":2"))
         assertTrue(target.contains("\"whisper_raw_text\":\"mir geht es gut\""))
         assertFalse(target.contains("hallo wie gehts"))
+        assertFalse(target.contains("/no_think"))
     }
 
     @Test

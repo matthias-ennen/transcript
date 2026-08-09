@@ -136,6 +136,20 @@ Fremdkontextprüfungen sind bewusst noch nicht aktiviert. Der freie KI-Testberei
 verwendet einen getrennten, unbeschränkten Antwortpfad und übernimmt keine
 Korrekturregeln.
 
+`AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
+Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
+Korrekturläufe verwenden dieselbe Modellabbildung. Jeder freie Test erzeugt dabei
+einen neuen nativen Kontext, sodass vorherige Testfragen die nächste Antwort nicht
+beeinflussen. Ein Modellwechsel oder das Löschen des geladenen Modells schließt die
+Session, bevor die neue Auswahl verwendet wird.
+
+Die JNI-Schicht rendert die im GGUF eingebettete Qwen-Chatvorlage über die offizielle
+`llama.cpp`-Jinja-Anbindung mit `enable_thinking=false`. `/no_think` wird nicht in
+Benutzer- oder Korrekturprompts geschrieben. Freie Testläufe liefern zusätzlich
+native Messwerte für Prompt-Tokens, Promptverarbeitung, erstes Antwort-Token,
+Antworterzeugung, Ausgabetokens und Beendigungsgrund. Strukturierte Korrekturen
+enden unmittelbar nach dem geschlossenen JSON-Objekt.
+
 ## Build und Veröffentlichung
 
 `.github/workflows/build-apk.yml` führt die JVM-Unit-Tests aus, baut eine
