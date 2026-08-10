@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <chrono>
 #include <codecvt>
+#include <cstdlib>
 #include <exception>
 #include <locale>
 #include <memory>
+#include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,12 +20,13 @@
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
 #include "jinja/value.h"
+#include "ggml-backend.h"
+#include "ggml-cpu.h"
 #include "llama.h"
 
 namespace {
 
 constexpr const char * TAG = "TranscriptLocalAI";
-constexpr int PROMPT_BATCH_SIZE = 1024;
 constexpr const char * FREE_TEST_MARKER = "[[FREE_TEST]]";
 constexpr int CHAT_SUFFIX_TOKEN_RESERVE = 16;
 using SteadyClock = std::chrono::steady_clock;
@@ -52,6 +56,7 @@ const std::string FREE_SYSTEM_PROMPT =
     "keine besondere Transkript-Korrekturstruktur.";
 
 std::string token_piece(const llama_vocab * vocab, llama_token token);
+void log_error(const std::string & message);
 
 struct LocalChatTemplate {
     std::string source;
@@ -73,7 +78,21 @@ struct LocalEngine {
     llama_model * model = nullptr;
     std::unique_ptr<LocalChatTemplate> chat_template;
     int context_size = 4096;
-    int thread_count = 4;
+    int generation_threads = 4;
+    int prompt_threads = 4;
+    int batch_size = 1024;
+    int micro_batch_size = 512;
+    int flash_attention = 0;
+    int requested_backend = 0;
+    int requested_cpu_backend = 0;
+    int requested_gpu_layers = 0;
+    int load_mode = 0;
+    bool offload_kqv = true;
+    bool offload_operations = true;
+    bool fallback_used = false;
+    std::string gpu_device;
+    ggml_threadpool * generation_threadpool = nullptr;
+    ggml_threadpool * prompt_threadpool = nullptr;
     std::vector<std::pair<std::string, std::string>> free_messages;
     std::string last_error;
     llama_context * correction_context = nullptr;
@@ -81,6 +100,129 @@ struct LocalEngine {
     std::string correction_common_prompt;
     std::string correction_base_rendered;
 };
+
+std::once_flag backend_init_once;
+
+void ensure_backend_initialized() {
+    std::call_once(backend_init_once, []() { llama_backend_init(); });
+}
+
+const char * backend_name(int backend) {
+    switch (backend) {
+        case 1: return "CPU";
+        case 2: return "Vulkan";
+        case 3: return "CPU/Vulkan";
+        default: return "Automatisch";
+    }
+}
+
+const char * load_mode_name(int mode) {
+    switch (mode) {
+        case 2: return "RAM/Lesen";
+        case 3: return "MLock";
+        case 4: return "Memory Mapping + MLock";
+        case 1: return "Memory Mapping";
+        default: return "Automatisch";
+    }
+}
+
+bool kleidi_compiled() {
+#ifdef GGML_USE_CPU_KLEIDIAI
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool vulkan_compiled() {
+#ifdef GGML_USE_VULKAN
+    return true;
+#else
+    return false;
+#endif
+}
+
+std::vector<ggml_backend_dev_t> gpu_devices() {
+    std::vector<ggml_backend_dev_t> result;
+    for (size_t index = 0; index < ggml_backend_dev_count(); ++index) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(index);
+        const ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+            type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            result.push_back(device);
+        }
+    }
+    return result;
+}
+
+llama_load_mode to_load_mode(int mode) {
+    switch (mode) {
+        case 2: return LLAMA_LOAD_MODE_NONE;
+        case 3: return LLAMA_LOAD_MODE_MLOCK;
+        case 4: return LLAMA_LOAD_MODE_MMAP_MLOCK;
+        case 1: return LLAMA_LOAD_MODE_MMAP;
+        default: return LLAMA_LOAD_MODE_MMAP;
+    }
+}
+
+ggml_sched_priority to_thread_priority(int priority) {
+    switch (priority) {
+        case 0: return GGML_SCHED_PRIO_LOW;
+        case 2: return GGML_SCHED_PRIO_MEDIUM;
+        case 3: return GGML_SCHED_PRIO_HIGH;
+        default: return GGML_SCHED_PRIO_NORMAL;
+    }
+}
+
+void apply_cpu_mask(ggml_threadpool_params & params, const std::string & value) {
+    if (value.empty()) return;
+    std::stringstream stream(value);
+    std::string item;
+    while (std::getline(stream, item, ',')) {
+        try {
+            const int core = std::stoi(item);
+            if (core >= 0 && core < GGML_MAX_N_THREADS) params.cpumask[core] = true;
+        } catch (...) {
+            log_error("Ignoring invalid CPU core entry: " + item);
+        }
+    }
+}
+
+void configure_threadpools(
+    LocalEngine * engine,
+    const std::string & cpu_mask,
+    bool strict_cpu,
+    int priority,
+    int polling) {
+    ggml_threadpool_params generation =
+        ggml_threadpool_params_default(engine->generation_threads);
+    generation.prio = to_thread_priority(priority);
+    generation.poll = static_cast<uint32_t>(std::clamp(polling, 0, 100));
+    generation.strict_cpu = strict_cpu;
+    apply_cpu_mask(generation, cpu_mask);
+    engine->generation_threadpool = ggml_threadpool_new(&generation);
+
+    ggml_threadpool_params prompt = ggml_threadpool_params_default(engine->prompt_threads);
+    prompt.prio = to_thread_priority(priority);
+    prompt.poll = static_cast<uint32_t>(std::clamp(polling, 0, 100));
+    prompt.strict_cpu = strict_cpu;
+    apply_cpu_mask(prompt, cpu_mask);
+    engine->prompt_threadpool = ggml_threadpool_new(&prompt);
+}
+
+void configure_kleidi_environment(int sme_units, int chunk_multiplier, int threads) {
+    if (sme_units >= 0) {
+        setenv("GGML_KLEIDIAI_SME", std::to_string(sme_units).c_str(), 1);
+    } else {
+        unsetenv("GGML_KLEIDIAI_SME");
+    }
+    if (chunk_multiplier > 0) {
+        setenv("GGML_KLEIDIAI_CHUNK_MULTIPLIER", std::to_string(chunk_multiplier).c_str(), 1);
+    } else {
+        unsetenv("GGML_KLEIDIAI_CHUNK_MULTIPLIER");
+    }
+    setenv("GGML_TOTAL_THREADS", std::to_string(threads).c_str(), 1);
+}
 
 struct RenderedChat {
     std::string prompt;
@@ -257,15 +399,29 @@ std::string token_piece(const llama_vocab * vocab, llama_token token) {
         : std::string();
 }
 
-llama_context * create_context(const LocalEngine * engine) {
+llama_context * create_context(LocalEngine * engine) {
     llama_context_params params = llama_context_default_params();
     params.n_ctx = engine->context_size;
-    params.n_batch = std::min(engine->context_size, PROMPT_BATCH_SIZE);
-    params.n_ubatch = std::min(engine->context_size, 512);
-    params.n_threads = engine->thread_count;
-    params.n_threads_batch = engine->thread_count;
+    params.n_batch = std::min(engine->context_size, engine->batch_size);
+    params.n_ubatch = std::min(params.n_batch, static_cast<uint32_t>(engine->micro_batch_size));
+    params.n_threads = engine->generation_threads;
+    params.n_threads_batch = engine->prompt_threads;
+    params.flash_attn_type = engine->flash_attention == 1
+        ? LLAMA_FLASH_ATTN_TYPE_ENABLED
+        : engine->flash_attention == 2
+            ? LLAMA_FLASH_ATTN_TYPE_DISABLED
+            : LLAMA_FLASH_ATTN_TYPE_AUTO;
+    params.offload_kqv = engine->offload_kqv;
+    params.op_offload = engine->offload_operations;
     params.no_perf = true;
-    return llama_init_from_model(engine->model, params);
+    llama_context * context = llama_init_from_model(engine->model, params);
+    if (context && engine->generation_threadpool && engine->prompt_threadpool) {
+        llama_attach_threadpool(
+            context,
+            engine->generation_threadpool,
+            engine->prompt_threadpool);
+    }
+    return context;
 }
 
 bool decode_tokens(llama_context * context, std::vector<llama_token> & tokens) {
@@ -273,7 +429,7 @@ bool decode_tokens(llama_context * context, std::vector<llama_token> & tokens) {
     while (offset < tokens.size()) {
         const size_t tokens_left = tokens.size() - offset;
         const int32_t current_batch_size = static_cast<int32_t>(
-            std::min(tokens_left, static_cast<size_t>(PROMPT_BATCH_SIZE)));
+            std::min(tokens_left, static_cast<size_t>(llama_n_batch(context))));
         llama_batch batch = llama_batch_get_one(tokens.data() + offset, current_batch_size);
         if (llama_decode(context, batch) != 0) {
             log_error("Prompt decoding failed at token offset " + std::to_string(offset));
@@ -403,30 +559,116 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     jobject,
     jstring model_path_value,
     jint context_size,
-    jint thread_count) {
+    jint generation_threads,
+    jint prompt_threads,
+    jint batch_size,
+    jint micro_batch_size,
+    jint flash_attention,
+    jint load_mode,
+    jint backend,
+    jint cpu_backend,
+    jint gpu_device_index,
+    jint gpu_layers,
+    jboolean offload_kqv,
+    jboolean offload_operations,
+    jboolean automatic_cpu_fallback,
+    jstring cpu_core_mask_value,
+    jboolean strict_cpu_placement,
+    jint thread_priority,
+    jint thread_polling_percent,
+    jint kleidi_sme_units,
+    jint kleidi_chunk_multiplier) {
     const std::string model_path = from_java(env, model_path_value);
     if (model_path.empty()) return 0;
 
-    llama_backend_init();
-    llama_model_params params = llama_model_default_params();
-    params.n_gpu_layers = 0;
-    llama_model * model = llama_model_load_from_file(model_path.c_str(), params);
-    if (!model) {
+    ensure_backend_initialized();
+    auto * engine = new LocalEngine();
+    engine->context_size = std::clamp(static_cast<int>(context_size), 1024, 32768);
+    engine->generation_threads = std::clamp(static_cast<int>(generation_threads), 1, 64);
+    engine->prompt_threads = std::clamp(static_cast<int>(prompt_threads), 1, 64);
+    engine->batch_size = std::clamp(
+        static_cast<int>(batch_size),
+        32,
+        engine->context_size);
+    engine->micro_batch_size = std::clamp(
+        static_cast<int>(micro_batch_size),
+        16,
+        engine->batch_size);
+    engine->flash_attention = std::clamp(static_cast<int>(flash_attention), 0, 2);
+    engine->load_mode = std::clamp(static_cast<int>(load_mode), 0, 4);
+    engine->requested_backend = std::clamp(static_cast<int>(backend), 0, 3);
+    engine->requested_cpu_backend = std::clamp(static_cast<int>(cpu_backend), 0, 2);
+    engine->requested_gpu_layers = static_cast<int>(gpu_layers);
+    engine->offload_kqv = offload_kqv == JNI_TRUE;
+    engine->offload_operations = offload_operations == JNI_TRUE;
+
+    configure_kleidi_environment(
+        static_cast<int>(kleidi_sme_units),
+        static_cast<int>(kleidi_chunk_multiplier),
+        std::max(engine->generation_threads, engine->prompt_threads));
+
+    const bool wants_gpu = engine->requested_backend == 2 ||
+        engine->requested_backend == 3;
+    const std::vector<ggml_backend_dev_t> available_gpus = gpu_devices();
+    std::vector<ggml_backend_dev_t> selected_devices;
+    if (wants_gpu && !available_gpus.empty()) {
+        const size_t selected_index = std::min(
+            static_cast<size_t>(std::max(0, static_cast<int>(gpu_device_index))),
+            available_gpus.size() - 1);
+        selected_devices.push_back(available_gpus[selected_index]);
+        selected_devices.push_back(nullptr);
+        const char * description = ggml_backend_dev_description(available_gpus[selected_index]);
+        engine->gpu_device = description ? description : ggml_backend_dev_name(available_gpus[selected_index]);
+    }
+
+    const auto load_model = [&](bool with_gpu) -> llama_model * {
+        llama_model_params params = llama_model_default_params();
+        params.load_mode = to_load_mode(engine->load_mode);
+        params.use_extra_bufts = engine->requested_cpu_backend != 1;
+        if (with_gpu && selected_devices.size() > 1) {
+            params.devices = selected_devices.data();
+            params.n_gpu_layers = engine->requested_backend == 2
+                ? -1
+                : std::max(1, engine->requested_gpu_layers);
+        } else {
+            params.n_gpu_layers = 0;
+        }
+        return llama_model_load_from_file(model_path.c_str(), params);
+    };
+
+    if (wants_gpu && selected_devices.empty()) {
+        if (automatic_cpu_fallback != JNI_TRUE) {
+            log_error("Vulkan was requested, but no Vulkan GPU device is available.");
+            delete engine;
+            return 0;
+        }
+        engine->fallback_used = true;
+    }
+    engine->model = load_model(wants_gpu && !selected_devices.empty());
+    if (!engine->model && wants_gpu && automatic_cpu_fallback == JNI_TRUE) {
+        log_error("Vulkan model load failed; retrying with CPU.");
+        engine->fallback_used = true;
+        engine->gpu_device.clear();
+        engine->model = load_model(false);
+    }
+    if (!engine->model) {
         log_error("Model load failed: " + model_path);
-        llama_backend_free();
+        delete engine;
         return 0;
     }
 
-    auto * engine = new LocalEngine();
-    engine->model = model;
-    engine->context_size = std::max(2048, static_cast<int>(context_size));
-    engine->thread_count = std::clamp(static_cast<int>(thread_count), 2, 8);
+    configure_threadpools(
+        engine,
+        from_java(env, cpu_core_mask_value),
+        strict_cpu_placement == JNI_TRUE,
+        static_cast<int>(thread_priority),
+        static_cast<int>(thread_polling_percent));
     try {
-        const char * source = llama_model_chat_template(model, nullptr);
+        const char * source = llama_model_chat_template(engine->model, nullptr);
         if (!source || source[0] == '\0') {
             throw std::runtime_error("Das GGUF-Modell enthält keine Chatvorlage.");
         }
-        const llama_vocab * vocab = llama_model_get_vocab(model);
+        const llama_vocab * vocab = llama_model_get_vocab(engine->model);
         const llama_token bos = llama_vocab_bos(vocab);
         const llama_token eos = llama_vocab_eos(vocab);
         engine->chat_template = std::make_unique<LocalChatTemplate>(
@@ -435,9 +677,10 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
             eos == LLAMA_TOKEN_NULL ? std::string() : token_piece(vocab, eos));
     } catch (const std::exception & exception) {
         log_error(std::string("Chat template initialization failed: ") + exception.what());
-        llama_model_free(model);
+        if (engine->generation_threadpool) ggml_threadpool_free(engine->generation_threadpool);
+        if (engine->prompt_threadpool) ggml_threadpool_free(engine->prompt_threadpool);
+        llama_model_free(engine->model);
         delete engine;
-        llama_backend_free();
         return 0;
     }
     return reinterpret_cast<jlong>(engine);
@@ -678,6 +921,97 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
     return output.text.empty() ? nullptr : to_java(env, output.text);
 }
 
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeReport(
+    JNIEnv * env,
+    jobject,
+    jlong handle) {
+    auto * engine = reinterpret_cast<LocalEngine *>(handle);
+    if (!engine || !engine->model) return nullptr;
+    const bool gpu_active = !engine->fallback_used && !engine->gpu_device.empty() &&
+        (engine->requested_backend == 2 || engine->requested_backend == 3);
+    const std::string active_backend = gpu_active
+        ? (engine->requested_backend == 2 ? "Vulkan" : "CPU/Vulkan")
+        : "CPU";
+    const std::string active_cpu = engine->requested_cpu_backend == 1 || !kleidi_compiled()
+        ? "Standard-CPU"
+        : "KleidiAI freigegeben";
+    return to_java_generation_result(env, {
+        backend_name(engine->requested_backend),
+        active_backend,
+        active_cpu,
+        engine->gpu_device.empty() ? "Kein Vulkan-Gerät aktiv" : engine->gpu_device,
+        std::to_string(llama_model_n_layer(engine->model)),
+        std::to_string(engine->requested_gpu_layers),
+        engine->fallback_used ? "true" : "false",
+        load_mode_name(engine->load_mode),
+    });
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeCapabilities(
+    JNIEnv * env,
+    jobject) {
+    ensure_backend_initialized();
+    nlohmann::ordered_json result = {
+        {"kleidiAiCompiled", kleidi_compiled()},
+        {"vulkanCompiled", vulkan_compiled()},
+        {"cpu", {
+            {"neon", ggml_cpu_has_neon() != 0},
+            {"fp16Vector", ggml_cpu_has_fp16_va() != 0},
+            {"dotProduct", ggml_cpu_has_dotprod() != 0},
+            {"int8Matrix", ggml_cpu_has_matmul_int8() != 0},
+            {"sve", ggml_cpu_has_sve() != 0},
+            {"sveBytes", ggml_cpu_get_sve_cnt()},
+            {"sme", ggml_cpu_has_sme() != 0},
+            {"sme2", ggml_cpu_has_sme2() != 0},
+        }},
+    };
+    result["devices"] = nlohmann::ordered_json::array();
+    for (size_t index = 0; index < ggml_backend_dev_count(); ++index) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(index);
+        size_t free_bytes = 0;
+        size_t total_bytes = 0;
+        ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
+        const ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        const char * type_name = type == GGML_BACKEND_DEVICE_TYPE_CPU ? "CPU" :
+            type == GGML_BACKEND_DEVICE_TYPE_GPU ? "GPU" :
+            type == GGML_BACKEND_DEVICE_TYPE_IGPU ? "Integrierte GPU" :
+            type == GGML_BACKEND_DEVICE_TYPE_ACCEL ? "Beschleuniger" : "Meta";
+        const char * name = ggml_backend_dev_name(device);
+        const char * description = ggml_backend_dev_description(device);
+        result["devices"].push_back({
+            {"index", index},
+            {"name", name ? name : "Unbekannt"},
+            {"description", description ? description : "Unbekannt"},
+            {"type", type_name},
+            {"freeBytes", free_bytes},
+            {"totalBytes", total_bytes},
+        });
+    }
+    return to_java(env, result.dump());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_de_matthiasennen_transcript_ai_LocalAiNative_inspectModelLayerCount(
+    JNIEnv * env,
+    jobject,
+    jstring model_path_value) {
+    const std::string model_path = from_java(env, model_path_value);
+    if (model_path.empty()) return 0;
+    ensure_backend_initialized();
+    llama_model_params params = llama_model_default_params();
+    params.vocab_only = true;
+    params.n_gpu_layers = 0;
+    params.use_extra_bufts = false;
+    params.load_mode = LLAMA_LOAD_MODE_MMAP;
+    llama_model * model = llama_model_load_from_file(model_path.c_str(), params);
+    if (!model) return 0;
+    const int layers = llama_model_n_layer(model);
+    llama_model_free(model);
+    return layers;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_de_matthiasennen_transcript_ai_LocalAiNative_release(
     JNIEnv *,
@@ -689,6 +1023,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_release(
     clear_correction_session(engine);
     engine->chat_template.reset();
     if (engine->model) llama_model_free(engine->model);
+    if (engine->generation_threadpool) ggml_threadpool_free(engine->generation_threadpool);
+    if (engine->prompt_threadpool) ggml_threadpool_free(engine->prompt_threadpool);
     delete engine;
-    llama_backend_free();
 }

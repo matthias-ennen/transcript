@@ -43,6 +43,7 @@ class AiPostProcessingService : Service() {
     private var processingJob: Job? = null
     private lateinit var requestStore: AiPostProcessingRequestStore
     private val diagnostics = ArrayDeque<String>()
+    private var activeConfiguration: LocalAiConfiguration? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -104,8 +105,18 @@ class AiPostProcessingService : Service() {
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
             }
-            val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(model, modelFile)
-            val conversationContinued = AiEngineSessionManager.hasTestConversation(model, modelFile)
+            val configuration = guardedConfiguration(modelFile, model)
+            activeConfiguration = configuration
+            val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(
+                model,
+                modelFile,
+                configuration
+            )
+            val conversationContinued = AiEngineSessionManager.hasTestConversation(
+                model,
+                modelFile,
+                configuration
+            )
             addDiagnostic(
                 if (conversationContinued) {
                     "KI-Unterhaltung wird mit vorhandenem Gesprächskontext fortgeführt."
@@ -131,7 +142,11 @@ class AiPostProcessingService : Service() {
                     diagnostics = diagnostics.toList()
                 )
             )
-            val sessionResult = AiEngineSessionManager.withModel(model, modelFile) { engine, sessionInfo ->
+            val sessionResult = AiEngineSessionManager.withModel(
+                model,
+                modelFile,
+                configuration
+            ) { engine, sessionInfo ->
                 addDiagnostic(
                     if (sessionInfo.modelAlreadyLoaded) {
                         "Bereits geladenes KI-Modell wird wiederverwendet."
@@ -206,16 +221,18 @@ class AiPostProcessingService : Service() {
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
             }
+            val configuration = guardedConfiguration(modelFile, model)
+            activeConfiguration = configuration
             addDiagnostic("Whisper-Speicher wurde freigegeben.")
             addDiagnostic(
-                if (AiEngineSessionManager.isLoaded(model, modelFile)) {
+                if (AiEngineSessionManager.isLoaded(model, modelFile, configuration)) {
                     "${model.modelLabel} ist bereits im Arbeitsspeicher."
                 } else {
                     "${model.modelLabel} wird lokal geladen."
                 }
             )
 
-            AiEngineSessionManager.withModel(model, modelFile) { engine, sessionInfo ->
+            AiEngineSessionManager.withModel(model, modelFile, configuration) { engine, sessionInfo ->
                 addDiagnostic(
                     if (sessionInfo.modelAlreadyLoaded) {
                         "${model.modelLabel} wird aus dem RAM wiederverwendet."
@@ -415,6 +432,40 @@ class AiPostProcessingService : Service() {
 
     private fun ensureContinues() {
         if (stopRequested.get()) throw CancellationException("KI-Nachbearbeitung beendet.")
+        val configuration = activeConfiguration ?: return
+        val thermalStatus = AiHardwareProbe.read(this).thermalStatus
+        check(thermalStatus < configuration.thermalStopStatus) {
+            "Wärmeschutz hat die KI bei Status ${thermalStatusLabel(thermalStatus)} beendet."
+        }
+    }
+
+    private fun guardedConfiguration(
+        modelFile: File,
+        model: AiModel
+    ): LocalAiConfiguration {
+        val stored = AiPerformancePreferences(this).load(model)
+        val hardware = AiHardwareProbe.read(this)
+        check(hardware.thermalStatus < stored.thermalStopStatus) {
+            "Das Gerät ist für den KI-Start zu warm (${thermalStatusLabel(hardware.thermalStatus)})."
+        }
+        val effective = if (hardware.thermalStatus >= stored.thermalThrottleStatus) {
+            addDiagnostic(
+                "Wärmeschutz aktiv: CPU-Threads werden reduziert und Vulkan wird für diesen Lauf abgeschaltet."
+            )
+            stored.copy(
+                generationThreads = stored.throttledThreads,
+                promptThreads = stored.throttledThreads,
+                backend = LocalAiBackend.CPU,
+                gpuLayers = 0
+            ).normalized()
+        } else {
+            stored
+        }
+        if (hardware.thermalStatus >= stored.thermalWarningStatus) {
+            addDiagnostic("Wärmehinweis: ${thermalStatusLabel(hardware.thermalStatus)}.")
+        }
+        AiHardwareProbe.checkMemory(this, modelFile, effective)
+        return effective
     }
 
     private fun buildNotification(text: String, progress: Int, indeterminate: Boolean): Notification {

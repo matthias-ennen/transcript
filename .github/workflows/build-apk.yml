@@ -34,6 +34,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Vulkan shader build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes glslc libvulkan-dev spirv-headers
+
       - name: Install Android build components
         run: |
           sdkmanager "platforms;android-34" \

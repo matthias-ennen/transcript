@@ -20,12 +20,19 @@ import de.matthiasennen.transcript.ai.AiModelDownloadState
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
 import de.matthiasennen.transcript.ai.AiEngineSessionManager
+import de.matthiasennen.transcript.ai.AiBenchmarkResult
+import de.matthiasennen.transcript.ai.AiBenchmarkRun
+import de.matthiasennen.transcript.ai.AiHardwareProbe
+import de.matthiasennen.transcript.ai.AiHardwareSnapshot
 import de.matthiasennen.transcript.ai.AiPostProcessingCoordinator
 import de.matthiasennen.transcript.ai.AiPostProcessingMode
 import de.matthiasennen.transcript.ai.AiPostProcessingService
 import de.matthiasennen.transcript.ai.AiPostProcessingState
 import de.matthiasennen.transcript.ai.AiPreferences
+import de.matthiasennen.transcript.ai.AiPerformancePreferences
 import de.matthiasennen.transcript.ai.AiSelfTestMetrics
+import de.matthiasennen.transcript.ai.LocalAiConfiguration
+import de.matthiasennen.transcript.ai.LocalAiEngine
 import de.matthiasennen.transcript.download.ModelDownloadCoordinator
 import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
@@ -43,6 +50,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,6 +97,15 @@ data class TranscriptUiState(
     val aiSelfTestModel: AiModel? = null,
     val aiSelfTestMetrics: AiSelfTestMetrics? = null,
     val latestAiCorrectionTrace: AiCorrectionTrace? = null,
+    val performanceProfileModel: AiModel = AiModel.BALANCED,
+    val aiPerformanceConfiguration: LocalAiConfiguration = LocalAiConfiguration(),
+    val aiHardwareSnapshot: AiHardwareSnapshot? = null,
+    val performanceModelLayerCount: Int = 0,
+    val isAiBenchmarkRunning: Boolean = false,
+    val aiBenchmarkProgress: Float = 0f,
+    val aiBenchmarkResult: AiBenchmarkResult? = null,
+    val aiPerformanceJson: String = "",
+    val aiPerformanceMessage: String? = null,
     val isBusy: Boolean = false,
     val isTranscribing: Boolean = false,
     val isCancellationRequested: Boolean = false,
@@ -119,6 +136,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val modelsDirectory = File(application.filesDir, "models")
     private val aiModelsDirectory = File(application.filesDir, "ai-models")
     private val aiPreferences = AiPreferences(application)
+    private val aiPerformancePreferences = AiPerformancePreferences(application)
     private val waveformCache = WaveformCache(File(application.filesDir, "waveforms"))
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val audioRecorder = AudioRecorder(application)
@@ -154,6 +172,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private var recordingMeter: Job? = null
     private var playbackTimer: Job? = null
     private var waveformJob: Job? = null
+    private var aiBenchmarkJob: Job? = null
     private var transcriptionElapsedTimer: Job? = null
     private var transcriptionStartedAtEpochMs = 0L
     private var lastDownloadAnimationBucket = -1
@@ -172,7 +191,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             selectedAiModel = aiSettings.selectedModel,
             aiPostProcessingEnabled = aiSettings.enabled,
-            automaticAiPostProcessingEnabled = aiSettings.automatic
+            automaticAiPostProcessingEnabled = aiSettings.automatic,
+            performanceProfileModel = aiSettings.selectedModel,
+            aiPerformanceConfiguration = aiPerformancePreferences.load(aiSettings.selectedModel),
+            aiHardwareSnapshot = runCatching { AiHardwareProbe.read(application) }.getOrNull(),
+            performanceModelLayerCount = inspectAiModelLayers(aiSettings.selectedModel)
         )
         refreshAiModelInstallations(aiSettings.selectedModel)
         viewModelScope.launch {
@@ -522,9 +545,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     fun startAiSelfTest() {
         if (uiState.isBusy || !uiState.selectedAiModelInstalled || uiState.aiTestPrompt.isBlank()) return
         val selectedModelFile = aiModelFile(uiState.selectedAiModel)
+        val performanceConfiguration = aiPerformancePreferences.load(uiState.selectedAiModel)
         val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(
             uiState.selectedAiModel,
-            selectedModelFile
+            selectedModelFile,
+            performanceConfiguration
         )
         uiState = uiState.copy(
             isBusy = true,
@@ -566,6 +591,265 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 .takeLast(12),
             cannaBotMode = CannaBotMode.IDLE
         )
+    }
+
+    fun selectPerformanceProfileModel(model: AiModel) {
+        if (uiState.isBusy) return
+        uiState = uiState.copy(
+            performanceProfileModel = model,
+            aiPerformanceConfiguration = aiPerformancePreferences.load(model),
+            aiPerformanceJson = "",
+            aiPerformanceMessage = null,
+            aiBenchmarkResult = null,
+            performanceModelLayerCount = inspectAiModelLayers(model)
+        )
+        refreshAiHardware()
+    }
+
+    fun updateAiPerformanceConfiguration(configuration: LocalAiConfiguration) {
+        if (uiState.isBusy) return
+        val model = uiState.performanceProfileModel
+        val previous = aiPerformancePreferences.load(model)
+        val saved = aiPerformancePreferences.save(model, configuration)
+        if (model == uiState.selectedAiModel && previous.runtimeKey() != saved.runtimeKey()) {
+            AiEngineSessionManager.release(model)
+        }
+        uiState = uiState.copy(
+            aiPerformanceConfiguration = saved,
+            aiPerformanceJson = "",
+            aiPerformanceMessage = "Einstellungen für ${model.modelLabel} gespeichert.",
+            aiBenchmarkResult = null,
+            status = "KI-Leistungseinstellungen gespeichert.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
+    fun resetAiPerformanceConfiguration() {
+        if (uiState.isBusy) return
+        val model = uiState.performanceProfileModel
+        AiEngineSessionManager.release(model)
+        val reset = aiPerformancePreferences.reset(model)
+        uiState = uiState.copy(
+            aiPerformanceConfiguration = reset,
+            aiPerformanceJson = "",
+            aiPerformanceMessage = "Standardwerte für ${model.modelLabel} wiederhergestellt.",
+            aiBenchmarkResult = null,
+            status = "KI-Standardwerte wiederhergestellt.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
+    fun copyAiPerformanceConfiguration(target: AiModel) {
+        if (uiState.isBusy) return
+        val source = uiState.performanceProfileModel
+        val copied = aiPerformancePreferences.copy(source, target)
+        AiEngineSessionManager.release(target)
+        uiState = uiState.copy(
+            aiPerformanceMessage = "Profil von ${source.modelLabel} nach ${target.modelLabel} kopiert.",
+            aiPerformanceConfiguration = if (target == source) copied else uiState.aiPerformanceConfiguration
+        )
+    }
+
+    fun exportAiPerformanceConfiguration() {
+        if (uiState.isBusy) return
+        uiState = uiState.copy(
+            aiPerformanceJson = aiPerformancePreferences.exportJson(uiState.performanceProfileModel),
+            aiPerformanceMessage = "Profil-JSON erstellt."
+        )
+    }
+
+    fun updateAiPerformanceJson(value: String) {
+        if (uiState.isBusy) return
+        uiState = uiState.copy(aiPerformanceJson = value, aiPerformanceMessage = null)
+    }
+
+    fun importAiPerformanceConfiguration() {
+        if (uiState.isBusy || uiState.aiPerformanceJson.isBlank()) return
+        val model = uiState.performanceProfileModel
+        runCatching {
+            aiPerformancePreferences.importJson(model, uiState.aiPerformanceJson)
+        }.onSuccess { imported ->
+            AiEngineSessionManager.release(model)
+            uiState = uiState.copy(
+                aiPerformanceConfiguration = imported,
+                aiPerformanceMessage = "Profil für ${model.modelLabel} importiert.",
+                aiBenchmarkResult = null,
+                status = "KI-Leistungsprofil importiert.",
+                cannaBotMode = CannaBotMode.IDLE
+            )
+        }.onFailure { failure ->
+            uiState = uiState.copy(
+                aiPerformanceMessage = failure.localizedMessage ?: "Profil konnte nicht importiert werden.",
+                error = failure.localizedMessage ?: "Profil konnte nicht importiert werden."
+            )
+        }
+    }
+
+    fun refreshAiHardware() {
+        val snapshot = runCatching { AiHardwareProbe.read(application) }.getOrNull()
+        uiState = uiState.copy(aiHardwareSnapshot = snapshot)
+    }
+
+    fun startAiPerformanceBenchmark() {
+        if (uiState.isBusy || aiBenchmarkJob?.isActive == true) return
+        val model = uiState.performanceProfileModel
+        val modelFile = aiModelFile(model)
+        val configuration = aiPerformancePreferences.load(model)
+        if (!modelFile.isFile || modelFile.length() < model.minimumBytes) {
+            uiState = uiState.copy(
+                error = "${model.modelLabel} ist nicht vollständig installiert.",
+                status = "Leistungstest kann nicht starten."
+            )
+            return
+        }
+        uiState = uiState.copy(
+            isBusy = true,
+            isAiBenchmarkRunning = true,
+            aiBenchmarkProgress = 0f,
+            aiBenchmarkResult = null,
+            aiPerformanceMessage = null,
+            error = null,
+            status = "KI-Leistungstest wird vorbereitet …",
+            activityDetail = "${model.modelLabel} · reproduzierbarer lokaler Benchmark",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        cue(CannaBotCue.RUNNING_RIGHT)
+        aiBenchmarkJob = viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    runAiPerformanceBenchmark(model, modelFile, configuration)
+                }
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiBenchmarkRunning = false,
+                    aiBenchmarkProgress = 1f,
+                    aiBenchmarkResult = result,
+                    aiHardwareSnapshot = runCatching { AiHardwareProbe.read(application) }.getOrNull(),
+                    aiPerformanceMessage = "Leistungstest mit ${result.runs.size} Messdurchläufen abgeschlossen.",
+                    status = "KI-Leistungstest abgeschlossen.",
+                    activityDetail = null,
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.SUCCESS)
+            } catch (cancelled: CancellationException) {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiBenchmarkRunning = false,
+                    activityDetail = null,
+                    aiPerformanceMessage = "Leistungstest abgebrochen.",
+                    status = "KI-Leistungstest abgebrochen.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            } catch (failure: Throwable) {
+                val message = failure.localizedMessage ?: "Der KI-Leistungstest ist fehlgeschlagen."
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiBenchmarkRunning = false,
+                    activityDetail = null,
+                    aiPerformanceMessage = message,
+                    error = message,
+                    status = "KI-Leistungstest fehlgeschlagen.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+            } finally {
+                AiEngineSessionManager.release(model)
+                aiBenchmarkJob = null
+            }
+        }
+    }
+
+    fun cancelAiPerformanceBenchmark() {
+        aiBenchmarkJob?.cancel()
+    }
+
+    private suspend fun runAiPerformanceBenchmark(
+        model: AiModel,
+        modelFile: File,
+        configuration: LocalAiConfiguration
+    ): AiBenchmarkResult {
+        val prompt = benchmarkPrompt(configuration.benchmarkPromptCharacters)
+        val totalRuns = configuration.benchmarkWarmupRuns + configuration.benchmarkMeasuredRuns
+        val measured = mutableListOf<AiBenchmarkRun>()
+        repeat(totalRuns) { runIndex ->
+            currentCoroutineContext().ensureActive()
+            val hardwareBefore = AiHardwareProbe.read(application)
+            require(
+                hardwareBefore.batteryPercent < 0 ||
+                    hardwareBefore.batteryPercent >= configuration.benchmarkMinimumBatteryPercent
+            ) {
+                "Akkustand ${hardwareBefore.batteryPercent} % liegt unter der Benchmark-Grenze von ${configuration.benchmarkMinimumBatteryPercent} %."
+            }
+            require(!configuration.benchmarkRequiresCharging || hardwareBefore.charging) {
+                "Der Leistungstest ist laut Einstellung nur am Ladegerät erlaubt."
+            }
+            require(hardwareBefore.thermalStatus <= configuration.benchmarkMaximumThermalStatus) {
+                "Wärmezustand ${hardwareBefore.thermalStatus} überschreitet die Benchmark-Grenze ${configuration.benchmarkMaximumThermalStatus}."
+            }
+            AiHardwareProbe.checkMemory(application, modelFile, configuration)
+            AiEngineSessionManager.release(model)
+            val runStarted = android.os.SystemClock.elapsedRealtime()
+            val session = AiEngineSessionManager.withModel(
+                model,
+                modelFile,
+                configuration
+            ) { engine, _ ->
+                engine.resetTestConversation()
+                val generation = engine.generateTest(
+                    prompt,
+                    configuration.benchmarkOutputTokens
+                )
+                generation to engine.runtimeReport()
+            }
+            val generation = session.value.first
+            val report = session.value.second
+            val hardwareAfter = AiHardwareProbe.read(application)
+            if (runIndex >= configuration.benchmarkWarmupRuns) {
+                measured += AiBenchmarkRun(
+                    runNumber = runIndex - configuration.benchmarkWarmupRuns + 1,
+                    modelLoadMs = session.info.modelLoadMs,
+                    promptTokens = generation.metrics.promptTokens,
+                    generatedTokens = generation.metrics.generatedTokens,
+                    promptProcessingMs = generation.metrics.promptProcessingMs,
+                    timeToFirstTokenMs = generation.metrics.timeToFirstTokenMs,
+                    answerGenerationMs = generation.metrics.answerGenerationMs,
+                    totalMs = (android.os.SystemClock.elapsedRealtime() - runStarted).coerceAtLeast(0L),
+                    appPssBytes = hardwareAfter.appPssBytes,
+                    thermalStatus = hardwareAfter.thermalStatus,
+                    runtimeReport = report
+                )
+            }
+            AiEngineSessionManager.release(model)
+            withContext(Dispatchers.Main) {
+                uiState = uiState.copy(
+                    aiBenchmarkProgress = (runIndex + 1).toFloat() / totalRuns,
+                    status = if (runIndex < configuration.benchmarkWarmupRuns) {
+                        "KI-Leistungstest: Aufwärmdurchlauf ${runIndex + 1} von ${configuration.benchmarkWarmupRuns} …"
+                    } else {
+                        "KI-Leistungstest: Messung ${runIndex - configuration.benchmarkWarmupRuns + 1} von ${configuration.benchmarkMeasuredRuns} …"
+                    },
+                    activityDetail = "Backend ${report.activeBackend} · ${report.activeCpuBackend}"
+                )
+            }
+            if (runIndex + 1 < totalRuns && configuration.benchmarkPauseSeconds > 0) {
+                delay(configuration.benchmarkPauseSeconds * 1_000L)
+            }
+        }
+        return AiBenchmarkResult(model, configuration, measured)
+    }
+
+    private fun benchmarkPrompt(length: Int): String {
+        val sentence = "Korrigiere diesen neutralen deutschen Testsatz sorgfältig und antworte knapp. "
+        return buildString(length + sentence.length) {
+            while (this.length < length) append(sentence)
+        }.take(length)
+    }
+
+    private fun inspectAiModelLayers(model: AiModel): Int {
+        val file = aiModelFile(model)
+        if (!file.isFile || file.length() < model.minimumBytes) return 0
+        return runCatching { LocalAiEngine.inspectModelLayerCount(file.absolutePath) }
+            .getOrDefault(0)
     }
 
     fun updateTranscriptText(index: Int, text: String) {
@@ -635,7 +919,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             aiSelfTestResponse = null,
             aiSelfTestModel = null,
-            aiSelfTestMetrics = null
+            aiSelfTestMetrics = null,
+            performanceProfileModel = model,
+            aiPerformanceConfiguration = aiPerformancePreferences.load(model),
+            aiPerformanceJson = "",
+            aiBenchmarkResult = null,
+            performanceModelLayerCount = inspectAiModelLayers(model)
         )
     }
 
@@ -1016,6 +1305,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     error = null,
                     status = "${downloadState.model.modelLabel} ist installiert und ausgewählt.",
                     activityDetail = null,
+                    performanceProfileModel = downloadState.model,
+                    aiPerformanceConfiguration = aiPerformancePreferences.load(downloadState.model),
+                    performanceModelLayerCount = inspectAiModelLayers(downloadState.model),
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.SUCCESS)
@@ -1443,6 +1735,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             downloadingAiModel = null,
             isAiPostProcessing = false,
             isAiSelfTest = false,
+            isAiBenchmarkRunning = false,
             activityDetail = null,
             error = throwable.localizedMessage ?: throwable.javaClass.simpleName,
             status = "Vorgang fehlgeschlagen.",
@@ -1454,6 +1747,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     override fun onCleared() {
         recordingMeter?.cancel()
         waveformJob?.cancel()
+        aiBenchmarkJob?.cancel()
+        AiEngineSessionManager.release()
         stopPlaybackTimer()
         stopTranscriptionElapsedTimer()
         audioRecorder.release()
