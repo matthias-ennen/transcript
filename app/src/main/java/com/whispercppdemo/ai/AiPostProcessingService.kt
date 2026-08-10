@@ -162,9 +162,17 @@ class AiPostProcessingService : Service() {
                         diagnostics = diagnostics.toList()
                     )
                 )
-                engine.generateTest(prompt)
+                val generation = engine.generateTest(prompt)
+                val report = engine.runtimeReport()
+                addDiagnostic(
+                    "Backend angefordert: ${report.requestedBackend} · aktiv: ${report.activeBackend} · ${report.activeCpuBackend}."
+                )
+                generation
             }
             val generation = sessionResult.value
+            if (sessionResult.info.cpuFallbackUsed) {
+                addDiagnostic("Vulkan-Gerät verloren; Anfrage einmalig vollständig über CPU wiederholt.")
+            }
             addDiagnostic(
                 "Erstes Antwort-Token nach ${generation.metrics.timeToFirstTokenMs} ms."
             )

@@ -127,17 +127,23 @@ class LocalAiEngine(
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
         require(prompt.isNotBlank()) { "Der Gesprächskontext darf nicht leer sein." }
         check(LocalAiNative.prepareCorrectionContext(handle, prompt)) {
-            "Der gemeinsame Gesprächskontext konnte nicht vorbereitet werden."
+            LocalAiNative.lastError(handle)
+                ?.takeIf(String::isNotBlank)
+                ?: "Der gemeinsame Gesprächskontext konnte nicht vorbereitet werden."
         }
     }
 
     fun correctSegment(prompt: String, maximumOutputTokens: Int): String {
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
         require(prompt.isNotBlank()) { "Das Zielsegment darf nicht leer sein." }
-        return LocalAiNative.generateCorrection(handle, prompt, maximumOutputTokens)
+        val result = LocalAiNative.generateCorrection(handle, prompt, maximumOutputTokens)
             ?.trim()
             ?.takeIf(String::isNotEmpty)
-            ?: "{\"result\":\"\"}"
+        if (result != null) return result
+        LocalAiNative.lastError(handle)
+            ?.takeIf(String::isNotBlank)
+            ?.let { error(it) }
+        return "{\"result\":\"\"}"
     }
 
     override fun close() {

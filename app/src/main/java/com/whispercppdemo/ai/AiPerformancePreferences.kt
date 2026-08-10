@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 
 private const val PERFORMANCE_PREFERENCES = "local_ai_performance_profiles_v1"
-private const val PROFILE_SCHEMA = 1
+private const val PROFILE_SCHEMA = 2
 
 class AiPerformancePreferences(context: Context) {
     private val preferences = context.getSharedPreferences(
@@ -12,36 +12,40 @@ class AiPerformancePreferences(context: Context) {
         Context.MODE_PRIVATE
     )
 
+    init {
+        val editor = preferences.edit()
+        AiModel.entries.forEach { editor.remove("working_profile_${it.id}") }
+        editor.apply()
+    }
+
     fun load(model: AiModel): LocalAiConfiguration {
         val stored = preferences.getString(key(model), null) ?: return LocalAiConfiguration()
-        return runCatching { configurationFromJson(JSONObject(stored)) }
+        val normalized = runCatching { configurationFromJson(JSONObject(stored)) }
             .getOrElse { LocalAiConfiguration() }
             .normalized()
+        val normalizedJson = configurationToJson(normalized).toString()
+        if (stored != normalizedJson) {
+            preferences.edit().putString(key(model), normalizedJson).apply()
+        }
+        removeLegacyWorkingProfile(model)
+        return normalized
     }
 
     fun save(model: AiModel, configuration: LocalAiConfiguration): LocalAiConfiguration {
         val normalized = configuration.normalized()
-        preferences.edit().putString(key(model), configurationToJson(normalized).toString()).apply()
+        preferences.edit()
+            .putString(key(model), configurationToJson(normalized).toString())
+            .remove("working_profile_${model.id}")
+            .apply()
         return normalized
     }
 
     fun reset(model: AiModel): LocalAiConfiguration {
-        preferences.edit().remove(key(model)).apply()
-        return LocalAiConfiguration().normalized()
-    }
-
-    fun rememberWorking(model: AiModel, configuration: LocalAiConfiguration) {
-        val normalized = configuration.normalized()
         preferences.edit()
-            .putString(workingKey(model), configurationToJson(normalized).toString())
+            .remove(key(model))
+            .remove("working_profile_${model.id}")
             .apply()
-    }
-
-    fun restoreLastWorking(model: AiModel): LocalAiConfiguration? {
-        val stored = preferences.getString(workingKey(model), null) ?: return null
-        val configuration = runCatching { configurationFromJson(JSONObject(stored)) }.getOrNull()
-            ?: return null
-        return save(model, configuration)
+        return LocalAiConfiguration().normalized()
     }
 
     fun copy(source: AiModel, target: AiModel): LocalAiConfiguration = save(target, load(source))
@@ -55,15 +59,17 @@ class AiPerformancePreferences(context: Context) {
 
     fun importJson(model: AiModel, value: String): LocalAiConfiguration {
         val root = JSONObject(value)
-        val schema = root.optInt("schema", PROFILE_SCHEMA)
-        require(schema == PROFILE_SCHEMA) { "Unbekannte Profilversion: $schema" }
+        val schema = root.optInt("schema", 1)
+        require(schema in 1..PROFILE_SCHEMA) { "Unbekannte Profilversion: $schema" }
         val configuration = root.optJSONObject("configuration") ?: root
         return save(model, configurationFromJson(configuration))
     }
 
     private fun key(model: AiModel): String = "profile_${model.id}"
 
-    private fun workingKey(model: AiModel): String = "working_profile_${model.id}"
+    private fun removeLegacyWorkingProfile(model: AiModel) {
+        preferences.edit().remove("working_profile_${model.id}").apply()
+    }
 }
 
 private fun configurationToJson(value: LocalAiConfiguration): JSONObject = JSONObject()

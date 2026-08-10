@@ -3,6 +3,7 @@ package de.matthiasennen.transcript
 import de.matthiasennen.transcript.ai.LocalAiBackend
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.ai.AiModel
+import de.matthiasennen.transcript.ai.shouldRetryWithCpu
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -34,6 +35,38 @@ class AiPerformanceConfigurationTest {
         ).normalized()
 
         assertEquals(0, normalized.gpuLayers)
+        assertEquals(0, normalized.gpuLayerPercent)
+        assertEquals(false, normalized.offloadKqv)
+        assertEquals(false, normalized.offloadOperations)
+    }
+
+    @Test
+    fun automaticBackendIsGuaranteedToStayVulkanFree() {
+        val normalized = LocalAiConfiguration(
+            backend = LocalAiBackend.AUTO,
+            gpuLayers = -1,
+            gpuLayerPercent = 100,
+            offloadKqv = true,
+            offloadOperations = true
+        ).normalized()
+
+        assertEquals(0, normalized.gpuLayers)
+        assertEquals(0, normalized.gpuLayerPercent)
+        assertEquals(false, normalized.offloadKqv)
+        assertEquals(false, normalized.offloadOperations)
+    }
+
+    @Test
+    fun vulkanBackendMayKeepExplicitGpuOffloads() {
+        val normalized = LocalAiConfiguration(
+            backend = LocalAiBackend.VULKAN,
+            offloadKqv = true,
+            offloadOperations = true
+        ).normalized()
+
+        assertEquals(-1, normalized.gpuLayers)
+        assertEquals(true, normalized.offloadKqv)
+        assertEquals(true, normalized.offloadOperations)
     }
 
     @Test
@@ -48,8 +81,37 @@ class AiPerformanceConfigurationTest {
 
     @Test
     fun onlyTheCurrentQ4_0ModelCanUseKleidiAiWeightPacking() {
+        assertEquals(3, AiModel.entries.size)
         assertEquals(true, AiModel.QUICK.kleidiAiCompatible)
         assertEquals(false, AiModel.BALANCED.kleidiAiCompatible)
         assertEquals(false, AiModel.PRECISE.kleidiAiCompatible)
+    }
+
+    @Test
+    fun deviceLostRetriesOnlyExplicitGpuBackendsOnceViaCpu() {
+        assertEquals(
+            true,
+            shouldRetryWithCpu(
+                LocalAiConfiguration(backend = LocalAiBackend.VULKAN),
+                "VULKAN_DEVICE_LOST: vk::DeviceLostError"
+            )
+        )
+        assertEquals(
+            false,
+            shouldRetryWithCpu(
+                LocalAiConfiguration(backend = LocalAiBackend.CPU),
+                "VULKAN_DEVICE_LOST: vk::DeviceLostError"
+            )
+        )
+        assertEquals(
+            false,
+            shouldRetryWithCpu(
+                LocalAiConfiguration(
+                    backend = LocalAiBackend.HYBRID,
+                    automaticCpuFallback = false
+                ),
+                "VULKAN_DEVICE_LOST: vk::DeviceLostError"
+            )
+        )
     }
 }

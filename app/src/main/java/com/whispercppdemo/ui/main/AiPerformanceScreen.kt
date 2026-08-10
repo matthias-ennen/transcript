@@ -58,7 +58,6 @@ fun AiPerformanceScreen(
     onStartBenchmark: () -> Unit,
     onCancelBenchmark: () -> Unit,
     onResetConfiguration: () -> Unit,
-    onRestoreLastWorkingConfiguration: () -> Unit,
     onCopyConfiguration: (AiModel) -> Unit,
     onExportConfiguration: () -> Unit,
     onJsonChanged: (String) -> Unit,
@@ -66,6 +65,8 @@ fun AiPerformanceScreen(
     modifier: Modifier = Modifier
 ) {
     val configuration = state.aiPerformanceConfiguration
+    val gpuSettingsEnabled = configuration.backend == LocalAiBackend.VULKAN ||
+        configuration.backend == LocalAiBackend.HYBRID
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -198,12 +199,15 @@ fun AiPerformanceScreen(
                     listOf(0 to "Kein Vulkan-Gerät erkannt")
                 } else {
                     vulkanDevices.mapIndexed { index, device -> index to device.description }
-                }
+                },
+                enabled = gpuSettingsEnabled
             ) { onConfigurationChanged(configuration.copy(gpuDeviceIndex = it)) }
             NumberSetting(
                 "GPU-Schichten",
                 configuration.gpuLayers,
-                "−1 = vollständig; bei gemischtem Backend exakte Schichtzahl"
+                if (gpuSettingsEnabled) "−1 = vollständig; bei gemischtem Backend exakte Schichtzahl"
+                else "Nur für Vulkan oder CPU/Vulkan verfügbar",
+                enabled = gpuSettingsEnabled
             ) { onConfigurationChanged(configuration.copy(gpuLayers = it)) }
             NumberSetting(
                 "GPU-Anteil",
@@ -212,7 +216,8 @@ fun AiPerformanceScreen(
                     "0–100 Prozent · Modell hat ${state.performanceModelLayerCount} Schichten"
                 } else {
                     "0–100 Prozent · Modell muss für die Umrechnung installiert sein"
-                }
+                },
+                enabled = gpuSettingsEnabled
             ) { percent ->
                 val normalizedPercent = percent.coerceIn(0, 100)
                 val layers = if (state.performanceModelLayerCount > 0) {
@@ -230,12 +235,14 @@ fun AiPerformanceScreen(
             BooleanSetting(
                 "KQV/KV-Cache auslagern",
                 "Legt K/Q/V-Operationen und den KV-Cache auf das GPU-Backend.",
-                configuration.offloadKqv
+                configuration.offloadKqv,
+                enabled = gpuSettingsEnabled
             ) { onConfigurationChanged(configuration.copy(offloadKqv = it)) }
             BooleanSetting(
                 "Rechenoperationen auslagern",
                 "Erlaubt llama.cpp geeignete Host-Operationen auf Vulkan auszuführen.",
-                configuration.offloadOperations
+                configuration.offloadOperations,
+                enabled = gpuSettingsEnabled
             ) { onConfigurationChanged(configuration.copy(offloadOperations = it)) }
             BooleanSetting(
                 "Automatischer CPU-Rückfall",
@@ -338,11 +345,6 @@ fun AiPerformanceScreen(
                 enabled = !state.isBusy,
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Standardwerte wiederherstellen") }
-            OutlinedButton(
-                onClick = onRestoreLastWorkingConfiguration,
-                enabled = !state.isBusy,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Letzte erfolgreiche Testkonfiguration wiederherstellen") }
             Button(
                 onClick = onExportConfiguration,
                 enabled = !state.isBusy,
@@ -467,6 +469,7 @@ private fun NumberSetting(
     title: String,
     value: Int,
     description: String,
+    enabled: Boolean = true,
     onValueChanged: (Int) -> Unit
 ) {
     var text by remember(title) { mutableStateOf(value.toString()) }
@@ -485,6 +488,7 @@ private fun NumberSetting(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
         keyboardActions = KeyboardActions(onDone = { commit() }),
         singleLine = true,
+        enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
             .onFocusChanged { state ->
@@ -516,6 +520,7 @@ private fun BooleanSetting(
     title: String,
     description: String,
     value: Boolean,
+    enabled: Boolean = true,
     onValueChanged: (Boolean) -> Unit
 ) {
     Row(
@@ -527,7 +532,7 @@ private fun BooleanSetting(
             Text(title, style = MaterialTheme.typography.titleSmall)
             Text(description, style = MaterialTheme.typography.bodySmall)
         }
-        Switch(checked = value, onCheckedChange = onValueChanged)
+        Switch(checked = value, onCheckedChange = onValueChanged, enabled = enabled)
     }
 }
 
@@ -536,6 +541,7 @@ private fun <T> ChoiceSetting(
     title: String,
     selected: T,
     options: List<Pair<T, String>>,
+    enabled: Boolean = true,
     onSelected: (T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -543,7 +549,11 @@ private fun <T> ChoiceSetting(
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(title, style = MaterialTheme.typography.labelLarge)
         Box {
-            OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(label)
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -581,6 +591,10 @@ private fun BenchmarkResultCard(result: AiBenchmarkResult) {
             Text("Benchmark-Ergebnis", style = MaterialTheme.typography.titleMedium)
             Text("Backend: ${result.runs.lastOrNull()?.runtimeReport?.activeBackend ?: "–"}")
             Text("CPU-Pfad: ${result.runs.lastOrNull()?.runtimeReport?.activeCpuBackend ?: "–"}")
+            result.runs.lastOrNull()?.runtimeReport?.let { report ->
+                Text("Angefordert: ${report.requestedBackend}")
+                if (report.fallbackUsed) Text("Rückfall: Ja · aktiv ${report.activeBackend}")
+            }
             Text("Modellladen: Ø ${result.averageLoadMs} ms")
             Text("Erstes Token: Ø ${result.averageFirstTokenMs} ms")
             Text("Prompt: Ø ${decimal(result.averagePromptTokensPerSecond)} Tokens/s")
