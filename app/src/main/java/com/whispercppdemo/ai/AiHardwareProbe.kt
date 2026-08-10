@@ -31,8 +31,14 @@ data class AiHardwareSnapshot(
     val batteryPercent: Int,
     val charging: Boolean,
     val thermalStatus: Int,
+    val nativeRuntimeLoaded: Boolean,
+    val nativeRuntimeError: String?,
+    val cpuVariant: String,
     val kleidiAiCompiled: Boolean,
+    val kleidiAiBufferAvailable: Boolean,
+    val kleidiAiUsable: Boolean,
     val vulkanCompiled: Boolean,
+    val vulkanAvailable: Boolean,
     val neon: Boolean,
     val fp16Vector: Boolean,
     val dotProduct: Boolean,
@@ -49,6 +55,7 @@ data class AiHardwareSnapshot(
 
 object AiHardwareProbe {
     fun read(context: Context): AiHardwareSnapshot {
+        LocalAiEngine.configureNativeLibraryDirectory(context.applicationInfo.nativeLibraryDir)
         val activityManager = context.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo().also(activityManager::getMemoryInfo)
         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -58,8 +65,11 @@ object AiHardwareProbe {
         val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
             status == BatteryManager.BATTERY_STATUS_FULL
         val powerManager = context.getSystemService(PowerManager::class.java)
-        val native = runCatching { JSONObject(LocalAiEngine.runtimeCapabilitiesJson()) }
-            .getOrElse { JSONObject() }
+        val nativeResult = runCatching { JSONObject(LocalAiEngine.runtimeCapabilitiesJson()) }
+        val native = nativeResult.getOrElse { JSONObject() }
+        val nativeError = nativeResult.exceptionOrNull()?.let { error ->
+            "${error::class.java.simpleName}: ${error.message ?: "Native Laufzeit nicht verfügbar"}"
+        } ?: native.optString("nativeRuntimeError").takeIf(String::isNotBlank)
         val cpu = native.optJSONObject("cpu") ?: JSONObject()
         val devicesJson = native.optJSONArray("devices")
         val devices = buildList {
@@ -100,8 +110,14 @@ object AiHardwareProbe {
             } else {
                 0
             },
+            nativeRuntimeLoaded = native.optBoolean("nativeRuntimeLoaded", false),
+            nativeRuntimeError = nativeError,
+            cpuVariant = native.optString("cpuVariant", "Unbekannt"),
             kleidiAiCompiled = native.optBoolean("kleidiAiCompiled", false),
+            kleidiAiBufferAvailable = native.optBoolean("kleidiAiBufferAvailable", false),
+            kleidiAiUsable = native.optBoolean("kleidiAiUsable", false),
             vulkanCompiled = native.optBoolean("vulkanCompiled", false),
+            vulkanAvailable = native.optBoolean("vulkanAvailable", false),
             neon = cpu.optBoolean("neon", false),
             fp16Vector = cpu.optBoolean("fp16Vector", false),
             dotProduct = cpu.optBoolean("dotProduct", false),

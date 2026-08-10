@@ -159,13 +159,25 @@ längerer Korrekturläufe erneut kontrolliert. `AiPerformanceBenchmark` hält di
 Messläufe getrennt vom normalen Korrekturpfad; Aufwärmläufe fließen nicht in die
 Mittelwerte ein.
 
-Für ARM64 baut das `llm`-Modul neben dem portablen ggml-CPU-Pfad die
-KleidiAI-Kernel und das Vulkan-Backend fest ein. Die Laufzeit wählt
-Standard-CPU/KleidiAI über die CPU-Buffer-Typen und CPU/Vulkan über die
-öffentlichen Backend-Geräte von llama.cpp. Threadzahl, Affinitätsmaske,
-Priorität und Polling werden über einen ggml-Threadpool gesetzt; Kontext,
-Batchgrößen, Flash Attention, KQV- und Operationsauslagerung gehen direkt in
-die llama.cpp-Kontextparameter ein. x86/x86_64 bleiben portable CPU-Builds.
+Für ARM64 baut das `llm`-Modul mehrere dynamisch geladene Android-CPU-Varianten:
+portables ARMv8, Dot Product, FP16/INT8 und SVE2. `llama.cpp` bewertet sie anhand
+der realen HWCAP/HWCAP2-Fähigkeiten und lädt nur die beste kompatible Variante
+aus dem Native-Verzeichnis der App. Jede beschleunigte Variante enthält die
+zugehörigen KleidiAI-Kernel; der portable Rückfallpfad bleibt erhalten. Erst
+innerhalb der ausgewählten Variante schaltet `use_extra_bufts` zwischen
+Standard-CPU und KleidiAI-Weight-Packing um. Das Vulkan-Backend wird aus
+demselben kontrollierten Suchpfad geladen. Threadzahl, Affinitätsmaske,
+Priorität und Polling werden über die Funktionsschnittstelle des tatsächlich
+geladenen CPU-Backends gesetzt; Kontext, Batchgrößen, Flash Attention, KQV- und
+Operationsauslagerung gehen direkt in die llama.cpp-Kontextparameter ein.
+x86/x86_64 bleiben portable statische CPU-Builds.
+
+Die Diagnose fragt Merkmale, Variantennamen und KleidiAI-Verfügbarkeit direkt
+über die geladene Backend-Registry ab. Sie unterscheidet verpacktes Backend,
+Gerätenutzbarkeit und Sitzungsaktivierung. Native Lade- oder JNI-Fehler bleiben
+als Fehlertext sichtbar. Da der gepinnte KleidiAI-Pfad Gewichtstypen Q4_0 und
+Q8_0 unterstützt, aktiviert die Laufzeit KleidiAI nur für entsprechend
+quantisierte Modelle; Q4_K_M fällt kontrolliert auf Standard-CPU zurück.
 
 `AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
 Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und

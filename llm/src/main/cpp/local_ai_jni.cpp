@@ -2,7 +2,9 @@
 #include <android/log.h>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <codecvt>
+#include <cstring>
 #include <cstdlib>
 #include <exception>
 #include <locale>
@@ -89,7 +91,9 @@ struct LocalEngine {
     int load_mode = 0;
     bool offload_kqv = true;
     bool offload_operations = true;
-    bool fallback_used = false;
+    bool cpu_fallback_used = false;
+    bool gpu_fallback_used = false;
+    bool kleidi_enabled = false;
     std::string gpu_device;
     ggml_threadpool * generation_threadpool = nullptr;
     ggml_threadpool * prompt_threadpool = nullptr;
@@ -101,10 +105,63 @@ struct LocalEngine {
     std::string correction_base_rendered;
 };
 
-std::once_flag backend_init_once;
+using ThreadpoolNewFn = ggml_threadpool * (*)(ggml_threadpool_params *);
+using ThreadpoolFreeFn = void (*)(ggml_threadpool *);
 
-void ensure_backend_initialized() {
-    std::call_once(backend_init_once, []() { llama_backend_init(); });
+struct CpuRuntimeInfo {
+    ggml_backend_dev_t device = nullptr;
+    ggml_backend_reg_t registry = nullptr;
+    std::string variant;
+    bool neon = false;
+    bool fp16_vector = false;
+    bool dot_product = false;
+    bool int8_matrix = false;
+    bool sve = false;
+    int sve_bytes = 0;
+    bool sme = false;
+    bool sme2 = false;
+    bool kleidi_compiled = false;
+    bool kleidi_buffer = false;
+    bool kleidi_usable = false;
+    ThreadpoolNewFn threadpool_new = nullptr;
+    ThreadpoolFreeFn threadpool_free = nullptr;
+};
+
+std::mutex backend_init_mutex;
+bool backend_core_initialized = false;
+std::vector<std::string> loaded_backend_paths;
+
+std::vector<std::string> split_search_paths(const std::string & value) {
+    std::vector<std::string> paths;
+    std::stringstream stream(value);
+    std::string path;
+    while (std::getline(stream, path, ':')) {
+        if (!path.empty() &&
+            std::find(paths.begin(), paths.end(), path) == paths.end()) {
+            paths.push_back(path);
+        }
+    }
+    return paths;
+}
+
+void ensure_backend_initialized(const std::string & search_paths = {}) {
+    std::lock_guard<std::mutex> lock(backend_init_mutex);
+    if (!backend_core_initialized) {
+        llama_backend_init();
+        backend_core_initialized = true;
+    }
+#ifdef TRANSCRIPT_DYNAMIC_BACKENDS
+    for (const std::string & path : split_search_paths(search_paths)) {
+        if (std::find(loaded_backend_paths.begin(), loaded_backend_paths.end(), path) !=
+            loaded_backend_paths.end()) {
+            continue;
+        }
+        ggml_backend_load_all_from_path(path.c_str());
+        loaded_backend_paths.push_back(path);
+    }
+#else
+    (void) search_paths;
+#endif
 }
 
 const char * backend_name(int backend) {
@@ -126,20 +183,92 @@ const char * load_mode_name(int mode) {
     }
 }
 
-bool kleidi_compiled() {
-#ifdef GGML_USE_CPU_KLEIDIAI
+bool feature_enabled(
+    const ggml_backend_feature * features,
+    const char * name) {
+    if (!features) return false;
+    for (const ggml_backend_feature * feature = features; feature->name; ++feature) {
+        if (std::strcmp(feature->name, name) == 0) {
+            return !feature->value || std::strcmp(feature->value, "0") != 0;
+        }
+    }
+    return false;
+}
+
+int feature_integer(
+    const ggml_backend_feature * features,
+    const char * name) {
+    if (!features) return 0;
+    for (const ggml_backend_feature * feature = features; feature->name; ++feature) {
+        if (std::strcmp(feature->name, name) == 0 && feature->value) {
+            try {
+                return std::stoi(feature->value);
+            } catch (...) {
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
+CpuRuntimeInfo cpu_runtime_info() {
+    CpuRuntimeInfo result;
+    result.device = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (!result.device) return result;
+    result.registry = ggml_backend_dev_backend_reg(result.device);
+    const char * registry_name = result.registry ? ggml_backend_reg_name(result.registry) : nullptr;
+    result.variant = registry_name ? registry_name : "CPU";
+    if (!result.registry) return result;
+
+    const auto get_features = reinterpret_cast<ggml_backend_get_features_t>(
+        ggml_backend_reg_get_proc_address(result.registry, "ggml_backend_get_features"));
+    ggml_backend_feature * features = get_features ? get_features(result.registry) : nullptr;
+    result.neon = feature_enabled(features, "NEON");
+    result.fp16_vector = feature_enabled(features, "FP16_VA");
+    result.dot_product = feature_enabled(features, "DOTPROD");
+    result.int8_matrix = feature_enabled(features, "MATMUL_INT8");
+    result.sve = feature_enabled(features, "SVE");
+    result.sve_bytes = feature_integer(features, "SVE_CNT");
+    result.sme = feature_enabled(features, "SME");
+    result.sme2 = feature_enabled(features, "SME2");
+    result.kleidi_compiled = feature_enabled(features, "KLEIDIAI");
+
+    const auto get_extra_bufts = reinterpret_cast<ggml_backend_dev_get_extra_bufts_t>(
+        ggml_backend_reg_get_proc_address(result.registry, "ggml_backend_dev_get_extra_bufts"));
+    // Do not call the provider here: constructing the KleidiAI buffer freezes
+    // its environment-controlled SME/chunk settings. Model loading calls it
+    // only after the selected profile has configured those values.
+    result.kleidi_buffer = result.kleidi_compiled && get_extra_bufts != nullptr;
+    result.kleidi_usable = result.kleidi_compiled && result.kleidi_buffer &&
+        (result.dot_product || result.int8_matrix || result.sve || result.sme);
+    result.threadpool_new = reinterpret_cast<ThreadpoolNewFn>(
+        ggml_backend_reg_get_proc_address(result.registry, "ggml_threadpool_new"));
+    result.threadpool_free = reinterpret_cast<ThreadpoolFreeFn>(
+        ggml_backend_reg_get_proc_address(result.registry, "ggml_threadpool_free"));
+    return result;
+}
+
+bool vulkan_packaged() {
+#ifdef TRANSCRIPT_VULKAN_PACKAGED
+    return true;
+#elif defined(GGML_USE_VULKAN)
     return true;
 #else
     return false;
 #endif
 }
 
-bool vulkan_compiled() {
-#ifdef GGML_USE_VULKAN
-    return true;
-#else
-    return false;
-#endif
+bool vulkan_available() {
+    return ggml_backend_reg_by_name("Vulkan") != nullptr;
+}
+
+bool model_supports_kleidiai(const std::string & model_path) {
+    std::string upper = model_path;
+    std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char value) {
+        return static_cast<char>(std::toupper(value));
+    });
+    return upper.find("Q4_0") != std::string::npos ||
+        upper.find("Q8_0") != std::string::npos;
 }
 
 std::vector<ggml_backend_dev_t> gpu_devices() {
@@ -193,21 +322,40 @@ void configure_threadpools(
     const std::string & cpu_mask,
     bool strict_cpu,
     int priority,
-    int polling) {
+    int polling,
+    const CpuRuntimeInfo & cpu) {
+    if (!cpu.threadpool_new) {
+        log_error("Selected CPU backend does not expose threadpool creation.");
+        return;
+    }
     ggml_threadpool_params generation =
         ggml_threadpool_params_default(engine->generation_threads);
     generation.prio = to_thread_priority(priority);
     generation.poll = static_cast<uint32_t>(std::clamp(polling, 0, 100));
     generation.strict_cpu = strict_cpu;
     apply_cpu_mask(generation, cpu_mask);
-    engine->generation_threadpool = ggml_threadpool_new(&generation);
+    engine->generation_threadpool = cpu.threadpool_new(&generation);
 
     ggml_threadpool_params prompt = ggml_threadpool_params_default(engine->prompt_threads);
     prompt.prio = to_thread_priority(priority);
     prompt.poll = static_cast<uint32_t>(std::clamp(polling, 0, 100));
     prompt.strict_cpu = strict_cpu;
     apply_cpu_mask(prompt, cpu_mask);
-    engine->prompt_threadpool = ggml_threadpool_new(&prompt);
+    engine->prompt_threadpool = cpu.threadpool_new(&prompt);
+}
+
+void free_threadpools(LocalEngine * engine) {
+    if (!engine) return;
+    const CpuRuntimeInfo cpu = cpu_runtime_info();
+    if (!cpu.threadpool_free) return;
+    if (engine->generation_threadpool) {
+        cpu.threadpool_free(engine->generation_threadpool);
+        engine->generation_threadpool = nullptr;
+    }
+    if (engine->prompt_threadpool) {
+        cpu.threadpool_free(engine->prompt_threadpool);
+        engine->prompt_threadpool = nullptr;
+    }
 }
 
 void configure_kleidi_environment(int sme_units, int chunk_multiplier, int threads) {
@@ -577,11 +725,17 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     jint thread_priority,
     jint thread_polling_percent,
     jint kleidi_sme_units,
-    jint kleidi_chunk_multiplier) {
+    jint kleidi_chunk_multiplier,
+    jstring native_library_search_path_value) {
     const std::string model_path = from_java(env, model_path_value);
     if (model_path.empty()) return 0;
 
-    ensure_backend_initialized();
+    ensure_backend_initialized(from_java(env, native_library_search_path_value));
+    const CpuRuntimeInfo cpu = cpu_runtime_info();
+    if (!cpu.device) {
+        log_error("No compatible CPU backend could be loaded from the APK.");
+        return 0;
+    }
     auto * engine = new LocalEngine();
     engine->context_size = std::clamp(static_cast<int>(context_size), 1024, 32768);
     engine->generation_threads = std::clamp(static_cast<int>(generation_threads), 1, 64);
@@ -601,6 +755,19 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     engine->requested_gpu_layers = static_cast<int>(gpu_layers);
     engine->offload_kqv = offload_kqv == JNI_TRUE;
     engine->offload_operations = offload_operations == JNI_TRUE;
+    const bool model_kleidi_compatible = model_supports_kleidiai(model_path);
+    engine->kleidi_enabled = engine->requested_cpu_backend != 1 &&
+        cpu.kleidi_usable && model_kleidi_compatible;
+    if (engine->requested_cpu_backend == 2 && !engine->kleidi_enabled) {
+        if (automatic_cpu_fallback != JNI_TRUE) {
+            log_error(model_kleidi_compatible
+                ? "KleidiAI was requested, but the selected CPU backend has no compatible KleidiAI kernels."
+                : "KleidiAI supports Q4_0/Q8_0 models; the selected model uses another quantization.");
+            delete engine;
+            return 0;
+        }
+        engine->cpu_fallback_used = true;
+    }
 
     configure_kleidi_environment(
         static_cast<int>(kleidi_sme_units),
@@ -624,7 +791,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     const auto load_model = [&](bool with_gpu) -> llama_model * {
         llama_model_params params = llama_model_default_params();
         params.load_mode = to_load_mode(engine->load_mode);
-        params.use_extra_bufts = engine->requested_cpu_backend != 1;
+        params.use_extra_bufts = engine->kleidi_enabled;
         if (with_gpu && selected_devices.size() > 1) {
             params.devices = selected_devices.data();
             params.n_gpu_layers = engine->requested_backend == 2
@@ -642,12 +809,12 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
             delete engine;
             return 0;
         }
-        engine->fallback_used = true;
+        engine->gpu_fallback_used = true;
     }
     engine->model = load_model(wants_gpu && !selected_devices.empty());
     if (!engine->model && wants_gpu && automatic_cpu_fallback == JNI_TRUE) {
         log_error("Vulkan model load failed; retrying with CPU.");
-        engine->fallback_used = true;
+        engine->gpu_fallback_used = true;
         engine->gpu_device.clear();
         engine->model = load_model(false);
     }
@@ -662,7 +829,8 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
         from_java(env, cpu_core_mask_value),
         strict_cpu_placement == JNI_TRUE,
         static_cast<int>(thread_priority),
-        static_cast<int>(thread_polling_percent));
+        static_cast<int>(thread_polling_percent),
+        cpu);
     try {
         const char * source = llama_model_chat_template(engine->model, nullptr);
         if (!source || source[0] == '\0') {
@@ -677,8 +845,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
             eos == LLAMA_TOKEN_NULL ? std::string() : token_piece(vocab, eos));
     } catch (const std::exception & exception) {
         log_error(std::string("Chat template initialization failed: ") + exception.what());
-        if (engine->generation_threadpool) ggml_threadpool_free(engine->generation_threadpool);
-        if (engine->prompt_threadpool) ggml_threadpool_free(engine->prompt_threadpool);
+        free_threadpools(engine);
         llama_model_free(engine->model);
         delete engine;
         return 0;
@@ -928,14 +1095,15 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeReport(
     jlong handle) {
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine || !engine->model) return nullptr;
-    const bool gpu_active = !engine->fallback_used && !engine->gpu_device.empty() &&
+    const bool gpu_active = !engine->gpu_fallback_used && !engine->gpu_device.empty() &&
         (engine->requested_backend == 2 || engine->requested_backend == 3);
     const std::string active_backend = gpu_active
         ? (engine->requested_backend == 2 ? "Vulkan" : "CPU/Vulkan")
         : "CPU";
-    const std::string active_cpu = engine->requested_cpu_backend == 1 || !kleidi_compiled()
-        ? "Standard-CPU"
-        : "KleidiAI freigegeben";
+    const CpuRuntimeInfo cpu = cpu_runtime_info();
+    const std::string active_cpu = engine->kleidi_enabled
+        ? "KleidiAI aktiviert (" + cpu.variant + ")"
+        : "Standard-CPU (" + cpu.variant + ")";
     return to_java_generation_result(env, {
         backend_name(engine->requested_backend),
         active_backend,
@@ -943,7 +1111,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeReport(
         engine->gpu_device.empty() ? "Kein Vulkan-Gerät aktiv" : engine->gpu_device,
         std::to_string(llama_model_n_layer(engine->model)),
         std::to_string(engine->requested_gpu_layers),
-        engine->fallback_used ? "true" : "false",
+        (engine->cpu_fallback_used || engine->gpu_fallback_used) ? "true" : "false",
         load_mode_name(engine->load_mode),
     });
 }
@@ -951,20 +1119,29 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeReport(
 extern "C" JNIEXPORT jstring JNICALL
 Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeCapabilities(
     JNIEnv * env,
-    jobject) {
-    ensure_backend_initialized();
+    jobject,
+    jstring native_library_search_path_value) {
+    ensure_backend_initialized(from_java(env, native_library_search_path_value));
+    const CpuRuntimeInfo cpu = cpu_runtime_info();
+    const bool cpu_loaded = cpu.device != nullptr;
     nlohmann::ordered_json result = {
-        {"kleidiAiCompiled", kleidi_compiled()},
-        {"vulkanCompiled", vulkan_compiled()},
+        {"nativeRuntimeLoaded", cpu_loaded},
+        {"nativeRuntimeError", cpu_loaded ? "" : "Kein kompatibles CPU-Backend aus der APK geladen."},
+        {"cpuVariant", cpu.variant},
+        {"kleidiAiCompiled", cpu.kleidi_compiled},
+        {"kleidiAiBufferAvailable", cpu.kleidi_buffer},
+        {"kleidiAiUsable", cpu.kleidi_usable},
+        {"vulkanCompiled", vulkan_packaged()},
+        {"vulkanAvailable", vulkan_available()},
         {"cpu", {
-            {"neon", ggml_cpu_has_neon() != 0},
-            {"fp16Vector", ggml_cpu_has_fp16_va() != 0},
-            {"dotProduct", ggml_cpu_has_dotprod() != 0},
-            {"int8Matrix", ggml_cpu_has_matmul_int8() != 0},
-            {"sve", ggml_cpu_has_sve() != 0},
-            {"sveBytes", ggml_cpu_get_sve_cnt()},
-            {"sme", ggml_cpu_has_sme() != 0},
-            {"sme2", ggml_cpu_has_sme2() != 0},
+            {"neon", cpu.neon},
+            {"fp16Vector", cpu.fp16_vector},
+            {"dotProduct", cpu.dot_product},
+            {"int8Matrix", cpu.int8_matrix},
+            {"sve", cpu.sve},
+            {"sveBytes", cpu.sve_bytes},
+            {"sme", cpu.sme},
+            {"sme2", cpu.sme2},
         }},
     };
     result["devices"] = nlohmann::ordered_json::array();
@@ -996,10 +1173,11 @@ extern "C" JNIEXPORT jint JNICALL
 Java_de_matthiasennen_transcript_ai_LocalAiNative_inspectModelLayerCount(
     JNIEnv * env,
     jobject,
-    jstring model_path_value) {
+    jstring model_path_value,
+    jstring native_library_search_path_value) {
     const std::string model_path = from_java(env, model_path_value);
     if (model_path.empty()) return 0;
-    ensure_backend_initialized();
+    ensure_backend_initialized(from_java(env, native_library_search_path_value));
     llama_model_params params = llama_model_default_params();
     params.vocab_only = true;
     params.n_gpu_layers = 0;
@@ -1023,7 +1201,6 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_release(
     clear_correction_session(engine);
     engine->chat_template.reset();
     if (engine->model) llama_model_free(engine->model);
-    if (engine->generation_threadpool) ggml_threadpool_free(engine->generation_threadpool);
-    if (engine->prompt_threadpool) ggml_threadpool_free(engine->prompt_threadpool);
+    free_threadpools(engine);
     delete engine;
 }

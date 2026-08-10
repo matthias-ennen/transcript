@@ -16,7 +16,7 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments '-DCMAKE_BUILD_TYPE=Release'
+                arguments '-DCMAKE_BUILD_TYPE=Release', '-DANDROID_STL=c++_shared'
             }
         }
     }
@@ -25,7 +25,7 @@ android {
         debug {
             externalNativeBuild {
                 cmake {
-                    arguments '-DCMAKE_BUILD_TYPE=Release'
+                    arguments '-DCMAKE_BUILD_TYPE=Release', '-DANDROID_STL=c++_shared'
                 }
             }
         }

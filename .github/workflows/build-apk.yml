@@ -76,6 +76,25 @@ jobs:
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
 
+      - name: Verify KleidiAI runtime payload
+        run: |
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          for library in \
+            libggml-cpu-android_armv8.0_1.so \
+            libggml-cpu-android_armv8.2_1.so \
+            libggml-cpu-android_armv8.6_1.so \
+            libggml-cpu-android_armv9.0_1.so; do
+            unzip -l "$apk" | grep -F "lib/arm64-v8a/$library"
+          done
+          audit_dir="$RUNNER_TEMP/kleidiai-audit"
+          mkdir -p "$audit_dir"
+          unzip -p "$apk" \
+            lib/arm64-v8a/libggml-cpu-android_armv8.6_1.so \
+            > "$audit_dir/libggml-cpu-i8mm.so"
+          strings "$audit_dir/libggml-cpu-i8mm.so" | grep -F "CPU_KLEIDIAI"
+          strings "$audit_dir/libggml-cpu-i8mm.so" | grep -E \
+            "kai_run_matmul_clamp.*(dotprod|i8mm)"
+
       - name: Verify APK signature
         run: |
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk

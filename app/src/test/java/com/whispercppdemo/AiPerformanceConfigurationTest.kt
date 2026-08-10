@@ -2,6 +2,7 @@ package de.matthiasennen.transcript
 
 import de.matthiasennen.transcript.ai.LocalAiBackend
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
+import de.matthiasennen.transcript.ai.AiModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -43,5 +44,12 @@ class AiPerformanceConfigurationTest {
             base.copy(benchmarkMeasuredRuns = 8, minimumFreeMemoryMb = 1_024).runtimeKey()
         )
         assertNotEquals(base.runtimeKey(), base.copy(contextSize = 8_192).runtimeKey())
+    }
+
+    @Test
+    fun onlyTheCurrentQ4_0ModelCanUseKleidiAiWeightPacking() {
+        assertEquals(true, AiModel.QUICK.kleidiAiCompatible)
+        assertEquals(false, AiModel.BALANCED.kleidiAiCompatible)
+        assertEquals(false, AiModel.PRECISE.kleidiAiCompatible)
     }
 }

@@ -161,8 +161,20 @@ fun AiPerformanceScreen(
             state.aiHardwareSnapshot?.let { hardware ->
                 Text(
                     "KleidiAI eingebaut: ${yesNo(hardware.kleidiAiCompiled)} · " +
+                        "auf diesem Gerät nutzbar: ${yesNo(hardware.kleidiAiUsable)} · " +
                         "Dot Product: ${yesNo(hardware.dotProduct)} · INT8: ${yesNo(hardware.int8Matrix)} · " +
                         "SVE: ${yesNo(hardware.sve)} · SME: ${yesNo(hardware.sme)} · SME2: ${yesNo(hardware.sme2)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "Geladene CPU-Variante: ${hardware.cpuVariant} · " +
+                        "KleidiAI-Puffer: ${yesNo(hardware.kleidiAiBufferAvailable)} · " +
+                        "Modell ${state.performanceProfileModel.modelLabel}: " +
+                        (if (state.performanceProfileModel.kleidiAiCompatible) {
+                            "KleidiAI-kompatibel"
+                        } else {
+                            "nicht KleidiAI-kompatibel (benötigt Q4_0 oder Q8_0)"
+                        }),
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -232,6 +244,7 @@ fun AiPerformanceScreen(
             ) { onConfigurationChanged(configuration.copy(automaticCpuFallback = it)) }
             Text(
                 "Vulkan eingebaut: ${yesNo(state.aiHardwareSnapshot?.vulkanCompiled == true)} · " +
+                    "auf diesem Gerät verfügbar: ${yesNo(state.aiHardwareSnapshot?.vulkanAvailable == true)} · " +
                     "erkannte GPU-Geräte: ${vulkanDevices.size}",
                 style = MaterialTheme.typography.bodySmall
             )
@@ -391,8 +404,16 @@ private fun ProfileAndHardwareSection(
 
 @Composable
 private fun HardwareSummary(hardware: AiHardwareSnapshot) {
+    hardware.nativeRuntimeError?.let { error ->
+        Text(
+            "Native KI-Diagnosefehler: $error",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
     Text(
-        "CPU: ${hardware.processorCount} Kerne · ABI ${hardware.supportedAbis}",
+        "CPU: ${hardware.processorCount} Kerne · ABI ${hardware.supportedAbis} · " +
+            "Native Laufzeit: ${if (hardware.nativeRuntimeLoaded) "geladen" else "nicht geladen"}",
         style = MaterialTheme.typography.bodySmall
     )
     val frequencies = hardware.coreMaximumFrequenciesKhz.filter { it > 0L }
