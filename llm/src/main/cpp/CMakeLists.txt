@@ -44,7 +44,9 @@ add_subdirectory(${LLAMA_SRC} build-llama EXCLUDE_FROM_ALL)
 
 # The Android NDK exposes Vulkan's C API and loader but omits Khronos'
 # header-only C++ bindings required by ggml-vulkan. CI stages the distro's
-# matching Vulkan headers here before Gradle configures this target.
+# matching Vulkan headers here before Gradle configures this target. The CI
+# step also routes Vulkan 1.1 feature queries through Vulkan-Hpp's dynamic
+# dispatcher because Android API 26 does not link that symbol directly.
 if(ANDROID_ABI STREQUAL "arm64-v8a" AND TARGET ggml-vulkan)
     target_include_directories(ggml-vulkan PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/host-vulkan-headers")
