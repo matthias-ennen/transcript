@@ -3,11 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <codecvt>
 #include <cstring>
 #include <cstdlib>
 #include <exception>
-#include <locale>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -25,6 +23,7 @@
 #include "ggml-backend.h"
 #include "ggml-cpu.h"
 #include "llama.h"
+#include "utf8_to_utf16.h"
 
 namespace {
 
@@ -399,14 +398,9 @@ std::string from_java(JNIEnv * env, jstring value) {
 }
 
 jstring to_java(JNIEnv * env, const std::string & value) {
-    try {
-        std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-        const std::u16string utf16 = converter.from_bytes(value);
-        return env->NewString(reinterpret_cast<const jchar *>(utf16.data()),
-                              static_cast<jsize>(utf16.size()));
-    } catch (...) {
-        return env->NewStringUTF(value.c_str());
-    }
+    const std::u16string utf16 = transcript::utf8_to_utf16_replacing_invalid(value);
+    return env->NewString(reinterpret_cast<const jchar *>(utf16.data()),
+                          static_cast<jsize>(utf16.size()));
 }
 
 long elapsed_ms(SteadyClock::time_point start, SteadyClock::time_point end) {
