@@ -38,6 +38,7 @@ import de.matthiasennen.transcript.ai.AiModelInstallation
 fun SettingsScreen(
     state: TranscriptUiState,
     onOpenAiDiagnostics: () -> Unit,
+    onOpenAiPerformance: () -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
@@ -93,6 +94,17 @@ fun SettingsScreen(
                 ) {
                     Text(
                         "KI-Diagnose-Seite",
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                }
+                TextButton(
+                    onClick = onOpenAiPerformance,
+                    modifier = Modifier.align(Alignment.Start),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        "KI-Leistung und Hardware",
                         color = MaterialTheme.colorScheme.primary,
                         textDecoration = TextDecoration.Underline
                     )
@@ -376,7 +388,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
 
         InfoCard("Open Source & Lizenzen") {
             Text(
-                "Die Spracherkennung verwendet whisper.cpp und die lokale KI llama.cpp unter MIT-Lizenz. Qwen3.5-Modelle stehen unter Apache 2.0."
+                "Die Spracherkennung verwendet whisper.cpp und die lokale KI llama.cpp unter MIT-Lizenz. Qwen3.5-Modelle und die eingebauten KleidiAI-CPU-Kernel stehen unter Apache 2.0."
             )
         }
 

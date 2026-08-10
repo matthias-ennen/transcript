@@ -36,6 +36,9 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - automatische KI-Korrektur nach dem Entladen von Whisper
 - gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
 - dauerhafte KI-Diagnose-Seite für eigene Fragen, Modellvergleich und App-Protokoll
+- eigene Seite **KI-Leistung und Hardware** mit getrennten Profilen je KI-Modell,
+  CPU-/KleidiAI-/Vulkan-Steuerung, Hardwarediagnose, Wärme- und Speicherschutz
+  sowie reproduzierbarem Benchmark
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
@@ -144,6 +147,22 @@ vorliegt. Der Testbereich zeigt getrennt Modellladezeit, Promptverarbeitung, Zei
 bis zum ersten Antwort-Token, Antwortdauer, Gesamtdauer, Tokenzahlen und
 Beendigungsgrund an. So lässt sich insbesondere der zweite Aufruf eines Modells
 ohne erneut eingerechnete Ladezeit beurteilen.
+
+Direkt unter der KI-Diagnose liegt in den Einstellungen der Link
+**KI-Leistung und Hardware**. Die gleichnamige Unterseite speichert für jedes
+Qwen-Modell ein eigenes Leistungsprofil. Einstellbar sind Kontext, Batchgrößen,
+Ausgabelimit, getrennte Prompt- und Ausgabethreads, CPU-Affinität und -Priorität,
+Standard- oder KleidiAI-Kernel, Memory Mapping/Locking sowie CPU, Vulkan oder
+gemischte GPU-Auslagerung. Die Seite zeigt nur Fähigkeiten, die von Android und
+der gebauten nativen Laufzeit tatsächlich gemeldet werden.
+
+Vor jeder lokalen KI-Ausführung prüfen RAM-Reserve, maximale Speichernutzung und
+thermische Grenzwerte den Start. Bei hoher Wärme reduziert die App die wirksame
+Konfiguration; an der Abbruchgrenze beendet sie die Berechnung kontrolliert. Der
+eingebaute Benchmark trennt Aufwärm- und Messläufe und erfasst Modellladezeit,
+Prompt- und Ausgabetempo, Zeit bis zum ersten Token, Gesamtdauer, App-Speicher,
+Wärmestatus und den real verwendeten Backendpfad. Profile können kopiert,
+zurückgesetzt und als versioniertes JSON importiert oder exportiert werden.
 
 ## Status und Diagnose während der Transkription
 

@@ -34,6 +34,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Vulkan shader build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes glslc libvulkan-dev spirv-headers
+          mkdir -p llm/src/main/cpp/host-vulkan-headers
+          cp -R /usr/include/vulkan llm/src/main/cpp/host-vulkan-headers/
+          cp -R /usr/include/vk_video llm/src/main/cpp/host-vulkan-headers/vulkan/
+          cp -R /usr/include/spirv llm/src/main/cpp/host-vulkan-headers/
+          sed -i \
+            's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
+            third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+
       - name: Install Android build components
         run: |
           sdkmanager "platforms;android-34" \

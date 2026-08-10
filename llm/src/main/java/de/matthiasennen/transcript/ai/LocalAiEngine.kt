@@ -27,10 +27,32 @@ data class LocalAiGenerationResult(
  */
 class LocalAiEngine(
     modelPath: String,
-    contextSize: Int = 4_096,
-    threadCount: Int = preferredThreadCount()
+    val configuration: LocalAiConfiguration = LocalAiConfiguration()
 ) : Closeable {
-    private var handle: Long = LocalAiNative.create(modelPath, contextSize, threadCount)
+    private val normalizedConfiguration = configuration.normalized()
+    private var handle: Long = LocalAiNative.create(
+        modelPath = modelPath,
+        contextSize = normalizedConfiguration.contextSize,
+        generationThreads = normalizedConfiguration.generationThreads,
+        promptThreads = normalizedConfiguration.promptThreads,
+        batchSize = normalizedConfiguration.batchSize,
+        microBatchSize = normalizedConfiguration.microBatchSize,
+        flashAttention = normalizedConfiguration.flashAttention.ordinal,
+        loadMode = normalizedConfiguration.loadMode.ordinal,
+        backend = normalizedConfiguration.backend.ordinal,
+        cpuBackend = normalizedConfiguration.cpuBackend.ordinal,
+        gpuDeviceIndex = normalizedConfiguration.gpuDeviceIndex,
+        gpuLayers = normalizedConfiguration.gpuLayers,
+        offloadKqv = normalizedConfiguration.offloadKqv,
+        offloadOperations = normalizedConfiguration.offloadOperations,
+        automaticCpuFallback = normalizedConfiguration.automaticCpuFallback,
+        cpuCoreMask = normalizedConfiguration.cpuCoreMask,
+        strictCpuPlacement = normalizedConfiguration.strictCpuPlacement,
+        threadPriority = normalizedConfiguration.threadPriority.ordinal,
+        threadPollingPercent = normalizedConfiguration.threadPollingPercent,
+        kleidiSmeUnits = normalizedConfiguration.kleidiSmeUnits,
+        kleidiChunkMultiplier = normalizedConfiguration.kleidiChunkMultiplier
+    )
 
     init {
         check(handle != 0L) { "Das lokale KI-Modell konnte nicht geladen werden." }
@@ -65,10 +87,30 @@ class LocalAiEngine(
         )
     }
 
-    fun generateTest(prompt: String): LocalAiGenerationResult = generate(
+    fun generateTest(
+        prompt: String,
+        maximumOutputTokens: Int = normalizedConfiguration.maximumOutputTokens
+    ): LocalAiGenerationResult = generate(
         prompt = "[[FREE_TEST]]$prompt",
-        maximumOutputTokens = 512
+        maximumOutputTokens = maximumOutputTokens
     )
+
+    fun runtimeReport(): LocalAiRuntimeReport {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        val values = LocalAiNative.runtimeReport(handle)
+            ?: error("Die aktive KI-Laufzeit konnte nicht ausgelesen werden.")
+        check(values.size == RUNTIME_REPORT_FIELD_COUNT)
+        return LocalAiRuntimeReport(
+            requestedBackend = values[0],
+            activeBackend = values[1],
+            activeCpuBackend = values[2],
+            gpuDevice = values[3],
+            modelLayers = values[4].toIntOrNull() ?: 0,
+            requestedGpuLayers = values[5].toIntOrNull() ?: 0,
+            fallbackUsed = values[6].toBooleanStrictOrNull() ?: false,
+            loadMode = values[7]
+        )
+    }
 
     fun hasTestConversation(): Boolean {
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
@@ -105,10 +147,16 @@ class LocalAiEngine(
 
     companion object {
         private const val GENERATION_RESULT_FIELD_COUNT = 9
+        private const val RUNTIME_REPORT_FIELD_COUNT = 8
 
         internal fun preferredThreadCount(
             availableProcessors: Int = Runtime.getRuntime().availableProcessors()
-        ): Int = (availableProcessors - 2).coerceIn(2, 6)
+        ): Int = LocalAiConfiguration.preferredThreadCount(availableProcessors)
+
+        fun runtimeCapabilitiesJson(): String = LocalAiNative.runtimeCapabilities()
+
+        fun inspectModelLayerCount(modelPath: String): Int =
+            LocalAiNative.inspectModelLayerCount(modelPath)
     }
 }
 
@@ -117,7 +165,29 @@ internal object LocalAiNative {
         System.loadLibrary("transcript_llm")
     }
 
-    external fun create(modelPath: String, contextSize: Int, threadCount: Int): Long
+    external fun create(
+        modelPath: String,
+        contextSize: Int,
+        generationThreads: Int,
+        promptThreads: Int,
+        batchSize: Int,
+        microBatchSize: Int,
+        flashAttention: Int,
+        loadMode: Int,
+        backend: Int,
+        cpuBackend: Int,
+        gpuDeviceIndex: Int,
+        gpuLayers: Int,
+        offloadKqv: Boolean,
+        offloadOperations: Boolean,
+        automaticCpuFallback: Boolean,
+        cpuCoreMask: String,
+        strictCpuPlacement: Boolean,
+        threadPriority: Int,
+        threadPollingPercent: Int,
+        kleidiSmeUnits: Int,
+        kleidiChunkMultiplier: Int
+    ): Long
     external fun generate(handle: Long, prompt: String, maximumOutputTokens: Int): Array<String>?
     external fun lastError(handle: Long): String?
     external fun hasTestConversation(handle: Long): Boolean
@@ -128,5 +198,8 @@ internal object LocalAiNative {
         prompt: String,
         maximumOutputTokens: Int
     ): String?
+    external fun runtimeReport(handle: Long): Array<String>?
+    external fun runtimeCapabilities(): String
+    external fun inspectModelLayerCount(modelPath: String): Int
     external fun release(handle: Long)
 }

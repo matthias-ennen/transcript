@@ -131,6 +131,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             AppPage.SETTINGS -> SettingsScreen(
                 state = state,
                 onOpenAiDiagnostics = { page = AppPage.AI_DIAGNOSTICS },
+                onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
@@ -161,6 +162,21 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onPromptChange = viewModel::updateAiTestPrompt,
                 onStart = viewModel::startAiSelfTest,
                 onResetConversation = viewModel::resetAiTestConversation,
+                modifier = Modifier.padding(innerPadding)
+            )
+            AppPage.AI_PERFORMANCE -> AiPerformanceScreen(
+                state = state,
+                onSelectProfileModel = viewModel::selectPerformanceProfileModel,
+                onConfigurationChanged = viewModel::updateAiPerformanceConfiguration,
+                onRefreshHardware = viewModel::refreshAiHardware,
+                onStartBenchmark = viewModel::startAiPerformanceBenchmark,
+                onCancelBenchmark = viewModel::cancelAiPerformanceBenchmark,
+                onResetConfiguration = viewModel::resetAiPerformanceConfiguration,
+                onRestoreLastWorkingConfiguration = viewModel::restoreLastWorkingAiPerformanceConfiguration,
+                onCopyConfiguration = viewModel::copyAiPerformanceConfiguration,
+                onExportConfiguration = viewModel::exportAiPerformanceConfiguration,
+                onJsonChanged = viewModel::updateAiPerformanceJson,
+                onImportConfiguration = viewModel::importAiPerformanceConfiguration,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.MAIN -> MainContent(
@@ -212,7 +228,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     }
 }
 
-private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, ABOUT }
+private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, AI_PERFORMANCE, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -229,7 +245,11 @@ private fun TranscriptTopBar(
             }
         },
         navigationIcon = {
-            if (page != AppPage.MAIN && page != AppPage.AI_DIAGNOSTICS) {
+            if (
+                page != AppPage.MAIN &&
+                page != AppPage.AI_DIAGNOSTICS &&
+                page != AppPage.AI_PERFORMANCE
+            ) {
                 IconButton(onClick = { onNavigate(AppPage.MAIN) }) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
                 }
@@ -264,7 +284,7 @@ private fun TranscriptTopBar(
                         }
                     }
                 }
-                AppPage.AI_DIAGNOSTICS -> {
+                AppPage.AI_DIAGNOSTICS, AppPage.AI_PERFORMANCE -> {
                     OutlinedButton(
                         onClick = { onNavigate(AppPage.SETTINGS) },
                         modifier = Modifier
@@ -326,6 +346,7 @@ private val AppPage.title: String
         AppPage.MAIN -> "Simple Transcript"
         AppPage.SETTINGS -> "Einstellungen"
         AppPage.AI_DIAGNOSTICS -> "KI-Diagnose"
+        AppPage.AI_PERFORMANCE -> "KI-Leistung und Hardware"
         AppPage.ABOUT -> "Über die App"
     }
 
