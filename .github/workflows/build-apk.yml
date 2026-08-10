@@ -41,6 +41,7 @@ jobs:
           mkdir -p llm/src/main/cpp/host-vulkan-headers
           cp -R /usr/include/vulkan llm/src/main/cpp/host-vulkan-headers/
           cp -R /usr/include/vk_video llm/src/main/cpp/host-vulkan-headers/vulkan/
+          cp -R /usr/include/spirv llm/src/main/cpp/host-vulkan-headers/
 
       - name: Install Android build components
         run: |
