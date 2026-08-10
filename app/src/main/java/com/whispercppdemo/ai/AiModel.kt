@@ -51,6 +51,10 @@ enum class AiModel(
             "Qwen3.5-4B-Q4_K_M.gguf?download=true"
     );
 
+    val kleidiAiCompatible: Boolean
+        get() = fileName.contains("Q4_0", ignoreCase = true) ||
+            fileName.contains("Q8_0", ignoreCase = true)
+
     companion object {
         fun fromId(id: String?): AiModel = entries.firstOrNull { it.id == id } ?: BALANCED
     }

@@ -19,7 +19,6 @@ set(SPIRV-Headers_DIR
     "${CMAKE_CURRENT_LIST_DIR}/cmake/SPIRV-Headers"
     CACHE PATH "Host SPIR-V header package for Vulkan shader generation" FORCE)
 
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
@@ -30,17 +29,35 @@ set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
-set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 if(ANDROID_ABI STREQUAL "arm64-v8a")
+    # Build the Android CPU variants as loadable backends. llama.cpp scores the
+    # variants against HWCAP/HWCAP2 at runtime, so an older ARM64 device keeps
+    # the baseline path while newer devices receive real DotProd/I8MM/SVE
+    # KleidiAI kernels without making the whole JNI library require them.
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
     set(GGML_SYSTEM_ARCH "ARM" CACHE STRING "" FORCE)
     set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
 else()
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
     set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
     set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
 endif()
 
 add_subdirectory(${LLAMA_SRC} build-llama EXCLUDE_FROM_ALL)
+
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    # whisper.cpp ships its own ggml shared objects in the app module. Keep the
+    # independently pinned llama.cpp core under unique SONAMEs; the loadable
+    # CPU variant names remain upstream-compatible so ggml can discover them.
+    set_target_properties(ggml-base PROPERTIES OUTPUT_NAME transcript-llm-ggml-base)
+    set_target_properties(ggml PROPERTIES OUTPUT_NAME transcript-llm-ggml)
+    set_target_properties(llama PROPERTIES OUTPUT_NAME transcript-llm-llama)
+endif()
 
 # The Android NDK exposes Vulkan's C API and loader but omits Khronos'
 # header-only C++ bindings required by ggml-vulkan. CI stages the distro's
@@ -53,6 +70,22 @@ if(ANDROID_ABI STREQUAL "arm64-v8a" AND TARGET ggml-vulkan)
 endif()
 
 add_library(transcript_llm SHARED local_ai_jni.cpp)
+
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    target_compile_definitions(transcript_llm PRIVATE
+        TRANSCRIPT_DYNAMIC_BACKENDS=1
+        TRANSCRIPT_VULKAN_PACKAGED=1)
+
+    # Keep the APK bounded while covering the relevant Android generations:
+    # portable ARMv8, DotProd, I8MM and SVE2. The runtime loader selects only a
+    # variant whose feature score is valid for the current processor.
+    add_dependencies(transcript_llm
+        ggml-cpu-android_armv8.0_1
+        ggml-cpu-android_armv8.2_1
+        ggml-cpu-android_armv8.6_1
+        ggml-cpu-android_armv9.0_1
+        ggml-vulkan)
+endif()
 
 target_sources(transcript_llm PRIVATE
     ${LLAMA_SRC}/common/jinja/lexer.cpp

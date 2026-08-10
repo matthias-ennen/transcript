@@ -51,7 +51,8 @@ class LocalAiEngine(
         threadPriority = normalizedConfiguration.threadPriority.ordinal,
         threadPollingPercent = normalizedConfiguration.threadPollingPercent,
         kleidiSmeUnits = normalizedConfiguration.kleidiSmeUnits,
-        kleidiChunkMultiplier = normalizedConfiguration.kleidiChunkMultiplier
+        kleidiChunkMultiplier = normalizedConfiguration.kleidiChunkMultiplier,
+        nativeLibrarySearchPath = nativeLibrarySearchPath()
     )
 
     init {
@@ -149,14 +150,28 @@ class LocalAiEngine(
         private const val GENERATION_RESULT_FIELD_COUNT = 9
         private const val RUNTIME_REPORT_FIELD_COUNT = 8
 
+        @Volatile
+        private var configuredNativeLibraryDirectory: String = ""
+
+        fun configureNativeLibraryDirectory(directory: String?) {
+            val normalized = directory?.trim().orEmpty()
+            if (normalized.isNotEmpty()) configuredNativeLibraryDirectory = normalized
+        }
+
+        private fun nativeLibrarySearchPath(): String = linkedSetOf(
+            configuredNativeLibraryDirectory,
+            System.getProperty("java.library.path").orEmpty()
+        ).filter(String::isNotBlank).joinToString(separator = ":")
+
         internal fun preferredThreadCount(
             availableProcessors: Int = Runtime.getRuntime().availableProcessors()
         ): Int = LocalAiConfiguration.preferredThreadCount(availableProcessors)
 
-        fun runtimeCapabilitiesJson(): String = LocalAiNative.runtimeCapabilities()
+        fun runtimeCapabilitiesJson(): String =
+            LocalAiNative.runtimeCapabilities(nativeLibrarySearchPath())
 
         fun inspectModelLayerCount(modelPath: String): Int =
-            LocalAiNative.inspectModelLayerCount(modelPath)
+            LocalAiNative.inspectModelLayerCount(modelPath, nativeLibrarySearchPath())
     }
 }
 
@@ -186,7 +201,8 @@ internal object LocalAiNative {
         threadPriority: Int,
         threadPollingPercent: Int,
         kleidiSmeUnits: Int,
-        kleidiChunkMultiplier: Int
+        kleidiChunkMultiplier: Int,
+        nativeLibrarySearchPath: String
     ): Long
     external fun generate(handle: Long, prompt: String, maximumOutputTokens: Int): Array<String>?
     external fun lastError(handle: Long): String?
@@ -199,7 +215,7 @@ internal object LocalAiNative {
         maximumOutputTokens: Int
     ): String?
     external fun runtimeReport(handle: Long): Array<String>?
-    external fun runtimeCapabilities(): String
-    external fun inspectModelLayerCount(modelPath: String): Int
+    external fun runtimeCapabilities(nativeLibrarySearchPath: String): String
+    external fun inspectModelLayerCount(modelPath: String, nativeLibrarySearchPath: String): Int
     external fun release(handle: Long)
 }

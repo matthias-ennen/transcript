@@ -74,6 +74,14 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion '1.5.0'
     }
+    packagingOptions {
+        jniLibs {
+            // llama.cpp discovers the best ARM CPU backend by enumerating the
+            // app's native library directory. Legacy packaging extracts these
+            // loadable variants to that real filesystem directory.
+            useLegacyPackaging true
+        }
+    }
 }
 
 dependencies {

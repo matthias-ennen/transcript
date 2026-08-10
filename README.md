@@ -156,6 +156,17 @@ Standard- oder KleidiAI-Kernel, Memory Mapping/Locking sowie CPU, Vulkan oder
 gemischte GPU-Auslagerung. Die Seite zeigt nur Fähigkeiten, die von Android und
 der gebauten nativen Laufzeit tatsächlich gemeldet werden.
 
+Auf ARM64 enthält die APK getrennte, zur Laufzeit bewertete CPU-Varianten für
+portables ARMv8, Dot Product, INT8-Matrixoperationen und SVE2. Dadurch bleibt der
+Standard-CPU-Pfad auf älteren Geräten sicher, während ein passendes Gerät echte
+KleidiAI-Kernel erhält. Die Diagnose unterscheidet **eingebaut**, **auf diesem
+Gerät nutzbar** und den für die aktuelle Modellsitzung aktivierten Pfad; ein
+Native-Ladefehler wird als Fehler angezeigt und nicht als Reihe falscher
+„Nein“-Werte verborgen. KleidiAI-Weight-Packing unterstützt im gepinnten
+`llama.cpp` Q4_0/Q8_0. Von den derzeit angebotenen Modellen ist deshalb das
+Qwen3.5-0,8B-Q4_0-Modell direkt KleidiAI-kompatibel; Q4_K_M läuft kontrolliert
+über den ausgewählten Standard-CPU-Pfad.
+
 Vor jeder lokalen KI-Ausführung prüfen RAM-Reserve, maximale Speichernutzung und
 thermische Grenzwerte den Start. Bei hoher Wärme reduziert die App die wirksame
 Konfiguration; an der Abbruchgrenze beendet sie die Berechnung kontrolliert. Der
