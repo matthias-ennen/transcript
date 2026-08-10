@@ -129,6 +129,26 @@ object AiHardwareProbe {
         require(estimatedBytes <= allowedBytes || configuration.loadMode == LocalAiLoadMode.MMAP) {
             "Modell und RAM-Reserve überschreiten die eingestellte Speichergrenze von ${configuration.maximumMemoryPercent} %."
         }
+        if (configuration.backend == LocalAiBackend.VULKAN || configuration.backend == LocalAiBackend.HYBRID) {
+            val device = snapshot.vulkanDevices.getOrNull(configuration.gpuDeviceIndex)
+            if (device != null && device.totalBytes > 0L) {
+                val layerPercent = when {
+                    configuration.backend == LocalAiBackend.VULKAN || configuration.gpuLayers < 0 -> 100
+                    configuration.gpuLayerPercent > 0 -> configuration.gpuLayerPercent
+                    else -> 50
+                }
+                val estimatedGpuBytes = modelFile.length() * layerPercent / 100L
+                val allowedGpuBytes = device.totalBytes * configuration.maximumVulkanMemoryPercent / 100L
+                require(estimatedGpuBytes <= allowedGpuBytes) {
+                    "Geschätzte GPU-Auslagerung überschreitet die Vulkan-Speichergrenze von ${configuration.maximumVulkanMemoryPercent} %."
+                }
+                if (device.freeBytes > 0L) {
+                    require(estimatedGpuBytes <= device.freeBytes) {
+                        "Für die gewählte GPU-Auslagerung ist nicht genügend freier Vulkan-Speicher verfügbar."
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -15,6 +15,9 @@ set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp)
 # tiny config package whose include target points at the host headers used by
 # its host shader generator.
 list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+set(SPIRV-Headers_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/cmake/SPIRV-Headers"
+    CACHE PATH "Host SPIR-V header package for Vulkan shader generation" FORCE)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)

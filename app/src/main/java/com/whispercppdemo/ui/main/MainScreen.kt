@@ -172,6 +172,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onStartBenchmark = viewModel::startAiPerformanceBenchmark,
                 onCancelBenchmark = viewModel::cancelAiPerformanceBenchmark,
                 onResetConfiguration = viewModel::resetAiPerformanceConfiguration,
+                onRestoreLastWorkingConfiguration = viewModel::restoreLastWorkingAiPerformanceConfiguration,
                 onCopyConfiguration = viewModel::copyAiPerformanceConfiguration,
                 onExportConfiguration = viewModel::exportAiPerformanceConfiguration,
                 onJsonChanged = viewModel::updateAiPerformanceJson,

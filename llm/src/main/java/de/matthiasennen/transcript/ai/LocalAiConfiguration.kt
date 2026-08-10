@@ -40,6 +40,7 @@ data class LocalAiConfiguration(
     val kleidiChunkMultiplier: Int = 0,
     val minimumFreeMemoryMb: Int = 512,
     val maximumMemoryPercent: Int = 80,
+    val maximumVulkanMemoryPercent: Int = 80,
     val thermalWarningStatus: Int = 2,
     val thermalThrottleStatus: Int = 3,
     val thermalStopStatus: Int = 4,
@@ -84,6 +85,7 @@ data class LocalAiConfiguration(
             kleidiChunkMultiplier = kleidiChunkMultiplier.coerceIn(0, 64),
             minimumFreeMemoryMb = minimumFreeMemoryMb.coerceIn(128, 8_192),
             maximumMemoryPercent = maximumMemoryPercent.coerceIn(40, 95),
+            maximumVulkanMemoryPercent = maximumVulkanMemoryPercent.coerceIn(25, 95),
             thermalWarningStatus = normalizedWarning,
             thermalThrottleStatus = normalizedThrottle,
             thermalStopStatus = normalizedStop,
@@ -145,4 +147,3 @@ data class LocalAiRuntimeReport(
     val fallbackUsed: Boolean,
     val loadMode: String
 )
-

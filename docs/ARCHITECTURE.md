@@ -143,6 +143,30 @@ und zeigt das allgemeine Diagnoseprotokoll am Seitenende. Testbereich und
 Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
 **Verlassen**-Button führt zurück zu den Einstellungen.
 
+`AiPerformanceScreen` ist die zweite dauerhafte KI-Unterseite. Sie verwendet
+ebenfalls `LiveStatusLine` und gliedert Modellprofil, Kontext/Speicher,
+CPU-Threadpool, KleidiAI, Vulkan, Wärmeschutz, Benchmark und Datenaustausch in
+aufklappbare Karten. `AiPerformancePreferences` persistiert ein versioniertes
+`LocalAiConfiguration` je `AiModel`; der Laufzeitschlüssel dieser Konfiguration
+ist Bestandteil des Sitzungsschlüssels. Eine Änderung an nativen Parametern
+schließt deshalb eine unpassende bestehende Sitzung, bevor sie erneut geladen
+wird.
+
+`AiHardwareProbe` verbindet Android-Speicher-, Akku-, Lade- und Wärmedaten mit
+den von JNI gemeldeten nativen Fähigkeiten und Vulkan-Geräten. RAM- und
+Wärmegrenzen werden vor dem Modellstart im App-Prozess geprüft und während
+längerer Korrekturläufe erneut kontrolliert. `AiPerformanceBenchmark` hält die
+Messläufe getrennt vom normalen Korrekturpfad; Aufwärmläufe fließen nicht in die
+Mittelwerte ein.
+
+Für ARM64 baut das `llm`-Modul neben dem portablen ggml-CPU-Pfad die
+KleidiAI-Kernel und das Vulkan-Backend fest ein. Die Laufzeit wählt
+Standard-CPU/KleidiAI über die CPU-Buffer-Typen und CPU/Vulkan über die
+öffentlichen Backend-Geräte von llama.cpp. Threadzahl, Affinitätsmaske,
+Priorität und Polling werden über einen ggml-Threadpool gesetzt; Kontext,
+Batchgrößen, Flash Attention, KQV- und Operationsauslagerung gehen direkt in
+die llama.cpp-Kontextparameter ein. x86/x86_64 bleiben portable CPU-Builds.
+
 `AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
 Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
 Korrekturläufe verwenden dieselbe Modellabbildung. Die KI-Diagnose hält die nicht

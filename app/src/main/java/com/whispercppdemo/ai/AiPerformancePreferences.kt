@@ -30,6 +30,20 @@ class AiPerformancePreferences(context: Context) {
         return LocalAiConfiguration().normalized()
     }
 
+    fun rememberWorking(model: AiModel, configuration: LocalAiConfiguration) {
+        val normalized = configuration.normalized()
+        preferences.edit()
+            .putString(workingKey(model), configurationToJson(normalized).toString())
+            .apply()
+    }
+
+    fun restoreLastWorking(model: AiModel): LocalAiConfiguration? {
+        val stored = preferences.getString(workingKey(model), null) ?: return null
+        val configuration = runCatching { configurationFromJson(JSONObject(stored)) }.getOrNull()
+            ?: return null
+        return save(model, configuration)
+    }
+
     fun copy(source: AiModel, target: AiModel): LocalAiConfiguration = save(target, load(source))
 
     fun exportJson(model: AiModel): String = JSONObject()
@@ -48,6 +62,8 @@ class AiPerformancePreferences(context: Context) {
     }
 
     private fun key(model: AiModel): String = "profile_${model.id}"
+
+    private fun workingKey(model: AiModel): String = "working_profile_${model.id}"
 }
 
 private fun configurationToJson(value: LocalAiConfiguration): JSONObject = JSONObject()
@@ -75,6 +91,7 @@ private fun configurationToJson(value: LocalAiConfiguration): JSONObject = JSONO
     .put("kleidiChunkMultiplier", value.kleidiChunkMultiplier)
     .put("minimumFreeMemoryMb", value.minimumFreeMemoryMb)
     .put("maximumMemoryPercent", value.maximumMemoryPercent)
+    .put("maximumVulkanMemoryPercent", value.maximumVulkanMemoryPercent)
     .put("thermalWarningStatus", value.thermalWarningStatus)
     .put("thermalThrottleStatus", value.thermalThrottleStatus)
     .put("thermalStopStatus", value.thermalStopStatus)
@@ -129,6 +146,10 @@ private fun configurationFromJson(json: JSONObject): LocalAiConfiguration {
         ),
         minimumFreeMemoryMb = json.optInt("minimumFreeMemoryMb", defaults.minimumFreeMemoryMb),
         maximumMemoryPercent = json.optInt("maximumMemoryPercent", defaults.maximumMemoryPercent),
+        maximumVulkanMemoryPercent = json.optInt(
+            "maximumVulkanMemoryPercent",
+            defaults.maximumVulkanMemoryPercent
+        ),
         thermalWarningStatus = json.optInt(
             "thermalWarningStatus",
             defaults.thermalWarningStatus
@@ -181,4 +202,3 @@ private inline fun <reified T : Enum<T>> enumValue(
     key: String,
     fallback: T
 ): T = enumValues<T>().firstOrNull { it.name == json.optString(key) } ?: fallback
-

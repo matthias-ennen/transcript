@@ -58,6 +58,7 @@ fun AiPerformanceScreen(
     onStartBenchmark: () -> Unit,
     onCancelBenchmark: () -> Unit,
     onResetConfiguration: () -> Unit,
+    onRestoreLastWorkingConfiguration: () -> Unit,
     onCopyConfiguration: (AiModel) -> Unit,
     onExportConfiguration: () -> Unit,
     onJsonChanged: (String) -> Unit,
@@ -242,6 +243,9 @@ fun AiPerformanceScreen(
             NumberSetting("Maximaler RAM-Anteil", configuration.maximumMemoryPercent, "40–95 Prozent") {
                 onConfigurationChanged(configuration.copy(maximumMemoryPercent = it))
             }
+            NumberSetting("Maximaler Vulkan-Speicheranteil", configuration.maximumVulkanMemoryPercent, "25–95 Prozent") {
+                onConfigurationChanged(configuration.copy(maximumVulkanMemoryPercent = it))
+            }
             ThermalChoice("Warnschwelle", configuration.thermalWarningStatus) {
                 onConfigurationChanged(configuration.copy(thermalWarningStatus = it))
             }
@@ -321,6 +325,11 @@ fun AiPerformanceScreen(
                 enabled = !state.isBusy,
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Standardwerte wiederherstellen") }
+            OutlinedButton(
+                onClick = onRestoreLastWorkingConfiguration,
+                enabled = !state.isBusy,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Letzte erfolgreiche Testkonfiguration wiederherstellen") }
             Button(
                 onClick = onExportConfiguration,
                 enabled = !state.isBusy,

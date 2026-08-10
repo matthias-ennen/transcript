@@ -449,14 +449,26 @@ class AiPostProcessingService : Service() {
             "Das Gerät ist für den KI-Start zu warm (${thermalStatusLabel(hardware.thermalStatus)})."
         }
         val effective = if (hardware.thermalStatus >= stored.thermalThrottleStatus) {
+            if (stored.coolingPauseSeconds > 0) {
+                addDiagnostic("Wärmeschutz: ${stored.coolingPauseSeconds} s Abkühlpause vor dem KI-Start.")
+                SystemClock.sleep(stored.coolingPauseSeconds * 1_000L)
+                if (stopRequested.get()) throw CancellationException("KI-Nachbearbeitung beendet.")
+            }
+            val reducedGpuLayers = if (stored.backend == LocalAiBackend.HYBRID) {
+                (stored.gpuLayers - stored.gpuLayersReducedPerStep).coerceAtLeast(0)
+            } else {
+                0
+            }
+            val reducedBackend = if (reducedGpuLayers > 0) LocalAiBackend.HYBRID else LocalAiBackend.CPU
             addDiagnostic(
-                "Wärmeschutz aktiv: CPU-Threads werden reduziert und Vulkan wird für diesen Lauf abgeschaltet."
+                "Wärmeschutz aktiv: CPU-Threads reduziert; GPU-Schichten ${stored.gpuLayers} → $reducedGpuLayers."
             )
             stored.copy(
                 generationThreads = stored.throttledThreads,
                 promptThreads = stored.throttledThreads,
-                backend = LocalAiBackend.CPU,
-                gpuLayers = 0
+                backend = reducedBackend,
+                gpuLayers = reducedGpuLayers,
+                gpuLayerPercent = 0
             ).normalized()
         } else {
             stored

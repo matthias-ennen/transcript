@@ -388,7 +388,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
 
         InfoCard("Open Source & Lizenzen") {
             Text(
-                "Die Spracherkennung verwendet whisper.cpp und die lokale KI llama.cpp unter MIT-Lizenz. Qwen3.5-Modelle stehen unter Apache 2.0."
+                "Die Spracherkennung verwendet whisper.cpp und die lokale KI llama.cpp unter MIT-Lizenz. Qwen3.5-Modelle und die eingebauten KleidiAI-CPU-Kernel stehen unter Apache 2.0."
             )
         }
 

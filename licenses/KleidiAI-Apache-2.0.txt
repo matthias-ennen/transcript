@@ -1,0 +1,8 @@
+KleidiAI
+Copyright Arm Limited and KleidiAI contributors.
+
+Licensed under the Apache License, Version 2.0. The complete Apache 2.0
+license text is included in this repository in
+licenses/Qwen3.5-Apache-2.0.txt and is available at:
+
+https://www.apache.org/licenses/LICENSE-2.0
