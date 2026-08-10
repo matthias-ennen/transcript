@@ -123,10 +123,11 @@ Einstellungen. Hauptseite und Diagnoseseite verwenden dieselbe Statuskomponente;
 der Testbereich und das Diagnoseprotokoll werden nicht zusätzlich auf der
 Hauptseite angezeigt.
 
-Der KI-Testbereich enthält statt einer fest eingebauten Testfrage ein mehrzeiliges
-Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an das ausgewählte
-Qwen-Modell senden; die vollständige Antwort kann anschließend ein- und
-ausgeblendet werden. Beim ersten Auftrag wird das ausgewählte Modell geladen und
+Der KI-Testbereich zeigt oben dauerhaft die schreibgeschützte, scrollbar begrenzte
+Box **KI-Antwort** und direkt darunter das mehrzeilige Eingabefeld. Eigene Fragen
+oder Aufgaben lassen sich unverändert an das ausgewählte Qwen-Modell senden; die
+vollständige Antwort bleibt ohne zusätzliche Ein-/Ausblendfunktion sichtbar. Beim
+ersten Auftrag wird das ausgewählte Modell geladen und
 bleibt anschließend im Arbeitsspeicher. Weitere Anfragen verwenden dasselbe Modell
 und führen außerdem dieselbe flüchtige Unterhaltung fort. Die unsichtbaren
 Nachrichten bleiben im Arbeitsspeicher; für jeden neuen Chat-Turn wird daraus ein
@@ -181,6 +182,10 @@ eingebaute Benchmark trennt Aufwärm- und Messläufe und erfasst Modellladezeit,
 Prompt- und Ausgabetempo, Zeit bis zum ersten Token, Gesamtdauer, App-Speicher,
 Wärmestatus und den real verwendeten Backendpfad. Profile können kopiert,
 zurückgesetzt und als versioniertes JSON importiert oder exportiert werden.
+Die erste Profil-/Hardwarekarte bleibt dauerhaft geöffnet. Die sechs folgenden
+Einstellungskarten sind beim ersten Öffnen geschlossen, speichern danach aber
+ihren jeweiligen Auf-/Zu-Zustand dauerhaft. Ihre Überschriften sind linksbündig.
+Leistungsstatus erscheint ausschließlich in der gemeinsamen CannaBot-Statuszeile.
 
 ## Status und Diagnose während der Transkription
 
@@ -199,7 +204,9 @@ am schwächsten Punkt zwischen der Bereitschaftsmeldung und einer
 modellabhängigen Schätzung der Transkriptionsdauer. Die Schätzfaktoren wurden
 anhand praktischer Laufzeitmessungen auf dem Zielgerät festgelegt.
 
-Kurze Statusmeldungen bleiben einzeilig. Längere Status- und Fehlermeldungen
+Die Statuszeile reserviert stets mindestens die Höhe von zwei Textzeilen; CannaBot
+und Text beginnen oben. Der Wechsel zwischen ein- und zweizeiligen Meldungen
+verschiebt deshalb die nachfolgenden Bedienelemente nicht. Längere Status- und Fehlermeldungen
 werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit
 Auslassungspunkten abgeschnitten. Bei der Wiedergabe verwendet die Oberfläche
 bewusst den allgemeinen Text **Audio wird wiedergegeben …**.
