@@ -84,6 +84,11 @@ Erfolgssequenz spielt Springen und Winken nacheinander ab und kehrt anschließen
 zum Grundzustand zurück. Fortschrittsereignisse werden nur an festgelegten
 Meilensteinen ausgelöst.
 
+`LiveStatusLine` reserviert unabhängig vom aktuellen Text mindestens zwei
+Textzeilen und richtet Sprite sowie Text oben aus. Ein optionaler Seitenstatus
+wird in derselben pulsierenden Wechselanzeige dargestellt; dadurch benötigt die
+Leistungsseite keine zweite Statusausgabe.
+
 Der Teilen-Dialog besitzt eine eigene, nur beim Öffnen gestartete Sequenz aus
 Rechtslauf, Sprung und Winken. Kurze Idle-Pausen trennen die Gesten; anschließend
 bleibt CannaBot ruhig im Idle-Zustand.
@@ -142,6 +147,8 @@ KI-Bereich der Einstellungen geöffnet wird. Sie verwendet dieselbe
 und zeigt das allgemeine Diagnoseprotokoll am Seitenende. Testbereich und
 Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
 **Verlassen**-Button führt zurück zu den Einstellungen.
+Die schreibgeschützte Antwortbox ist dauerhaft oberhalb der Eingabebox sichtbar
+und begrenzt lange Antworten auf einen intern scrollbar dargestellten Bereich.
 
 `AiPerformanceScreen` ist die zweite dauerhafte KI-Unterseite. Sie verwendet
 ebenfalls `LiveStatusLine` und gliedert Modellprofil, Kontext/Speicher,
@@ -152,6 +159,14 @@ Arbeitsprofile werden bei der Migration entfernt. Der Laufzeitschlüssel dieser 
 ist Bestandteil des Sitzungsschlüssels. Eine Änderung an nativen Parametern
 schließt deshalb eine unpassende bestehende Sitzung, bevor sie erneut geladen
 wird.
+`AiPerformanceUiPreferences` speichert davon getrennt den Auf-/Zu-Zustand jeder
+der sechs Einstellungskarten. Die Profil-/Hardwarekarte bleibt dauerhaft offen.
+
+Alle nativen Textausgaben durchlaufen vor `JNIEnv::NewString` die zentrale,
+fehlertolerante UTF-8-zu-UTF-16-Konvertierung. Gültige Mehrbytezeichen werden über
+zusammengefügte Tokenstücke hinweg dekodiert; ungültige oder unvollständige
+Sequenzen werden durch U+FFFD ersetzt und können den Android-Prozess nicht mehr
+über `NewStringUTF` abbrechen.
 
 `AiHardwareProbe` verbindet Android-Speicher-, Akku-, Lade- und Wärmedaten mit
 den von JNI gemeldeten nativen Fähigkeiten und Vulkan-Geräten. RAM- und

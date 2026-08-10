@@ -68,6 +68,13 @@ jobs:
           fi
           printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/transcript-signing.jks"
 
+      - name: Test native UTF-8 conversion
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            llm/src/test/cpp/utf8_to_utf16_test.cpp \
+            -o "$RUNNER_TEMP/utf8-to-utf16-test"
+          "$RUNNER_TEMP/utf8-to-utf16-test"
+
       - name: Run unit tests and build permanently signed debug APK
         env:
           ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/transcript-signing.jks

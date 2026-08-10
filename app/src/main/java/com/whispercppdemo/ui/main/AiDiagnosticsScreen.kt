@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -74,7 +75,10 @@ private fun DiagnosticsLogCard(entries: List<String>) {
 }
 
 @Composable
-internal fun LiveStatusLine(state: TranscriptUiState) {
+internal fun LiveStatusLine(
+    state: TranscriptUiState,
+    supplementalStatus: String? = null
+) {
     val estimateStatus = transcriptionEstimateStatus(state.transcriptionEstimateSeconds)
     val alternatesReadyStatus =
         state.cannaBotMode == CannaBotMode.REVIEW &&
@@ -102,6 +106,7 @@ internal fun LiveStatusLine(state: TranscriptUiState) {
         ?.trim()
         ?.takeIf { it.isNotEmpty() && it != primaryStatus }
     val alternateStatus = when {
+        !supplementalStatus.isNullOrBlank() && supplementalStatus != primaryStatus -> supplementalStatus
         announcesChangedModelEstimate -> estimateStatus
         alternatesReadyStatus -> estimateStatus
         isActiveOperation -> activityStatus
@@ -112,6 +117,7 @@ internal fun LiveStatusLine(state: TranscriptUiState) {
     LaunchedEffect(
         primaryStatus,
         alternateStatus,
+        supplementalStatus,
         announcesChangedModelEstimate,
         state.runtimeEstimateAnnouncementId
     ) {
@@ -131,7 +137,8 @@ internal fun LiveStatusLine(state: TranscriptUiState) {
             showAlternate = !showAlternate
         }
     }
-    val isActive = isActiveOperation || alternatesReadyStatus || announcesChangedModelEstimate
+    val isActive = isActiveOperation || alternatesReadyStatus || announcesChangedModelEstimate ||
+        !supplementalStatus.isNullOrBlank()
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(
@@ -148,8 +155,10 @@ internal fun LiveStatusLine(state: TranscriptUiState) {
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         CannaBotStatusAnimation(state)
@@ -169,7 +178,6 @@ private fun AiSelfTestCard(
     onStart: () -> Unit,
     onResetConversation: () -> Unit
 ) {
-    var responseExpanded by remember { mutableStateOf(false) }
     val modelInstalled = state.selectedAiModelInstalled
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -180,6 +188,16 @@ private fun AiSelfTestCard(
             Text(
                 "Hier kannst du eine flüchtige Unterhaltung mit dem ausgewählten lokalen KI-Modell führen. Es wird kein Chatverlauf gespeichert.",
                 style = MaterialTheme.typography.bodySmall
+            )
+            OutlinedTextField(
+                value = state.aiSelfTestResponse.orEmpty(),
+                onValueChange = {},
+                label = { Text("KI-Antwort") },
+                placeholder = { Text("Die Antwort der KI erscheint hier …") },
+                minLines = 4,
+                maxLines = 8,
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = state.aiTestPrompt,
@@ -212,7 +230,7 @@ private fun AiSelfTestCard(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            state.aiSelfTestResponse?.let { response ->
+            state.aiSelfTestResponse?.let {
                 state.aiSelfTestMetrics?.let { metrics ->
                     Text(
                         "Messwerte · ${state.aiSelfTestModel?.modelLabel ?: state.selectedAiModel.modelLabel}",
@@ -252,15 +270,6 @@ private fun AiSelfTestCard(
                         },
                         style = MaterialTheme.typography.bodySmall
                     )
-                }
-                OutlinedButton(
-                    onClick = { responseExpanded = !responseExpanded },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (responseExpanded) "KI-Antwort ausblenden" else "KI-Antwort anzeigen")
-                }
-                if (responseExpanded) {
-                    Text(response, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
