@@ -9,6 +9,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp)
 
+# Android's cross-compilation search root hides the host-side SPIR-V package
+# metadata even though glslc and the headers are installed on the CI host.
+# llama.cpp only uses find_package here as an availability check, so expose a
+# tiny config package whose include target points at the host headers used by
+# its host shader generator.
+list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
