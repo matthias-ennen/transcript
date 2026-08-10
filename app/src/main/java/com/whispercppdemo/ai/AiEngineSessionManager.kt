@@ -23,6 +23,10 @@ internal object AiEngineSessionManager {
         engine != null && modelId == model.id && modelPath == file.absolutePath
 
     @Synchronized
+    fun hasTestConversation(model: AiModel, file: File): Boolean =
+        isLoaded(model, file) && requireNotNull(engine).hasTestConversation()
+
+    @Synchronized
     fun <T> withModel(
         model: AiModel,
         file: File,
@@ -57,6 +61,11 @@ internal object AiEngineSessionManager {
     @Synchronized
     fun release(model: AiModel? = null) {
         if (model == null || modelId == model.id) releaseLocked()
+    }
+
+    @Synchronized
+    fun resetTestConversation() {
+        engine?.resetTestConversation()
     }
 
     private fun releaseLocked() {

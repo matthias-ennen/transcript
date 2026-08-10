@@ -136,12 +136,32 @@ Fremdkontextprüfungen sind bewusst noch nicht aktiviert. Der freie KI-Testberei
 verwendet einen getrennten, unbeschränkten Antwortpfad und übernimmt keine
 Korrekturregeln.
 
+`AiDiagnosticsScreen` ist eine dauerhafte Unterseite, die ausschließlich aus dem
+KI-Bereich der Einstellungen geöffnet wird. Sie verwendet dieselbe
+`LiveStatusLine`-Komponente wie die Hauptseite, enthält den freien KI-Testbereich
+und zeigt das allgemeine Diagnoseprotokoll am Seitenende. Testbereich und
+Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
+**Verlassen**-Button führt zurück zu den Einstellungen.
+
 `AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
 Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
-Korrekturläufe verwenden dieselbe Modellabbildung. Jeder freie Test erzeugt dabei
-einen neuen nativen Kontext, sodass vorherige Testfragen die nächste Antwort nicht
-beeinflussen. Ein Modellwechsel oder das Löschen des geladenen Modells schließt die
-Session, bevor die neue Auswahl verwendet wird.
+Korrekturläufe verwenden dieselbe Modellabbildung. Die KI-Diagnose hält die nicht
+sichtbaren Chatnachrichten ausschließlich im Arbeitsspeicher. Für jede neue Frage
+rendert die eingebettete Chatvorlage die vollständige Unterhaltung und die native
+Schicht baut daraus einen frischen `llama_context` auf. Nach der Antwort wird dieser
+Rechenkontext freigegeben; Modell und Nachrichten bleiben erhalten. Dadurch kann
+die Antwort frühere Aussagen berücksichtigen, ohne einen KV-Cache samt
+Tokenpositionen über mehrere Aufrufe synchronisieren zu müssen. Es wird kein
+Verlauf persistiert. Ein Modellwechsel, das Löschen des geladenen Modells,
+**Unterhaltung zurücksetzen** oder das Ende des App-Prozesses schließt die flüchtige
+Gesprächssitzung.
+
+Reicht das feste Kontextfenster nicht für eine weitere Anfrage, bleibt die bisherige
+Unterhaltung unverändert und die Oberfläche fordert zu einem bewussten Zurücksetzen
+auf. Ein unbemerkter automatischer Kontextverlust findet nicht statt. Die
+automatisierte Transkriptkorrektur behält vorerst ihren getrennten Gruppenpfad; die
+spätere abschnittsweise Unterhaltung ist in
+`docs/_work/ai-diagnostics-conversation-plan.md` festgehalten.
 
 Die JNI-Schicht rendert die im GGUF eingebettete Qwen-Chatvorlage über die offizielle
 `llama.cpp`-Jinja-Anbindung mit `enable_thinking=false`. `/no_think` wird nicht in

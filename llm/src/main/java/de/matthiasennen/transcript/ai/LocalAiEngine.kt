@@ -20,8 +20,10 @@ data class LocalAiGenerationResult(
 
 /**
  * Small lifecycle wrapper around llama.cpp. The model is mapped once. Free test
- * prompts use an isolated context; transcript correction keeps one group context
- * cached and resets to that exact base before every target segment.
+ * prompts share one in-memory message conversation until it is explicitly reset;
+ * every chat turn receives a fresh native compute context. Transcript correction
+ * keeps one group context cached and resets to that exact base before every target
+ * segment.
  */
 class LocalAiEngine(
     modelPath: String,
@@ -38,7 +40,11 @@ class LocalAiEngine(
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
         require(prompt.isNotBlank()) { "Der KI-Auftrag darf nicht leer sein." }
         val values = LocalAiNative.generate(handle, prompt, maximumOutputTokens)
-            ?: error("Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.")
+            ?: error(
+                LocalAiNative.lastError(handle)
+                    ?.takeIf(String::isNotBlank)
+                    ?: "Das lokale KI-Modell hat keinen verwertbaren Text erzeugt."
+            )
         check(values.size == GENERATION_RESULT_FIELD_COUNT) {
             "Die lokale KI hat unvollständige Diagnosewerte geliefert."
         }
@@ -63,6 +69,16 @@ class LocalAiEngine(
         prompt = "[[FREE_TEST]]$prompt",
         maximumOutputTokens = 512
     )
+
+    fun hasTestConversation(): Boolean {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        return LocalAiNative.hasTestConversation(handle)
+    }
+
+    fun resetTestConversation() {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        LocalAiNative.resetTestConversation(handle)
+    }
 
     fun prepareCorrectionContext(prompt: String) {
         check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
@@ -103,6 +119,9 @@ internal object LocalAiNative {
 
     external fun create(modelPath: String, contextSize: Int, threadCount: Int): Long
     external fun generate(handle: Long, prompt: String, maximumOutputTokens: Int): Array<String>?
+    external fun lastError(handle: Long): String?
+    external fun hasTestConversation(handle: Long): Boolean
+    external fun resetTestConversation(handle: Long)
     external fun prepareCorrectionContext(handle: Long, prompt: String): Boolean
     external fun generateCorrection(
         handle: Long,

@@ -24,6 +24,7 @@ namespace {
 constexpr const char * TAG = "TranscriptLocalAI";
 constexpr int PROMPT_BATCH_SIZE = 1024;
 constexpr const char * FREE_TEST_MARKER = "[[FREE_TEST]]";
+constexpr int CHAT_SUFFIX_TOKEN_RESERVE = 16;
 using SteadyClock = std::chrono::steady_clock;
 constexpr const char * CORRECTION_GRAMMAR = R"GBNF(
 root ::= "{" ws "\"result\"" ws ":" ws string "}" ws
@@ -43,6 +44,12 @@ const std::string CORRECTION_SYSTEM_PROMPT =
     "enthält immer den vollständigen korrigierten oder unveränderten Zieltext. "
     "Gib keine Erklärung, Analyse, Segmentnummer, Markdown-Formatierung, weiteren "
     "Felder oder sonstigen Text aus.";
+
+const std::string FREE_SYSTEM_PROMPT =
+    "Du bist ein vollständig lokaler KI-Assistent. Bearbeite die Benutzeranfrage "
+    "direkt und antworte in der Sprache der Anfrage. Behalte den Inhalt der "
+    "laufenden Unterhaltung im Gedächtnis. Es gibt für diese freie Unterhaltung "
+    "keine besondere Transkript-Korrekturstruktur.";
 
 std::string token_piece(const llama_vocab * vocab, llama_token token);
 
@@ -67,6 +74,8 @@ struct LocalEngine {
     std::unique_ptr<LocalChatTemplate> chat_template;
     int context_size = 4096;
     int thread_count = 4;
+    std::vector<std::pair<std::string, std::string>> free_messages;
+    std::string last_error;
     llama_context * correction_context = nullptr;
     int correction_base_tokens = 0;
     std::string correction_common_prompt;
@@ -167,22 +176,10 @@ RenderedChat render_chat(
     }
 }
 
-RenderedChat format_free_prompt(LocalEngine * engine, const std::string & marked_prompt) {
-    const bool marked = marked_prompt.rfind(FREE_TEST_MARKER, 0) == 0;
-    const std::string user_prompt = marked
-        ? marked_prompt.substr(std::string(FREE_TEST_MARKER).size())
-        : marked_prompt;
-    const std::string system_prompt =
-        "Du bist ein vollständig lokaler KI-Assistent. Bearbeite die Benutzeranfrage "
-        "direkt. Antworte in der Sprache der Anfrage. Es gibt für diesen freien "
-        "KI-Test keine besondere Transkript-Korrekturstruktur.";
-    const std::vector<std::pair<std::string, std::string>> messages = {
-        {"system", system_prompt},
-        {"user", user_prompt},
-    };
-    RenderedChat rendered = render_chat(engine, messages, true);
-    if (!rendered.prompt.empty()) return rendered;
-    return { system_prompt + "\n\n" + user_prompt + "\n\nAntwort:\n", false };
+std::string unmark_free_prompt(const std::string & prompt) {
+    return prompt.rfind(FREE_TEST_MARKER, 0) == 0
+        ? prompt.substr(std::string(FREE_TEST_MARKER).size())
+        : prompt;
 }
 
 std::string format_correction_base(LocalEngine * engine, const std::string & common_prompt) {
@@ -384,6 +381,20 @@ void clear_correction_session(LocalEngine * engine) {
     engine->correction_base_rendered.clear();
 }
 
+void clear_free_session(LocalEngine * engine) {
+    engine->free_messages.clear();
+}
+
+jobjectArray fail_free_generation(
+    JNIEnv * env,
+    LocalEngine * engine,
+    const std::string & message) {
+    (void) env;
+    log_error(message);
+    engine->last_error = message;
+    return nullptr;
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -442,18 +453,52 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine || !engine->model) return nullptr;
 
+    engine->last_error.clear();
     const SteadyClock::time_point request_started = SteadyClock::now();
-    const std::string user_prompt = from_java(env, prompt_value);
-    const RenderedChat rendered = format_free_prompt(engine, user_prompt);
-    const std::string & prompt = rendered.prompt;
-    const llama_vocab * vocab = llama_model_get_vocab(engine->model);
-    std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt, true);
-    if (prompt_tokens.empty()) return nullptr;
+    const std::string user_prompt = unmark_free_prompt(from_java(env, prompt_value));
+    if (user_prompt.empty()) {
+        return fail_free_generation(env, engine, "Der KI-Auftrag darf nicht leer sein.");
+    }
 
-    const int remaining_context = engine->context_size - static_cast<int>(prompt_tokens.size()) - 1;
+    const bool conversation_continued = engine->free_messages.size() >= 3 &&
+        engine->free_messages.back().first == "assistant";
+    std::vector<std::pair<std::string, std::string>> request_messages;
+    if (conversation_continued) {
+        request_messages = engine->free_messages;
+        request_messages.push_back({"user", user_prompt});
+    } else {
+        request_messages = {
+            {"system", FREE_SYSTEM_PROMPT},
+            {"user", user_prompt},
+        };
+    }
+
+    const RenderedChat rendered = render_chat(engine, request_messages, true);
+    if (rendered.prompt.empty()) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Die Chatvorlage konnte die KI-Unterhaltung nicht fortsetzen.");
+    }
+    const llama_vocab * vocab = llama_model_get_vocab(engine->model);
+    const std::vector<llama_token> prompt_tokens = tokenize(
+        vocab,
+        rendered.prompt,
+        true);
+    if (prompt_tokens.empty()) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Die neue Anfrage konnte nicht in KI-Tokens umgewandelt werden.");
+    }
+
+    const int remaining_context = engine->context_size -
+        static_cast<int>(prompt_tokens.size()) - CHAT_SUFFIX_TOKEN_RESERVE;
     if (remaining_context < 64) {
-        log_error("Prompt leaves too little context for a free response.");
-        return nullptr;
+        return fail_free_generation(
+            env,
+            engine,
+            "Das Kontextfenster der Unterhaltung ist voll. Bitte die Unterhaltung zurücksetzen.");
     }
     const int output_limit = std::min(
         std::clamp(static_cast<int>(maximum_output_tokens), 64, 4096),
@@ -461,7 +506,19 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
 
     std::unique_ptr<llama_context, decltype(&llama_free)> context(
         create_context(engine), llama_free);
-    if (!context || !decode_tokens(context.get(), prompt_tokens)) return nullptr;
+    if (!context) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Der Gesprächskontext konnte nicht angelegt werden.");
+    }
+    std::vector<llama_token> mutable_prompt_tokens = prompt_tokens;
+    if (!decode_tokens(context.get(), mutable_prompt_tokens)) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Die KI-Unterhaltung konnte nicht in den Gesprächskontext eingelesen werden.");
+    }
 
     const SteadyClock::time_point prompt_processed_at = SteadyClock::now();
     const SampleResult output = sample_response(
@@ -471,7 +528,16 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         nullptr,
         request_started);
     const SteadyClock::time_point finished_at = SteadyClock::now();
-    if (output.text.empty()) return nullptr;
+    if (output.text.empty()) {
+        return fail_free_generation(
+            env,
+            engine,
+            "Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.");
+    }
+
+    request_messages.push_back({"assistant", output.text});
+    engine->free_messages = std::move(request_messages);
+
     return to_java_generation_result(env, {
         output.text,
         std::to_string(prompt_tokens.size()),
@@ -483,6 +549,39 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         output.finish_reason,
         rendered.thinking_disabled ? "true" : "false",
     });
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_de_matthiasennen_transcript_ai_LocalAiNative_lastError(
+    JNIEnv * env,
+    jobject,
+    jlong handle) {
+    auto * engine = reinterpret_cast<LocalEngine *>(handle);
+    if (!engine || engine->last_error.empty()) return nullptr;
+    return to_java(env, engine->last_error);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_de_matthiasennen_transcript_ai_LocalAiNative_hasTestConversation(
+    JNIEnv *,
+    jobject,
+    jlong handle) {
+    auto * engine = reinterpret_cast<LocalEngine *>(handle);
+    return engine && engine->free_messages.size() >= 3 &&
+        engine->free_messages.back().first == "assistant"
+        ? JNI_TRUE
+        : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_de_matthiasennen_transcript_ai_LocalAiNative_resetTestConversation(
+    JNIEnv *,
+    jobject,
+    jlong handle) {
+    auto * engine = reinterpret_cast<LocalEngine *>(handle);
+    if (!engine) return;
+    clear_free_session(engine);
+    engine->last_error.clear();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -586,6 +685,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_release(
     jlong handle) {
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine) return;
+    clear_free_session(engine);
     clear_correction_session(engine);
     engine->chat_template.reset();
     if (engine->model) llama_model_free(engine->model);

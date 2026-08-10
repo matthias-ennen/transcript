@@ -35,7 +35,7 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - optionale lokale KI-Nachbearbeitung mit drei auswählbaren Qwen3.5-Größen
 - automatische KI-Korrektur nach dem Entladen von Whisper
 - gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
-- freier KI-Testbereich für eigene Fragen und den direkten Modellvergleich
+- dauerhafte KI-Diagnose-Seite für eigene Fragen, Modellvergleich und App-Protokoll
 - robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
@@ -112,14 +112,30 @@ ein einziges Ergebnisfeld. In der aktuellen Erprobungsstufe behält die App nur 
 einem leeren oder nicht lesbaren Ergebnis das Original; weitere inhaltliche
 Plausibilitätsprüfungen werden erst nach den Praxistests ergänzt.
 
-Die Kachel **KI-Testbereich** enthält statt einer fest eingebauten Testfrage ein
-mehrzeiliges Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an
-das ausgewählte Qwen-Modell senden; die vollständige Antwort kann anschließend
-ein- und ausgeblendet werden. Beim ersten Auftrag wird das ausgewählte Modell
-geladen und bleibt anschließend im Arbeitsspeicher. Weitere Testaufträge verwenden
-dasselbe Modell ohne erneute Ladezeit, erhalten aber jeweils einen frischen
-Gesprächskontext. Erst ein Modellwechsel, das Löschen des Modells oder das Beenden
-des App-Prozesses gibt den Modellspeicher wieder frei.
+Die dauerhafte Seite **KI-Diagnose** ist über den Link **KI-Diagnose-Seite** im
+KI-Bereich der Einstellungen erreichbar. Sie zeigt zuerst dieselbe gemeinsame
+CannaBot-Statuszeile wie die Hauptseite, danach den freien **KI-Testbereich** und
+ganz unten das allgemeine App-Diagnoseprotokoll. **Verlassen** führt zurück zu den
+Einstellungen. Hauptseite und Diagnoseseite verwenden dieselbe Statuskomponente;
+der Testbereich und das Diagnoseprotokoll werden nicht zusätzlich auf der
+Hauptseite angezeigt.
+
+Der KI-Testbereich enthält statt einer fest eingebauten Testfrage ein mehrzeiliges
+Eingabefeld. Eigene Fragen oder Aufgaben lassen sich unverändert an das ausgewählte
+Qwen-Modell senden; die vollständige Antwort kann anschließend ein- und
+ausgeblendet werden. Beim ersten Auftrag wird das ausgewählte Modell geladen und
+bleibt anschließend im Arbeitsspeicher. Weitere Anfragen verwenden dasselbe Modell
+und führen außerdem dieselbe flüchtige Unterhaltung fort. Die unsichtbaren
+Nachrichten bleiben im Arbeitsspeicher; für jeden neuen Chat-Turn wird daraus ein
+frischer nativer Rechenkontext aufgebaut. Dadurch kann die KI auf vorherige
+Aussagen Bezug nehmen, ohne dass die App einen Chatverlauf anzeigt oder dauerhaft
+speichert. **Unterhaltung zurücksetzen** beginnt bewusst einen neuen Kontext. Auch
+ein Modellwechsel, das Löschen des Modells oder das Beenden des App-Prozesses
+beendet die Unterhaltung.
+
+Ist das Kontextfenster gefüllt, fordert die App zum Zurücksetzen auf, anstatt die
+Unterhaltung unbemerkt zu vergessen. Die Messwerte zeigen zusätzlich, ob eine neue
+Unterhaltung begonnen oder ein vorhandener Kontext fortgeführt wurde.
 
 Die Qwen-Chatvorlage wird für freie Tests und Transkriptkorrekturen technisch mit
 `enable_thinking=false` angewendet. Die Korrektur verwendet zusätzlich eine native

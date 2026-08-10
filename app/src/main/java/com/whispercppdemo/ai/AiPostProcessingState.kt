@@ -16,6 +16,7 @@ data class AiCorrectionTrace(
 
 data class AiSelfTestMetrics(
     val modelAlreadyLoaded: Boolean,
+    val conversationContinued: Boolean,
     val modelLoadMs: Long,
     val promptTokens: Int,
     val generatedTokens: Int,

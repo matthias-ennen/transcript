@@ -552,6 +552,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
+    fun resetAiTestConversation() {
+        if (uiState.isBusy) return
+        AiEngineSessionManager.resetTestConversation()
+        uiState = uiState.copy(
+            aiSelfTestResponse = null,
+            aiSelfTestModel = null,
+            aiSelfTestMetrics = null,
+            error = null,
+            status = "KI-Unterhaltung wurde zurückgesetzt.",
+            activityDetail = "Die nächste Anfrage beginnt mit einem neuen Gesprächskontext.",
+            diagnostics = (uiState.diagnostics + "Flüchtige KI-Unterhaltung zurückgesetzt.")
+                .takeLast(12),
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
     fun updateTranscriptText(index: Int, text: String) {
         if (!uiState.isEditingTranscript || uiState.isAiPostProcessing) return
         val groupStartMs = uiState.editingTranscriptGroupStartMs ?: return
@@ -616,6 +632,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         AiEngineSessionManager.releaseIfDifferent(model)
         aiPreferences.setSelectedModel(model)
         refreshAiModelInstallations(model)
+        uiState = uiState.copy(
+            aiSelfTestResponse = null,
+            aiSelfTestModel = null,
+            aiSelfTestMetrics = null
+        )
     }
 
     fun downloadAiModel(model: AiModel = uiState.selectedAiModel) {
