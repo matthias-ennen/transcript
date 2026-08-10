@@ -42,6 +42,14 @@ endif()
 
 add_subdirectory(${LLAMA_SRC} build-llama EXCLUDE_FROM_ALL)
 
+# The Android NDK exposes Vulkan's C API and loader but omits Khronos'
+# header-only C++ bindings required by ggml-vulkan. CI stages the distro's
+# matching Vulkan headers here before Gradle configures this target.
+if(ANDROID_ABI STREQUAL "arm64-v8a" AND TARGET ggml-vulkan)
+    target_include_directories(ggml-vulkan PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/host-vulkan-headers")
+endif()
+
 add_library(transcript_llm SHARED local_ai_jni.cpp)
 
 target_sources(transcript_llm PRIVATE

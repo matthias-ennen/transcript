@@ -38,6 +38,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes glslc libvulkan-dev spirv-headers
+          mkdir -p llm/src/main/cpp/host-vulkan-headers
+          cp -R /usr/include/vulkan llm/src/main/cpp/host-vulkan-headers/
 
       - name: Install Android build components
         run: |

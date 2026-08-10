@@ -146,7 +146,7 @@ std::vector<ggml_backend_dev_t> gpu_devices() {
     std::vector<ggml_backend_dev_t> result;
     for (size_t index = 0; index < ggml_backend_dev_count(); ++index) {
         ggml_backend_dev_t device = ggml_backend_dev_get(index);
-        const ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
         if (type == GGML_BACKEND_DEVICE_TYPE_GPU ||
             type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
             result.push_back(device);
@@ -973,7 +973,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_runtimeCapabilities(
         size_t free_bytes = 0;
         size_t total_bytes = 0;
         ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
-        const ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
         const char * type_name = type == GGML_BACKEND_DEVICE_TYPE_CPU ? "CPU" :
             type == GGML_BACKEND_DEVICE_TYPE_GPU ? "GPU" :
             type == GGML_BACKEND_DEVICE_TYPE_IGPU ? "Integrierte GPU" :
