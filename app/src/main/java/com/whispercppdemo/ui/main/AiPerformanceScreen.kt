@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.ai.AiBenchmarkResult
 import de.matthiasennen.transcript.ai.AiHardwareSnapshot
 import de.matthiasennen.transcript.ai.AiModel
+import de.matthiasennen.transcript.ai.AiPerformanceUiPreferences
 import de.matthiasennen.transcript.ai.LocalAiBackend
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.ai.LocalAiCpuBackend
@@ -65,6 +67,10 @@ fun AiPerformanceScreen(
     modifier: Modifier = Modifier
 ) {
     val configuration = state.aiPerformanceConfiguration
+    val context = LocalContext.current
+    val uiPreferences = remember(context.applicationContext) {
+        AiPerformanceUiPreferences(context.applicationContext)
+    }
     val gpuSettingsEnabled = configuration.backend == LocalAiBackend.VULKAN ||
         configuration.backend == LocalAiBackend.HYBRID
     Column(
@@ -74,13 +80,13 @@ fun AiPerformanceScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        LiveStatusLine(state)
+        LiveStatusLine(state, state.aiPerformanceMessage)
         ProfileAndHardwareSection(
             state = state,
             onSelectProfileModel = onSelectProfileModel,
             onRefreshHardware = onRefreshHardware
         )
-        ExpandableSettingsCard("Kontext, Threads und Laden", initiallyExpanded = true) {
+        ExpandableSettingsCard("context", "Kontext, Threads und Laden", uiPreferences) {
             NumberSetting("Kontextgröße", configuration.contextSize, "1.024–32.768 Tokens") {
                 onConfigurationChanged(configuration.copy(contextSize = it))
             }
@@ -120,7 +126,7 @@ fun AiPerformanceScreen(
                 )
             ) { onConfigurationChanged(configuration.copy(loadMode = it)) }
         }
-        ExpandableSettingsCard("CPU und KleidiAI") {
+        ExpandableSettingsCard("cpu", "CPU und KleidiAI", uiPreferences) {
             ChoiceSetting(
                 title = "CPU-Beschleunigung",
                 selected = configuration.cpuBackend,
@@ -180,7 +186,7 @@ fun AiPerformanceScreen(
                 )
             }
         }
-        ExpandableSettingsCard("Vulkan und GPU") {
+        ExpandableSettingsCard("vulkan", "Vulkan und GPU", uiPreferences) {
             ChoiceSetting(
                 title = "Rechenbackend",
                 selected = configuration.backend,
@@ -256,7 +262,7 @@ fun AiPerformanceScreen(
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        ExpandableSettingsCard("Arbeitsspeicher, Wärme und Stabilität") {
+        ExpandableSettingsCard("stability", "Arbeitsspeicher, Wärme und Stabilität", uiPreferences) {
             NumberSetting("Freie RAM-Reserve", configuration.minimumFreeMemoryMb, "128–8.192 MB") {
                 onConfigurationChanged(configuration.copy(minimumFreeMemoryMb = it))
             }
@@ -285,7 +291,7 @@ fun AiPerformanceScreen(
                 onConfigurationChanged(configuration.copy(coolingPauseSeconds = it))
             }
         }
-        ExpandableSettingsCard("Leistungstest") {
+        ExpandableSettingsCard("benchmark", "Leistungstest", uiPreferences) {
             NumberSetting("Aufwärmdurchläufe", configuration.benchmarkWarmupRuns, "0–5") {
                 onConfigurationChanged(configuration.copy(benchmarkWarmupRuns = it))
             }
@@ -331,7 +337,7 @@ fun AiPerformanceScreen(
                 BenchmarkResultCard(result)
             }
         }
-        ExpandableSettingsCard("Profile sowie JSON-Import und -Export") {
+        ExpandableSettingsCard("profiles", "Profile sowie JSON-Import und -Export", uiPreferences) {
             Text("Profil auf ein anderes KI-Modell übertragen", style = MaterialTheme.typography.titleSmall)
             AiModel.entries.filter { it != state.performanceProfileModel }.forEach { target ->
                 OutlinedButton(
@@ -372,9 +378,6 @@ fun AiPerformanceScreen(
                     modifier = Modifier.weight(1f)
                 ) { Text("Importieren") }
             }
-        }
-        state.aiPerformanceMessage?.let { message ->
-            Text(message, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -446,18 +449,29 @@ private fun HardwareSummary(hardware: AiHardwareSnapshot) {
 
 @Composable
 private fun ExpandableSettingsCard(
+    storageKey: String,
     title: String,
-    initiallyExpanded: Boolean = false,
+    preferences: AiPerformanceUiPreferences,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    var expanded by remember(storageKey) { mutableStateOf(preferences.isExpanded(storageKey)) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (expanded) "▾  $title" else "▸  $title", style = MaterialTheme.typography.titleMedium)
+            TextButton(
+                onClick = {
+                    expanded = !expanded
+                    preferences.setExpanded(storageKey, expanded)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (expanded) "▾  $title" else "▸  $title",
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.titleMedium
+                )
             }
             if (expanded) content()
         }
