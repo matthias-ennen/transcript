@@ -44,3 +44,13 @@ lauter negative Fähigkeiten dargestellt.
 - Standard-CPU deaktiviert zusätzliche Puffertypen; KleidiAI/Automatisch gibt
   sie nur frei, wenn ein kompatibler KleidiAI-Puffer vorhanden ist.
 - Fehler der nativen Diagnose sind in der Oberfläche sichtbar.
+
+## Checkpoints
+
+- [x] Root Cause gegen die Binärdaten der Build-#149-APK belegt.
+- [x] Laufzeitgewählte ARM-CPU-Varianten umgesetzt.
+- [x] Diagnose trennt eingebaut, gerätenutzbar, modellkompatibel und aktiv.
+- [x] APK-Payload-Prüfung in CI ergänzt.
+- [x] NDK auf r27c aktualisiert, nachdem r25/Clang 14 beim ARMv9/SVE2-Kernel abstürzte.
+- [ ] Signierte CI-APK gebaut und geprüft.
+- [ ] Pull Request nach grünen Checks zusammengeführt.

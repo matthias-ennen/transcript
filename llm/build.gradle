@@ -42,7 +42,9 @@ android {
         jvmTarget = '17'
     }
 
-    ndkVersion '25.2.9519653'
+    // Clang 14 from NDK r25 crashes while compiling llama.cpp's ARMv9/SVE2
+    // quant kernels. NDK r27c ships Clang 18 and supports the same Android ABI.
+    ndkVersion '27.2.12479018'
     externalNativeBuild {
         cmake {
             path = file('src/main/cpp/CMakeLists.txt')
