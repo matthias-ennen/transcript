@@ -5,13 +5,22 @@ import java.io.File
 
 internal data class AiEngineSessionInfo(
     val modelAlreadyLoaded: Boolean,
-    val modelLoadMs: Long
+    val modelLoadMs: Long,
+    val cpuFallbackUsed: Boolean = false
 )
 
 internal data class AiEngineSessionResult<T>(
     val value: T,
     val info: AiEngineSessionInfo
 )
+
+internal fun shouldRetryWithCpu(
+    configuration: LocalAiConfiguration,
+    failureMessage: String?
+): Boolean = configuration.automaticCpuFallback &&
+    (configuration.backend == de.matthiasennen.transcript.ai.LocalAiBackend.VULKAN ||
+        configuration.backend == de.matthiasennen.transcript.ai.LocalAiBackend.HYBRID) &&
+    failureMessage.orEmpty().contains("VULKAN_DEVICE_LOST", ignoreCase = true)
 
 internal object AiEngineSessionManager {
     private var engine: LocalAiEngine? = null
@@ -42,26 +51,37 @@ internal object AiEngineSessionManager {
         block: (LocalAiEngine, AiEngineSessionInfo) -> T
     ): AiEngineSessionResult<T> {
         val normalized = configuration.normalized()
-        val alreadyLoaded = isLoaded(model, file, normalized)
+        return try {
+            runWithConfiguration(model, file, normalized, false, block)
+        } catch (failure: Throwable) {
+            val canFallback = shouldRetryWithCpu(normalized, failure.message)
+            if (!canFallback) throw failure
+            releaseLocked()
+            runWithConfiguration(model, file, normalized.cpuFallback(), true, block)
+        }
+    }
+
+    private fun <T> runWithConfiguration(
+        model: AiModel,
+        file: File,
+        configuration: LocalAiConfiguration,
+        cpuFallbackUsed: Boolean,
+        block: (LocalAiEngine, AiEngineSessionInfo) -> T
+    ): AiEngineSessionResult<T> {
+        val alreadyLoaded = isLoaded(model, file, configuration)
         var loadMs = 0L
         if (!alreadyLoaded) {
             releaseLocked()
             val startedAt = SystemClock.elapsedRealtime()
-            val loadedEngine = LocalAiEngine(file.absolutePath, normalized)
+            val loadedEngine = LocalAiEngine(file.absolutePath, configuration)
             loadMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
             engine = loadedEngine
             modelId = model.id
             modelPath = file.absolutePath
-            configurationKey = normalized.runtimeKey()
+            configurationKey = configuration.runtimeKey()
         }
-        val info = AiEngineSessionInfo(
-            modelAlreadyLoaded = alreadyLoaded,
-            modelLoadMs = loadMs
-        )
-        return AiEngineSessionResult(
-            value = block(requireNotNull(engine), info),
-            info = info
-        )
+        val info = AiEngineSessionInfo(alreadyLoaded, loadMs, cpuFallbackUsed)
+        return AiEngineSessionResult(block(requireNotNull(engine), info), info)
     }
 
     @Synchronized

@@ -146,8 +146,9 @@ Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
 `AiPerformanceScreen` ist die zweite dauerhafte KI-Unterseite. Sie verwendet
 ebenfalls `LiveStatusLine` und gliedert Modellprofil, Kontext/Speicher,
 CPU-Threadpool, KleidiAI, Vulkan, Wärmeschutz, Benchmark und Datenaustausch in
-aufklappbare Karten. `AiPerformancePreferences` persistiert ein versioniertes
-`LocalAiConfiguration` je `AiModel`; der Laufzeitschlüssel dieser Konfiguration
+aufklappbare Karten. `AiPerformancePreferences` persistiert genau ein
+versioniertes `LocalAiConfiguration` je `AiModel`; ältere zusätzliche
+Arbeitsprofile werden bei der Migration entfernt. Der Laufzeitschlüssel dieser Konfiguration
 ist Bestandteil des Sitzungsschlüssels. Eine Änderung an nativen Parametern
 schließt deshalb eine unpassende bestehende Sitzung, bevor sie erneut geladen
 wird.
@@ -171,6 +172,14 @@ Priorität und Polling werden über die Funktionsschnittstelle des tatsächlich
 geladenen CPU-Backends gesetzt; Kontext, Batchgrößen, Flash Attention, KQV- und
 Operationsauslagerung gehen direkt in die llama.cpp-Kontextparameter ein.
 x86/x86_64 bleiben portable statische CPU-Builds.
+
+`CPU` und `AUTO` werden sowohl an der Kotlin-Grenze als auch erneut in JNI
+vollständig Vulkan-frei normalisiert: keine GPU-Schichten, kein GPU-Gerät und
+keine KQV-/Operationsauslagerung. Vulkan/Hybrid sind ausdrückliche Profile.
+Native Inferenz-Exceptions werden an den JNI-Einstiegspunkten in typisierte
+Fehler übersetzt. Bei `VK_ERROR_DEVICE_LOST` verwirft der Sitzungsmanager die
+Vulkan-Sitzung und wiederholt den Auftrag höchstens einmal mit einer vollständig
+CPU-basierten Konfiguration.
 
 Die Diagnose fragt Merkmale, Variantennamen und KleidiAI-Verfügbarkeit direkt
 über die geladene Backend-Registry ab. Sie unterscheidet verpacktes Backend,

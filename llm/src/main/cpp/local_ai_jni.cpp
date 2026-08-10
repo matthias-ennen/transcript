@@ -89,8 +89,8 @@ struct LocalEngine {
     int requested_cpu_backend = 0;
     int requested_gpu_layers = 0;
     int load_mode = 0;
-    bool offload_kqv = true;
-    bool offload_operations = true;
+    bool offload_kqv = false;
+    bool offload_operations = false;
     bool cpu_fallback_used = false;
     bool gpu_fallback_used = false;
     bool kleidi_enabled = false;
@@ -752,9 +752,13 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
     engine->load_mode = std::clamp(static_cast<int>(load_mode), 0, 4);
     engine->requested_backend = std::clamp(static_cast<int>(backend), 0, 3);
     engine->requested_cpu_backend = std::clamp(static_cast<int>(cpu_backend), 0, 2);
-    engine->requested_gpu_layers = static_cast<int>(gpu_layers);
-    engine->offload_kqv = offload_kqv == JNI_TRUE;
-    engine->offload_operations = offload_operations == JNI_TRUE;
+    const bool gpu_backend_requested = engine->requested_backend == 2 ||
+        engine->requested_backend == 3;
+    engine->requested_gpu_layers = gpu_backend_requested
+        ? static_cast<int>(gpu_layers)
+        : 0;
+    engine->offload_kqv = gpu_backend_requested && offload_kqv == JNI_TRUE;
+    engine->offload_operations = gpu_backend_requested && offload_operations == JNI_TRUE;
     const bool model_kleidi_compatible = model_supports_kleidiai(model_path);
     engine->kleidi_enabled = engine->requested_cpu_backend != 1 &&
         cpu.kleidi_usable && model_kleidi_compatible;
@@ -774,8 +778,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_create(
         static_cast<int>(kleidi_chunk_multiplier),
         std::max(engine->generation_threads, engine->prompt_threads));
 
-    const bool wants_gpu = engine->requested_backend == 2 ||
-        engine->requested_backend == 3;
+    const bool wants_gpu = gpu_backend_requested;
     const std::vector<ggml_backend_dev_t> available_gpus = gpu_devices();
     std::vector<ggml_backend_dev_t> selected_devices;
     if (wants_gpu && !available_gpus.empty()) {
@@ -862,6 +865,8 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
     jint maximum_output_tokens) {
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine || !engine->model) return nullptr;
+
+    try {
 
     engine->last_error.clear();
     const SteadyClock::time_point request_started = SteadyClock::now();
@@ -959,6 +964,22 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         output.finish_reason,
         rendered.thinking_disabled ? "true" : "false",
     });
+    } catch (const std::exception & exception) {
+        const std::string detail = exception.what() ? exception.what() : "Unbekannter nativer Fehler";
+        const bool device_lost = detail.find("DeviceLost") != std::string::npos ||
+            detail.find("DEVICE_LOST") != std::string::npos ||
+            detail.find("device lost") != std::string::npos;
+        engine->gpu_fallback_used = engine->gpu_fallback_used || device_lost;
+        return fail_free_generation(
+            env,
+            engine,
+            (device_lost ? "VULKAN_DEVICE_LOST: " : "NATIVE_INFERENCE_ERROR: ") + detail);
+    } catch (...) {
+        return fail_free_generation(
+            env,
+            engine,
+            "NATIVE_INFERENCE_ERROR: Unbekannte native C++-Exception.");
+    }
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -1003,6 +1024,8 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_prepareCorrectionContext(
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine || !engine->model) return JNI_FALSE;
 
+    try {
+
     clear_correction_session(engine);
     engine->correction_common_prompt = from_java(env, common_prompt_value);
     if (engine->correction_common_prompt.empty()) return JNI_FALSE;
@@ -1035,6 +1058,23 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_prepareCorrectionContext(
     engine->correction_base_tokens =
         llama_memory_seq_pos_max(llama_get_memory(engine->correction_context), 0) + 1;
     return engine->correction_base_tokens > 0 ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception & exception) {
+        const std::string detail = exception.what() ? exception.what() : "Unbekannter nativer Fehler";
+        const bool device_lost = detail.find("DeviceLost") != std::string::npos ||
+            detail.find("DEVICE_LOST") != std::string::npos ||
+            detail.find("device lost") != std::string::npos;
+        engine->last_error = (device_lost ? "VULKAN_DEVICE_LOST: " :
+            "NATIVE_INFERENCE_ERROR: ") + detail;
+        engine->gpu_fallback_used = engine->gpu_fallback_used || device_lost;
+        log_error(engine->last_error);
+        clear_correction_session(engine);
+        return JNI_FALSE;
+    } catch (...) {
+        engine->last_error = "NATIVE_INFERENCE_ERROR: Unbekannte native C++-Exception.";
+        log_error(engine->last_error);
+        clear_correction_session(engine);
+        return JNI_FALSE;
+    }
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -1047,6 +1087,8 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
     auto * engine = reinterpret_cast<LocalEngine *>(handle);
     if (!engine || !engine->model || !engine->correction_context ||
         engine->correction_base_tokens <= 0) return nullptr;
+
+    try {
 
     llama_memory_t memory = llama_get_memory(engine->correction_context);
     if (!llama_memory_seq_rm(memory, 0, engine->correction_base_tokens, -1)) {
@@ -1086,6 +1128,21 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
         CORRECTION_GRAMMAR,
         SteadyClock::now());
     return output.text.empty() ? nullptr : to_java(env, output.text);
+    } catch (const std::exception & exception) {
+        const std::string detail = exception.what() ? exception.what() : "Unbekannter nativer Fehler";
+        const bool device_lost = detail.find("DeviceLost") != std::string::npos ||
+            detail.find("DEVICE_LOST") != std::string::npos ||
+            detail.find("device lost") != std::string::npos;
+        engine->last_error = (device_lost ? "VULKAN_DEVICE_LOST: " :
+            "NATIVE_INFERENCE_ERROR: ") + detail;
+        engine->gpu_fallback_used = engine->gpu_fallback_used || device_lost;
+        log_error(engine->last_error);
+        return nullptr;
+    } catch (...) {
+        engine->last_error = "NATIVE_INFERENCE_ERROR: Unbekannte native C++-Exception.";
+        log_error(engine->last_error);
+        return nullptr;
+    }
 }
 
 extern "C" JNIEXPORT jobjectArray JNICALL

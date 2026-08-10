@@ -29,8 +29,8 @@ data class LocalAiConfiguration(
     val gpuDeviceIndex: Int = 0,
     val gpuLayers: Int = 0,
     val gpuLayerPercent: Int = 0,
-    val offloadKqv: Boolean = true,
-    val offloadOperations: Boolean = true,
+    val offloadKqv: Boolean = false,
+    val offloadOperations: Boolean = false,
     val automaticCpuFallback: Boolean = true,
     val cpuCoreMask: String = "",
     val strictCpuPlacement: Boolean = false,
@@ -70,6 +70,7 @@ data class LocalAiConfiguration(
             LocalAiBackend.VULKAN -> if (gpuLayers == 0) -1 else gpuLayers.coerceIn(-1, 512)
             LocalAiBackend.HYBRID -> gpuLayers.coerceIn(1, 512)
         }
+        val gpuEnabled = backend == LocalAiBackend.VULKAN || backend == LocalAiBackend.HYBRID
         return copy(
             contextSize = normalizedContext,
             generationThreads = generationThreads.coerceIn(1, processorLimit),
@@ -79,7 +80,9 @@ data class LocalAiConfiguration(
             maximumOutputTokens = maximumOutputTokens.coerceIn(32, normalizedContext / 2),
             gpuDeviceIndex = gpuDeviceIndex.coerceAtLeast(0),
             gpuLayers = normalizedGpuLayers,
-            gpuLayerPercent = normalizedGpuPercent,
+            gpuLayerPercent = if (gpuEnabled) normalizedGpuPercent else 0,
+            offloadKqv = gpuEnabled && offloadKqv,
+            offloadOperations = gpuEnabled && offloadOperations,
             threadPollingPercent = threadPollingPercent.coerceIn(0, 100),
             kleidiSmeUnits = kleidiSmeUnits.coerceIn(-1, 64),
             kleidiChunkMultiplier = kleidiChunkMultiplier.coerceIn(0, 64),
@@ -129,6 +132,15 @@ data class LocalAiConfiguration(
             value.kleidiChunkMultiplier
         ).joinToString("|")
     }
+
+    fun cpuFallback(): LocalAiConfiguration = copy(
+        backend = LocalAiBackend.CPU,
+        gpuDeviceIndex = 0,
+        gpuLayers = 0,
+        gpuLayerPercent = 0,
+        offloadKqv = false,
+        offloadOperations = false
+    ).normalized()
 
     companion object {
         fun preferredThreadCount(

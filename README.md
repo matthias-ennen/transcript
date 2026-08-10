@@ -156,6 +156,13 @@ Standard- oder KleidiAI-Kernel, Memory Mapping/Locking sowie CPU, Vulkan oder
 gemischte GPU-Auslagerung. Die Seite zeigt nur Fähigkeiten, die von Android und
 der gebauten nativen Laufzeit tatsächlich gemeldet werden.
 
+Jedes der drei Modelle besitzt genau ein eigenes Profil. **Nur CPU** und
+**Automatisch (CPU/KleidiAI)** sind garantiert Vulkan-frei; GPU-Schichten sowie
+KQV-/Operationsauslagerung sind ausschließlich in Vulkan- und Hybridprofilen
+wirksam. Verliert der Vulkan-Treiber während der Berechnung das Gerät, wird der
+native Fehler kontrolliert zurückgegeben und der Auftrag bei aktiviertem
+CPU-Rückfall einmal vollständig über CPU wiederholt.
+
 Auf ARM64 enthält die APK getrennte, zur Laufzeit bewertete CPU-Varianten für
 portables ARMv8, Dot Product, INT8-Matrixoperationen und SVE2. Dadurch bleibt der
 Standard-CPU-Pfad auf älteren Geräten sicher, während ein passendes Gerät echte

@@ -639,27 +639,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
-    fun restoreLastWorkingAiPerformanceConfiguration() {
-        if (uiState.isBusy) return
-        val model = uiState.performanceProfileModel
-        val restored = aiPerformancePreferences.restoreLastWorking(model)
-        if (restored == null) {
-            uiState = uiState.copy(
-                aiPerformanceMessage = "Für ${model.modelLabel} wurde noch keine erfolgreiche Testkonfiguration gespeichert."
-            )
-            return
-        }
-        AiEngineSessionManager.release(model)
-        uiState = uiState.copy(
-            aiPerformanceConfiguration = restored,
-            aiPerformanceJson = "",
-            aiPerformanceMessage = "Letzte erfolgreiche Testkonfiguration wiederhergestellt.",
-            aiBenchmarkResult = null,
-            status = "Funktionierende KI-Konfiguration wiederhergestellt.",
-            cannaBotMode = CannaBotMode.IDLE
-        )
-    }
-
     fun copyAiPerformanceConfiguration(target: AiModel) {
         if (uiState.isBusy) return
         val source = uiState.performanceProfileModel
@@ -740,7 +719,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 val result = withContext(Dispatchers.IO) {
                     runAiPerformanceBenchmark(model, modelFile, configuration)
                 }
-                aiPerformancePreferences.rememberWorking(model, result.configuration)
                 uiState = uiState.copy(
                     isBusy = false,
                     isAiBenchmarkRunning = false,
@@ -764,15 +742,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 )
             } catch (failure: Throwable) {
                 val message = failure.localizedMessage ?: "Der KI-Leistungstest ist fehlgeschlagen."
-                val restored = aiPerformancePreferences.restoreLastWorking(model)
-                if (restored != null) AiEngineSessionManager.release(model)
                 uiState = uiState.copy(
                     isBusy = false,
                     isAiBenchmarkRunning = false,
                     activityDetail = null,
-                    aiPerformanceConfiguration = restored ?: uiState.aiPerformanceConfiguration,
-                    aiPerformanceMessage = if (restored == null) message else
-                        "$message Die letzte erfolgreiche Testkonfiguration wurde automatisch wiederhergestellt.",
+                    aiPerformanceMessage = message,
                     error = message,
                     status = "KI-Leistungstest fehlgeschlagen.",
                     cannaBotMode = CannaBotMode.IDLE
