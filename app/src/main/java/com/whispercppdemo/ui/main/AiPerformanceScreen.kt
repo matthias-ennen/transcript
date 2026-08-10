@@ -303,7 +303,9 @@ fun AiPerformanceScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("KI-Leistungstest starten") }
             }
-            state.aiBenchmarkResult?.let(::BenchmarkResultCard)
+            state.aiBenchmarkResult?.let { result ->
+                BenchmarkResultCard(result)
+            }
         }
         ExpandableSettingsCard("Profile sowie JSON-Import und -Export") {
             Text("Profil auf ein anderes KI-Modell übertragen", style = MaterialTheme.typography.titleSmall)
