@@ -250,11 +250,13 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_initContextFromAsset(
 
 JNIEXPORT jlong JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_initContext(
-        JNIEnv *env, jobject thiz, jstring model_path_str) {
+        JNIEnv *env, jobject thiz, jstring model_path_str, jboolean use_gpu) {
     UNUSED(thiz);
     struct whisper_context *context = NULL;
     const char *model_path_chars = (*env)->GetStringUTFChars(env, model_path_str, NULL);
-    context = whisper_init_from_file_with_params(model_path_chars, whisper_context_default_params());
+    struct whisper_context_params context_params = whisper_context_default_params();
+    context_params.use_gpu = use_gpu;
+    context = whisper_init_from_file_with_params(model_path_chars, context_params);
     (*env)->ReleaseStringUTFChars(env, model_path_str, model_path_chars);
     return (jlong) context;
 }
@@ -271,7 +273,13 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
 JNIEXPORT jint JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
-        jfloatArray audio_data, jstring language_str, jlong abort_token,
+        jfloatArray audio_data, jstring language_str,
+        jboolean beam_search, jint beam_size, jint best_of, jfloat temperature,
+        jstring initial_prompt_str, jboolean carry_context,
+        jint maximum_segment_characters, jboolean split_on_word,
+        jboolean token_timestamps, jboolean suppress_blank,
+        jboolean suppress_non_speech_tokens, jfloat log_probability_threshold,
+        jfloat no_speech_threshold, jfloat entropy_threshold, jlong abort_token,
         jobject progress_listener) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
@@ -279,7 +287,8 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     const jsize audio_data_length = (*env)->GetArrayLength(env, audio_data);
 
     // The below adapted from the Objective-C iOS sample
-    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    struct whisper_full_params params = whisper_full_default_params(
+            beam_search ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = true;
@@ -293,8 +302,22 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.detect_language = false;
     params.n_threads = num_threads;
     params.offset_ms = 0;
-    params.no_context = true;
+    params.no_context = !carry_context;
     params.single_segment = false;
+    params.beam_search.beam_size = beam_size;
+    params.greedy.best_of = best_of;
+    params.temperature = temperature;
+    const char *initial_prompt = (*env)->GetStringUTFChars(env, initial_prompt_str, NULL);
+    params.initial_prompt = initial_prompt[0] == '\0' ? NULL : initial_prompt;
+    params.carry_initial_prompt = carry_context;
+    params.max_len = maximum_segment_characters;
+    params.split_on_word = split_on_word;
+    params.token_timestamps = token_timestamps || maximum_segment_characters > 0;
+    params.suppress_blank = suppress_blank;
+    params.suppress_nst = suppress_non_speech_tokens;
+    params.logprob_thold = log_probability_threshold;
+    params.no_speech_thold = no_speech_threshold;
+    params.entropy_thold = entropy_threshold;
     params.abort_callback = on_whisper_abort;
     params.abort_callback_user_data = (void *) abort_token;
 
@@ -325,6 +348,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     }
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio_data_arr, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, language_str, language);
+    (*env)->ReleaseStringUTFChars(env, initial_prompt_str, initial_prompt);
     if (progress_context.listener != NULL) {
         (*env)->DeleteGlobalRef(env, progress_context.listener);
     }

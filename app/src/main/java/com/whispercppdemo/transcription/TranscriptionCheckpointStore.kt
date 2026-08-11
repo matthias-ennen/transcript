@@ -12,7 +12,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 private const val CHECKPOINT_MAGIC = 0x54524350
-private const val CHECKPOINT_VERSION = 1
+private const val CHECKPOINT_VERSION = 2
 private const val MAX_STRING_BYTES = 4 * 1024 * 1024
 private const val MAX_SEGMENT_COUNT = 1_000_000
 
@@ -20,7 +20,8 @@ data class TranscriptionRequest(
     val uri: String,
     val fileName: String,
     val modelId: String,
-    val language: String
+    val language: String,
+    val settingsSignature: String = ""
 )
 
 data class TranscriptionCheckpoint(
@@ -50,7 +51,8 @@ class TranscriptionCheckpointStore(private val checkpointFile: File) {
                 uri = input.readSizedString(),
                 fileName = input.readSizedString(),
                 modelId = input.readSizedString(),
-                language = input.readSizedString()
+                language = input.readSizedString(),
+                settingsSignature = input.readSizedString()
             )
             val durationMs = input.readLong()
             val nextStartMs = input.readLong()
@@ -88,6 +90,7 @@ class TranscriptionCheckpointStore(private val checkpointFile: File) {
             output.writeSizedString(checkpoint.request.fileName)
             output.writeSizedString(checkpoint.request.modelId)
             output.writeSizedString(checkpoint.request.language)
+            output.writeSizedString(checkpoint.request.settingsSignature)
             output.writeLong(checkpoint.durationMs)
             output.writeLong(checkpoint.nextStartMs)
             output.writeNullableString(checkpoint.detectedLanguage)

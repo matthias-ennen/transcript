@@ -59,6 +59,7 @@ import kotlin.math.roundToInt
 
 private const val PREFERENCES_NAME = "transcript_preferences"
 private const val SELECTED_MODEL_KEY = "selected_model"
+private const val LANGUAGE_KEY = "transcription_language"
 
 enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
 
@@ -77,6 +78,7 @@ data class TranscriptUiState(
     val isWaveformLoading: Boolean = false,
     val waveformProgress: Float? = null,
     val language: String = "auto",
+    val whisperSettings: WhisperSettings = WhisperSettings(),
     val selectedModel: WhisperModel = WhisperModel.BASE,
     val modelInstallations: List<ModelInstallation> = emptyList(),
     val modelReady: Boolean = false,
@@ -139,6 +141,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val aiPerformancePreferences = AiPerformancePreferences(application)
     private val waveformCache = WaveformCache(File(application.filesDir, "waveforms"))
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
+    private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
     private val audioRecorder = AudioRecorder(application)
     private val audioPlayer = AudioPlayerController(
         context = application,
@@ -186,9 +189,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         modelsDirectory.mkdirs()
         aiModelsDirectory.mkdirs()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
+        val whisperSettings = whisperSettingsPreferences.load()
         refreshModelInstallations(selectedModel)
         val aiSettings = aiPreferences.load()
         uiState = uiState.copy(
+            language = preferences.getString(LANGUAGE_KEY, "auto") ?: "auto",
+            whisperSettings = whisperSettings,
             selectedAiModel = aiSettings.selectedModel,
             aiPostProcessingEnabled = aiSettings.enabled,
             automaticAiPostProcessingEnabled = aiSettings.automatic,
@@ -464,7 +470,23 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun setLanguage(language: String) {
+        preferences.edit().putString(LANGUAGE_KEY, language).apply()
         uiState = uiState.copy(language = language)
+    }
+
+    fun updateWhisperSettings(settings: WhisperSettings) {
+        if (uiState.isTranscribing) return
+        val normalized = settings.normalized()
+        whisperSettingsPreferences.save(normalized)
+        uiState = uiState.copy(
+            whisperSettings = normalized,
+            status = "Whisper-Einstellungen gespeichert.",
+            cannaBotMode = CannaBotMode.REVIEW
+        )
+    }
+
+    fun resetWhisperSettings(group: WhisperSettingsGroup) {
+        updateWhisperSettings(uiState.whisperSettings.reset(group))
     }
 
     fun selectModel(model: WhisperModel) {
@@ -1091,7 +1113,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             uri = uri,
             fileName = uiState.selectedFileName ?: displayName(uri),
             model = uiState.selectedModel,
-            language = uiState.language
+            language = uiState.language,
+            settings = uiState.whisperSettings
         )
     }
 

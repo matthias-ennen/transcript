@@ -86,7 +86,10 @@ fun AiPerformanceScreen(
             onSelectProfileModel = onSelectProfileModel,
             onRefreshHardware = onRefreshHardware
         )
-        ExpandableSettingsCard("context", "Kontext, Threads und Laden", uiPreferences) {
+        ExpandableSettingsCard("context", "Kontext, Threads und Laden", uiPreferences, onReset = {
+            val d = LocalAiConfiguration()
+            onConfigurationChanged(configuration.copy(contextSize=d.contextSize, generationThreads=d.generationThreads, promptThreads=d.promptThreads, batchSize=d.batchSize, microBatchSize=d.microBatchSize, maximumOutputTokens=d.maximumOutputTokens, flashAttention=d.flashAttention, loadMode=d.loadMode))
+        }) {
             NumberSetting("Kontextgröße", configuration.contextSize, "1.024–32.768 Tokens") {
                 onConfigurationChanged(configuration.copy(contextSize = it))
             }
@@ -126,7 +129,10 @@ fun AiPerformanceScreen(
                 )
             ) { onConfigurationChanged(configuration.copy(loadMode = it)) }
         }
-        ExpandableSettingsCard("cpu", "CPU und KleidiAI", uiPreferences) {
+        ExpandableSettingsCard("cpu", "CPU und KleidiAI", uiPreferences, onReset = {
+            val d = LocalAiConfiguration()
+            onConfigurationChanged(configuration.copy(cpuBackend=d.cpuBackend, cpuCoreMask=d.cpuCoreMask, strictCpuPlacement=d.strictCpuPlacement, threadPriority=d.threadPriority, threadPollingPercent=d.threadPollingPercent, kleidiSmeUnits=d.kleidiSmeUnits, kleidiChunkMultiplier=d.kleidiChunkMultiplier))
+        }) {
             ChoiceSetting(
                 title = "CPU-Beschleunigung",
                 selected = configuration.cpuBackend,
@@ -186,7 +192,10 @@ fun AiPerformanceScreen(
                 )
             }
         }
-        ExpandableSettingsCard("vulkan", "Vulkan und GPU", uiPreferences) {
+        ExpandableSettingsCard("vulkan", "Vulkan und GPU", uiPreferences, onReset = {
+            val d = LocalAiConfiguration()
+            onConfigurationChanged(configuration.copy(backend=d.backend, gpuDeviceIndex=d.gpuDeviceIndex, gpuLayers=d.gpuLayers, gpuLayerPercent=d.gpuLayerPercent, offloadKqv=d.offloadKqv, offloadOperations=d.offloadOperations, automaticCpuFallback=d.automaticCpuFallback))
+        }) {
             ChoiceSetting(
                 title = "Rechenbackend",
                 selected = configuration.backend,
@@ -262,7 +271,10 @@ fun AiPerformanceScreen(
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        ExpandableSettingsCard("stability", "Arbeitsspeicher, Wärme und Stabilität", uiPreferences) {
+        ExpandableSettingsCard("stability", "Arbeitsspeicher, Wärme und Stabilität", uiPreferences, onReset = {
+            val d = LocalAiConfiguration()
+            onConfigurationChanged(configuration.copy(minimumFreeMemoryMb=d.minimumFreeMemoryMb, maximumMemoryPercent=d.maximumMemoryPercent, maximumVulkanMemoryPercent=d.maximumVulkanMemoryPercent, thermalWarningStatus=d.thermalWarningStatus, thermalThrottleStatus=d.thermalThrottleStatus, thermalStopStatus=d.thermalStopStatus, throttledThreads=d.throttledThreads, gpuLayersReducedPerStep=d.gpuLayersReducedPerStep, coolingPauseSeconds=d.coolingPauseSeconds))
+        }) {
             NumberSetting("Freie RAM-Reserve", configuration.minimumFreeMemoryMb, "128–8.192 MB") {
                 onConfigurationChanged(configuration.copy(minimumFreeMemoryMb = it))
             }
@@ -291,7 +303,10 @@ fun AiPerformanceScreen(
                 onConfigurationChanged(configuration.copy(coolingPauseSeconds = it))
             }
         }
-        ExpandableSettingsCard("benchmark", "Leistungstest", uiPreferences) {
+        ExpandableSettingsCard("benchmark", "Leistungstest", uiPreferences, onReset = {
+            val d = LocalAiConfiguration()
+            onConfigurationChanged(configuration.copy(benchmarkWarmupRuns=d.benchmarkWarmupRuns, benchmarkMeasuredRuns=d.benchmarkMeasuredRuns, benchmarkPromptCharacters=d.benchmarkPromptCharacters, benchmarkOutputTokens=d.benchmarkOutputTokens, benchmarkPauseSeconds=d.benchmarkPauseSeconds, benchmarkMinimumBatteryPercent=d.benchmarkMinimumBatteryPercent, benchmarkRequiresCharging=d.benchmarkRequiresCharging, benchmarkMaximumThermalStatus=d.benchmarkMaximumThermalStatus))
+        }) {
             NumberSetting("Aufwärmdurchläufe", configuration.benchmarkWarmupRuns, "0–5") {
                 onConfigurationChanged(configuration.copy(benchmarkWarmupRuns = it))
             }
@@ -337,7 +352,7 @@ fun AiPerformanceScreen(
                 BenchmarkResultCard(result)
             }
         }
-        ExpandableSettingsCard("profiles", "Profile sowie JSON-Import und -Export", uiPreferences) {
+        ExpandableSettingsCard("profiles", "Profile sowie JSON-Import und -Export", uiPreferences, onReset = onResetConfiguration) {
             Text("Profil auf ein anderes KI-Modell übertragen", style = MaterialTheme.typography.titleSmall)
             AiModel.entries.filter { it != state.performanceProfileModel }.forEach { target ->
                 OutlinedButton(
@@ -346,11 +361,6 @@ fun AiPerformanceScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Nach ${target.modelLabel} kopieren") }
             }
-            OutlinedButton(
-                onClick = onResetConfiguration,
-                enabled = !state.isBusy,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Standardwerte wiederherstellen") }
             Button(
                 onClick = onExportConfiguration,
                 enabled = !state.isBusy,
@@ -448,10 +458,11 @@ private fun HardwareSummary(hardware: AiHardwareSnapshot) {
 }
 
 @Composable
-private fun ExpandableSettingsCard(
+internal fun ExpandableSettingsCard(
     storageKey: String,
     title: String,
     preferences: AiPerformanceUiPreferences,
+    onReset: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     var expanded by remember(storageKey) { mutableStateOf(preferences.isExpanded(storageKey)) }
@@ -473,13 +484,20 @@ private fun ExpandableSettingsCard(
                     style = MaterialTheme.typography.titleMedium
                 )
             }
-            if (expanded) content()
+            if (expanded) {
+                content()
+                onReset?.let { reset ->
+                    OutlinedButton(onClick = reset, modifier = Modifier.fillMaxWidth()) {
+                        Text("Auf Standard zurücksetzen")
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun NumberSetting(
+internal fun NumberSetting(
     title: String,
     value: Int,
     description: String,
@@ -513,7 +531,7 @@ private fun NumberSetting(
 }
 
 @Composable
-private fun TextSetting(
+internal fun TextSetting(
     title: String,
     value: String,
     placeholder: String,
@@ -530,7 +548,7 @@ private fun TextSetting(
 }
 
 @Composable
-private fun BooleanSetting(
+internal fun BooleanSetting(
     title: String,
     description: String,
     value: Boolean,
@@ -551,7 +569,7 @@ private fun BooleanSetting(
 }
 
 @Composable
-private fun <T> ChoiceSetting(
+internal fun <T> ChoiceSetting(
     title: String,
     selected: T,
     options: List<Pair<T, String>>,

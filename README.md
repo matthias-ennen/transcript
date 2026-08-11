@@ -43,6 +43,8 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - Transkriptionssprache wahlweise automatisch erkannt, Deutsch oder Englisch
+- dauerhaft gespeicherte Whisper-Einstellungen für Vorgabetext, Threads,
+  CPU/GPU, Dekodierung, Segmentierung, Zeitstempel und Halluzinationsschutz
 - Ausgabe mit Segmentzeitstempeln
 - fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
   die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
