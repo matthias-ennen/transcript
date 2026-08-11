@@ -40,25 +40,29 @@ Internetverbindung.
    2,5-Minuten-Bereiche geteilt.
 7. `TranscriptionCheckpointStore` schreibt Segmente, Sprache und nächste
    Position nach jedem fertigen Abschnitt atomar in den privaten App-Speicher.
-8. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
+8. `TranscriptResultStore` hält nach Abschluss das unveränderte Whisper-Original
+   und den zuletzt übernommenen Anzeige-/Exportstand getrennt in einer atomar
+   ersetzten Datei. `TranscriptResultPersistence` serialisiert Schreibvorgänge
+   außerhalb des Compose-Hauptthreads.
+9. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
    an jedes aktive `MainScreenViewModel`.
-9. Die Ergebnisansicht stellt jedes Segment mit Zeitstempel und GUI-Nummer dar.
+10. Die Ergebnisansicht stellt jedes Segment mit Zeitstempel und GUI-Nummer dar.
    Eine 52 × 32 dp große, abgerundete Nummernkapsel hält auch drei- und
    vierstellige Nummern vollständig sichtbar.
-10. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
+11. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
    **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
    Reihenfolge bleiben erhalten.
-11. `AiPostProcessingService` lädt nach vollständiger Freigabe des Whisper-
+12. `AiPostProcessingService` lädt nach vollständiger Freigabe des Whisper-
     Kontexts genau ein ausgewähltes Qwen3.5-GGUF. Stabile Segmentmarker sichern
     Anzahl, Reihenfolge und Zeitstempel. Automatische Läufe übernehmen validierte
     Gruppen direkt; manuelle Läufe schreiben nur in `draftSegments`.
-12. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
-13. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
+13. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
+14. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
     Cache-Unterordner. Ein nicht exportierter `FileProvider` gibt ausschließlich
     diese Dateien mit zeitlich begrenztem Leserecht an das Android-Teilen-Menü
     weiter. Ein Format verwendet `ACTION_SEND`, mehrere Formate verwenden
     `ACTION_SEND_MULTIPLE`.
-14. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
+15. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
     schwebende Navigationskapsel ein. Sie verwendet denselben Scrollzustand wie
     die gesamte Hauptansicht und führt deshalb bis an den Anfang der App zurück.
 
@@ -102,8 +106,10 @@ Das optionale Silero-VAD-Modell wird getrennt unter `vad-models/` verwaltet. Nur
 ein vollständig installiertes Modell wird zusammen mit den persistierten
 VAD-Parametern bis in `whisper_full_params` durchgereicht. **Aus** deaktiviert
 VAD, **Ein** aktiviert es und **Automatisch** führt vor dem Laden von Whisper
-eine konstantspeichernde Abschnittsanalyse durch. Diese verwendet VAD nur bei
-eindeutigen längeren Ruhephasen und geringer Zerstückelung; Grenzfälle bleiben
+eine konstantspeichernde Abschnittsanalyse mit dem echten Silero-Kontext durch.
+Sie aggregiert erkannte Sprachbereiche, Sprach-/Pausenanteil, die längste Pause
+und Zerstückelung über Abschnittsgrenzen. VAD wird nur bei eindeutigen längeren
+Ruhephasen und stabilen Sprachbereichen verwendet; Grenzfälle bleiben
 vollständig bei Whisper. Die
 integrierte `whisper.cpp`-Pipeline entfernt Nicht-Sprachbereiche für die
 Berechnung und bildet Segmentzeitstempel anschließend wieder auf die
@@ -147,7 +153,10 @@ Der getrennte `AiModel`-Katalog enthält Qwen3.5 mit 0,8B, 2B und 4B Parametern.
 Auswahl, Download, SHA-256-Prüfung und Löschen liegen ausschließlich in den
 Einstellungen. `AiPostProcessingService` speichert seinen Gruppenfortschritt
 atomar und verwendet nie gleichzeitig Speicher mit einem aktiven Whisper-Kontext.
-Whisper- und KI-Modelldateien sind von Cloud-Backup und Gerätetransfer ausgeschlossen.
+`android:allowBackup=false` und vollständige Ausschlussregeln deaktivieren
+Cloud-Backup sowie Gerätetransfer für alle App-Daten. Modelle, Aufnahmen,
+Zwischenstände, fertige Transkripte und Einstellungen verlassen diesen Speicher
+nicht über Android Backup.
 
 Eine KI-Korrektursitzung dekodiert die vollständige aktive Fünf-Minuten-Gruppe
 einmal als schreibgeschützten Whisper-Rohkontext. Für jedes Segment wird der native
@@ -252,9 +261,18 @@ native Messwerte für Prompt-Tokens, Promptverarbeitung, erstes Antwort-Token,
 Antworterzeugung, Ausgabetokens und Beendigungsgrund. Strukturierte Korrekturen
 enden unmittelbar nach dem geschlossenen JSON-Objekt.
 
+Das `lib`-Modul baut `whisper.cpp` mit `GGML_VULKAN=ON`. Vor der Kontextanlage
+fragt JNI die registrierten GGML-Geräte ab. Nur ein tatsächlich vorhandenes GPU-
+oder iGPU-Gerät aktiviert den GPU-Pfad; ein fehlendes Gerät oder eine gescheiterte
+GPU-Initialisierung führt zu genau einem sichtbaren CPU-Rückfall. Jeder Whisper-
+und Silero-Kontext besitzt einen seriellen Executor, der beim Freigeben zusammen
+mit dem nativen Kontext idempotent geschlossen wird.
+
 ## Build und Veröffentlichung
 
-`.github/workflows/build-apk.yml` führt die JVM-Unit-Tests aus, baut eine
-dauerhaft signierte Debug-APK, prüft deren Signatur und lädt sie als GitHub-
-Actions-Artefakt hoch. Die Signierdaten werden ausschließlich aus geschützten
-Repository-Secrets gelesen.
+`.github/workflows/build-apk.yml` führt die JVM-Unit-Tests aus und baut getrennt
+eine dauerhaft signierte Debug-APK, eine signierte Release-APK und ein signiertes
+Release-AAB. Der Workflow prüft Signaturen, nicht debuggable Release-Metadaten,
+deaktiviertes Backup sowie die KleidiAI- und Whisper-Vulkan-Native-Payloads und
+lädt Debug- und Release-Artefakte getrennt hoch. Die Signierdaten werden
+ausschließlich aus geschützten Repository-Secrets gelesen.

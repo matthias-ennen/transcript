@@ -1,72 +1,87 @@
 package de.matthiasennen.transcript.transcription
 
-import kotlin.math.abs
-import kotlin.math.sqrt
+import com.whispercpp.whisper.WhisperVadSegment
 
 internal data class VadAutomaticDecision(
     val useVad: Boolean,
     val reason: String,
     val silencePercent: Int,
-    val longestSilenceMs: Long
+    val speechPercent: Int,
+    val longestSilenceMs: Long,
+    val speechSegmentCount: Int
 )
 
 /**
- * Constant-memory, deliberately conservative scan for clear silence. It does
- * not try to classify speech itself: ambiguous audio is always left to Whisper.
+ * Aggregates real Silero-VAD segments in constant memory and accepts VAD only
+ * when it removes a useful amount of silence without fragmenting the audio.
  */
-internal class VadAutomaticAnalyzer(
-    private val sampleRate: Int = 16_000,
-    private val windowSamples: Int = 480
-) {
-    private var totalWindows = 0L
-    private var silentWindows = 0L
-    private var currentSilentWindows = 0L
-    private var longestSilentWindows = 0L
-    private var silenceRuns = 0L
+internal class VadAutomaticAnalyzer {
+    private var totalDurationMs = 0L
+    private var speechDurationMs = 0L
+    private var longestSilenceMs = 0L
+    private var lastSpeechEndMs = 0L
+    private var speechSegmentCount = 0
+    private var shortSpeechSegmentCount = 0
 
-    fun add(samples: FloatArray) {
-        var offset = 0
-        while (offset < samples.size) {
-            val end = (offset + windowSamples).coerceAtMost(samples.size)
-            var squared = 0.0
-            var peak = 0f
-            for (index in offset until end) {
-                val value = samples[index]
-                squared += value * value
-                peak = maxOf(peak, abs(value))
-            }
-            val rms = sqrt(squared / (end - offset).coerceAtLeast(1)).toFloat()
-            val silent = rms < 0.0035f && peak < 0.02f
-            totalWindows++
-            if (silent) {
-                silentWindows++
-                if (currentSilentWindows == 0L) silenceRuns++
-                currentSilentWindows++
-                longestSilentWindows = maxOf(longestSilentWindows, currentSilentWindows)
-            } else {
-                currentSilentWindows = 0L
-            }
-            offset = end
+    fun add(chunkDurationMs: Long, segments: List<WhisperVadSegment>) {
+        val duration = chunkDurationMs.coerceAtLeast(0L)
+        val chunkStartMs = totalDurationMs
+        totalDurationMs += duration
+        segments.sortedBy(WhisperVadSegment::startMs).forEach { segment ->
+            val startMs = segment.startMs.coerceIn(0L, duration)
+            val endMs = segment.endMs.coerceIn(startMs, duration)
+            val absoluteStartMs = chunkStartMs + startMs
+            val absoluteEndMs = chunkStartMs + endMs
+            longestSilenceMs = maxOf(longestSilenceMs, absoluteStartMs - lastSpeechEndMs)
+            val speechMs = endMs - startMs
+            speechDurationMs += speechMs
+            speechSegmentCount++
+            if (speechMs < 750L) shortSpeechSegmentCount++
+            lastSpeechEndMs = maxOf(lastSpeechEndMs, absoluteEndMs)
         }
     }
 
     fun decide(): VadAutomaticDecision {
-        if (totalWindows == 0L) {
-            return VadAutomaticDecision(false, "keine auswertbaren Audiodaten", 0, 0L)
+        if (totalDurationMs <= 0L) {
+            return VadAutomaticDecision(
+                useVad = false,
+                reason = "keine auswertbaren Audiodaten",
+                silencePercent = 0,
+                speechPercent = 0,
+                longestSilenceMs = 0L,
+                speechSegmentCount = 0
+            )
         }
-        val silenceRatio = silentWindows.toDouble() / totalWindows
-        val durationMinutes = totalWindows * windowSamples.toDouble() / sampleRate / 60.0
-        val runsPerMinute = silenceRuns / durationMinutes.coerceAtLeast(1.0)
-        val longestMs = longestSilentWindows * windowSamples * 1_000L / sampleRate
-        val useVad = silenceRatio >= 0.15 && silenceRatio <= 0.85 &&
-            longestMs >= 2_500L && runsPerMinute <= 8.0
+        val effectiveLongestSilenceMs = maxOf(longestSilenceMs, totalDurationMs - lastSpeechEndMs)
+        val clampedSpeechMs = speechDurationMs.coerceIn(0L, totalDurationMs)
+        val speechRatio = clampedSpeechMs.toDouble() / totalDurationMs
+        val silenceRatio = 1.0 - speechRatio
+        val durationMinutes = totalDurationMs / 60_000.0
+        val segmentsPerMinute = speechSegmentCount / durationMinutes.coerceAtLeast(1.0)
+        val shortSegmentRatio = if (speechSegmentCount == 0) 1.0 else {
+            shortSpeechSegmentCount.toDouble() / speechSegmentCount
+        }
+        val useVad = speechSegmentCount > 0 &&
+            silenceRatio in 0.15..0.80 &&
+            effectiveLongestSilenceMs >= 2_500L &&
+            segmentsPerMinute <= 10.0 &&
+            shortSegmentRatio <= 0.35
         val reason = when {
-            silenceRatio < 0.15 -> "zu wenig klare längere Stille"
-            silenceRatio > 0.85 -> "überwiegend Stille oder sehr leises, unsicheres Audio"
-            longestMs < 2_500L -> "keine ausreichend lange eindeutige Pause"
-            runsPerMinute > 8.0 -> "zu viele kurze Unterbrechungen; Qualitätsrisiko durch Zerstückelung"
-            else -> "klare längere Pausen bei geringer Zerstückelung"
+            speechSegmentCount == 0 -> "Silero hat keine belastbaren Sprachbereiche erkannt"
+            silenceRatio < 0.15 -> "Silero würde zu wenig Audio einsparen"
+            silenceRatio > 0.80 -> "Silero würde zu viel unsicheres Audio entfernen"
+            effectiveLongestSilenceMs < 2_500L -> "keine ausreichend lange von Silero erkannte Pause"
+            segmentsPerMinute > 10.0 -> "Silero würde die Aufnahme zu stark zerstückeln"
+            shortSegmentRatio > 0.35 -> "zu viele sehr kurze, unsichere Sprachbereiche"
+            else -> "Silero erkennt klare längere Pausen bei stabilen Sprachbereichen"
         }
-        return VadAutomaticDecision(useVad, reason, (silenceRatio * 100).toInt(), longestMs)
+        return VadAutomaticDecision(
+            useVad = useVad,
+            reason = reason,
+            silencePercent = (silenceRatio * 100).toInt().coerceIn(0, 100),
+            speechPercent = (speechRatio * 100).toInt().coerceIn(0, 100),
+            longestSilenceMs = effectiveLongestSilenceMs,
+            speechSegmentCount = speechSegmentCount
+        )
     }
 }

@@ -14,6 +14,7 @@ import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperContext
+import com.whispercpp.whisper.WhisperVadContext
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
 import de.matthiasennen.transcript.media.AudioDecoderOutputOverflowException
@@ -51,6 +52,7 @@ class TranscriptionService : Service() {
     private val userCancellationRequested = AtomicBoolean(false)
     private var transcriptionJob: Job? = null
     private var activeWhisperContext: WhisperContext? = null
+    private var activeVadModelPath: String? = null
     private lateinit var checkpointStore: TranscriptionCheckpointStore
     private val diagnostics = ArrayDeque<String>()
     private var startedAtEpochMs = 0L
@@ -154,7 +156,7 @@ class TranscriptionService : Service() {
                 whisperSettings.sectionMinutes * 60_000L
             )
             var sectionCount = sections.size + previouslyCompletedSections
-            val vadModelPath = resolveVadModelPath(
+            activeVadModelPath = resolveVadModelPath(
                 request = request,
                 model = model,
                 uri = uri,
@@ -167,7 +169,11 @@ class TranscriptionService : Service() {
                 modelFile.absolutePath,
                 useGpu = whisperSettings.toNativeConfiguration().useGpu
             )
-            addDiagnostic("${model.modelLabel} wurde geladen.")
+            val runtimeBackend = checkNotNull(activeWhisperContext).runtimeBackend
+            addDiagnostic(
+                "${model.modelLabel} wurde mit Backend ${runtimeBackend.name} geladen." +
+                    if (runtimeBackend.fellBackToCpu) " Vulkan war nicht nutzbar; CPU-Rückfall aktiv." else ""
+            )
 
             while (sectionIndex < sections.size) {
                 ensureContinues()
@@ -182,8 +188,7 @@ class TranscriptionService : Service() {
                         sectionNumber = absoluteSectionNumber.coerceAtMost(sectionCount),
                         sectionCount = sectionCount,
                         checkpoint = checkpoint,
-                        whisperSettings = whisperSettings,
-                        vadModelPath = vadModelPath
+                        whisperSettings = whisperSettings
                     )
                     latestCheckpoint = checkpoint
                     sectionIndex++
@@ -253,6 +258,7 @@ class TranscriptionService : Service() {
                 finishWithNotification("Transkription unterbrochen", message)
             }
         } finally {
+            activeVadModelPath = null
             val context = activeWhisperContext
             activeWhisperContext = null
             runCatching { context?.release() }
@@ -267,8 +273,7 @@ class TranscriptionService : Service() {
         sectionNumber: Int,
         sectionCount: Int,
         checkpoint: TranscriptionCheckpoint,
-        whisperSettings: WhisperSettings,
-        vadModelPath: String?
+        whisperSettings: WhisperSettings
     ): TranscriptionCheckpoint {
         val fallbackLabel = if (section.usedFallbackSize) " · Sicherheitsgröße 2,5 min" else ""
         publishRunning(
@@ -320,12 +325,14 @@ class TranscriptionService : Service() {
         } else {
             request.language
         }
+        val vadModelPath = activeVadModelPath
         if (vadModelPath != null) addDiagnostic("Abschnitt $sectionNumber wird mit Silero VAD verarbeitet.")
         val result = runCatching {
             transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
                 language, whisperSettings, vadModelPath)
         }.recoverCatching { throwable ->
             if (vadModelPath == null || throwable is CancellationException || stopRequested.get()) throw throwable
+            activeVadModelPath = null
             addDiagnostic("VAD-Fehler: Abschnitt $sectionNumber wird automatisch ohne VAD wiederholt.")
             publishRunning(request, model, section, sectionNumber, sectionCount, checkpoint, 0.15f,
                 "VAD-Fehler · Abschnitt $sectionNumber wird ohne VAD fortgesetzt",
@@ -415,21 +422,58 @@ class TranscriptionService : Service() {
 
         val analyzer = VadAutomaticAnalyzer()
         val analysisSections = planTranscriptionSections(audioDurationMs, 0L, settings.sectionMinutes * 60_000L)
-        addDiagnostic("VAD-Automatik analysiert die Audiospur speicherschonend.")
-        analysisSections.forEachIndexed { index, section ->
-            ensureContinues()
-            publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
-                0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
-                "Es werden nur Audiokennzahlen gehalten; die Datei bleibt abschnittsweise im Speicher.")
-            val chunk = decodeAudioChunk(this, uri, section.mainStartMs, section.mainEndMs, stopRequested::get) { progress ->
-                publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
-                    progress, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
-                    "Klare längere Ruhephasen und Zerstückelungsrisiko werden geprüft.")
-            }
-            analyzer.add(chunk.samples)
+        addDiagnostic("VAD-Automatik analysiert die Audiospur speicherschonend mit Silero.")
+        val vadContext = runCatching {
+            WhisperVadContext.createContextFromFile(installedModelPath)
+        }.getOrElse { failure ->
+            addDiagnostic("VAD-Automatik konnte Silero nicht laden; Whisper arbeitet ohne VAD: ${failure.message}")
+            return null
         }
-        val decision = analyzer.decide()
-        val summary = "${decision.silencePercent} % klare Stille, längste Pause ${decision.longestSilenceMs / 1_000.0} s"
+        val decision = try {
+            analysisSections.forEachIndexed { index, section ->
+                ensureContinues()
+                publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
+                    0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
+                    "Silero prüft reale Sprachbereiche; die Datei bleibt abschnittsweise im Speicher.")
+                val chunk = decodeAudioChunk(this, uri, section.mainStartMs, section.mainEndMs, stopRequested::get) { progress ->
+                    publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
+                        progress, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
+                        "Silero bewertet Sprachanteil, Pausenlänge und Zerstückelungsrisiko.")
+                }
+                ensureContinues()
+                val speechSegments = vadContext.detectSegments(
+                    samples = chunk.samples,
+                    threshold = settings.vadThresholdPercent / 100f,
+                    minimumSpeechDurationMs = settings.vadMinSpeechDurationMs,
+                    minimumSilenceDurationMs = settings.vadMinSilenceDurationMs,
+                    maximumSpeechDurationSeconds = settings.vadMaxSpeechDurationSeconds.toFloat(),
+                    speechPadMs = settings.vadSpeechPadMs,
+                    overlapSeconds = settings.vadOverlapMs / 1_000f
+                )
+                analyzer.add(
+                    chunkDurationMs = chunk.samples.size * 1_000L / 16_000L,
+                    segments = speechSegments
+                )
+            }
+            analyzer.decide()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Throwable) {
+            addDiagnostic(
+                "VAD-Automatik fehlgeschlagen; Whisper arbeitet sicher ohne VAD: " +
+                    (failure.localizedMessage ?: failure.javaClass.simpleName)
+            )
+            analysisSections.lastOrNull()?.let { finalSection ->
+                publishRunning(request, model, finalSection, analysisSections.size, analysisSections.size,
+                    checkpoint, 1f, "VAD-Automatik: Whisper arbeitet ohne VAD",
+                    "Silero-Analyse war nicht zuverlässig; der vollständige Ton bleibt erhalten.")
+            }
+            return null
+        } finally {
+            vadContext.release()
+        }
+        val summary = "${decision.silencePercent} % Pause, ${decision.speechPercent} % Sprache, " +
+            "${decision.speechSegmentCount} Sprachbereiche, längste Pause ${decision.longestSilenceMs / 1_000.0} s"
         if (decision.useVad) {
             addDiagnostic("VAD-Automatik: VAD wird verwendet ($summary; ${decision.reason}).")
             analysisSections.lastOrNull()?.let { finalSection ->

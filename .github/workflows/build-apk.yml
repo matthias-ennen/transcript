@@ -45,6 +45,9 @@ jobs:
           sed -i \
             's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
             third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+          sed -i \
+            's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
+            third_party/whisper.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 
       - name: Install Android build components
         run: |
@@ -75,13 +78,13 @@ jobs:
             -o "$RUNNER_TEMP/utf8-to-utf16-test"
           "$RUNNER_TEMP/utf8-to-utf16-test"
 
-      - name: Run unit tests and build permanently signed debug APK
+      - name: Run unit tests and build signed debug and release artifacts
         env:
           ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/transcript-signing.jks
           ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease bundleRelease
 
       - name: Verify KleidiAI runtime payload
         run: |
@@ -102,13 +105,48 @@ jobs:
           strings "$audit_dir/libggml-cpu-i8mm.so" | grep -E \
             "kai_run_matmul_clamp.*(dotprod|i8mm)"
 
-      - name: Verify APK signature
+      - name: Verify Whisper Vulkan runtime payload
+        run: |
+          apk="app/build/outputs/apk/release/app-release.apk"
+          audit_dir="$RUNNER_TEMP/whisper-vulkan-audit"
+          mkdir -p "$audit_dir"
+          unzip -p "$apk" \
+            lib/arm64-v8a/libwhisper_v8fp16_va.so \
+            > "$audit_dir/libwhisper.so"
+          strings "$audit_dir/libwhisper.so" | grep -F "Vulkan"
+          readelf -d "$audit_dir/libwhisper.so" | grep -F "libvulkan.so"
+
+      - name: Verify APK and AAB signatures
         run: |
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+          jarsigner -verify -strict -certs app/build/outputs/bundle/release/app-release.aab
 
-      - name: Upload APK
+      - name: Verify release privacy and debug separation
+        run: |
+          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump xmltree \
+            --file AndroidManifest.xml \
+            app/build/outputs/apk/release/app-release.apk \
+            > "$RUNNER_TEMP/release-manifest.txt"
+          grep -E 'allowBackup.*0x0' "$RUNNER_TEMP/release-manifest.txt"
+          if "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging \
+            app/build/outputs/apk/release/app-release.apk | grep -q 'application-debuggable'; then
+            echo "Release APK is unexpectedly debuggable."
+            exit 1
+          fi
+
+      - name: Upload signed debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: transcript-signed-apk-${{ env.TRANSCRIPT_VERSION_CODE }}
+          name: transcript-signed-debug-apk-${{ env.TRANSCRIPT_VERSION_CODE }}
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload signed release APK and AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: transcript-signed-release-${{ env.TRANSCRIPT_VERSION_CODE }}
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
