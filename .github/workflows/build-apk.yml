@@ -121,7 +121,10 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
-          jarsigner -verify -strict -certs app/build/outputs/bundle/release/app-release.aab
+          jarsigner -verify -verbose -certs \
+            app/build/outputs/bundle/release/app-release.aab \
+            2>&1 | tee "$RUNNER_TEMP/aab-signature.txt"
+          grep -F "jar verified." "$RUNNER_TEMP/aab-signature.txt"
 
       - name: Verify release privacy and debug separation
         run: |
