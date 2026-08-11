@@ -45,8 +45,9 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - Transkriptionssprache wahlweise automatisch erkannt, Deutsch oder Englisch
-- dauerhaft gespeicherte Whisper-Einstellungen für Vorgabetext, Threads,
-  CPU/GPU, VAD, Dekodierung, Segmentierung, Zeitstempel und Halluzinationsschutz
+- dauerhaft gespeicherte Whisper- und eigene VAD-Einstellungen für Vorgabetext,
+  Threads, CPU/GPU, konservative VAD-Automatik, Dekodierung, Segmentierung,
+  Zeitstempel und Halluzinationsschutz
 - Ausgabe mit Segmentzeitstempeln
 - fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
   die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
@@ -119,7 +120,7 @@ ein einziges Ergebnisfeld. In der aktuellen Erprobungsstufe behält die App nur 
 einem leeren oder nicht lesbaren Ergebnis das Original; weitere inhaltliche
 Plausibilitätsprüfungen werden erst nach den Praxistests ergänzt.
 
-Die dauerhafte Seite **KI-Diagnose** ist über den Link **KI-Diagnose-Seite** im
+Die dauerhafte Seite **KI-Diagnose** ist über den Link **KI-Diagnose** im
 KI-Bereich der Einstellungen erreichbar. Sie zeigt zuerst dieselbe gemeinsame
 CannaBot-Statuszeile wie die Hauptseite, danach den freien **KI-Testbereich** und
 ganz unten das allgemeine App-Diagnoseprotokoll. **Verlassen** führt zurück zu den
