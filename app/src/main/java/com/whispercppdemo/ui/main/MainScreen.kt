@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -136,6 +137,8 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onOpenAiDiagnostics = { page = AppPage.AI_DIAGNOSTICS },
                 onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
                 onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
+                onOpenVadSettings = { page = AppPage.VAD_SETTINGS },
+                onSelectModel = viewModel::selectModel,
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
                 onDownloadVadModel = {
@@ -198,6 +201,12 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onResetGroup = viewModel::resetWhisperSettings,
                 modifier = Modifier.padding(innerPadding)
             )
+            AppPage.VAD_SETTINGS -> VadSettingsScreen(
+                state = state,
+                onSettingsChanged = viewModel::updateWhisperSettings,
+                onReset = { viewModel.resetWhisperSettings(WhisperSettingsGroup.VAD) },
+                modifier = Modifier.padding(innerPadding)
+            )
             AppPage.MAIN -> MainContent(
                 viewModel = viewModel,
                 state = state,
@@ -247,7 +256,14 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     }
 }
 
-private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, AI_PERFORMANCE, WHISPER_SETTINGS, ABOUT }
+private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, AI_PERFORMANCE, WHISPER_SETTINGS, VAD_SETTINGS, ABOUT }
+
+private val advancedSettingsPages = listOf(
+    AppPage.WHISPER_SETTINGS,
+    AppPage.VAD_SETTINGS,
+    AppPage.AI_PERFORMANCE,
+    AppPage.AI_DIAGNOSTICS
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -257,10 +273,39 @@ private fun TranscriptTopBar(
     onAppLanguageSelected: (AppLanguage) -> Unit,
     onNavigate: (AppPage) -> Unit
 ) {
+    var pageMenuExpanded by remember { mutableStateOf(false) }
     TopAppBar(
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (page == AppPage.MAIN) "Simple Transcript" else page.title)
+            Box {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable(
+                        enabled = page in advancedSettingsPages,
+                        onClick = { pageMenuExpanded = true }
+                    )
+                ) {
+                    Text(if (page == AppPage.MAIN) "Simple Transcript" else page.title)
+                    if (page in advancedSettingsPages) {
+                        Column(modifier = Modifier.padding(start = 4.dp)) {
+                            Icon(Icons.Default.KeyboardArrowUp, null, Modifier.size(14.dp))
+                            Icon(Icons.Default.ArrowDropDown, "Einstellungsseite auswählen", Modifier.size(14.dp))
+                        }
+                    }
+                }
+                DropdownMenu(
+                    expanded = pageMenuExpanded,
+                    onDismissRequest = { pageMenuExpanded = false }
+                ) {
+                    advancedSettingsPages.forEach { destination ->
+                        DropdownMenuItem(
+                            text = { Text(destination.title) },
+                            onClick = {
+                                pageMenuExpanded = false
+                                onNavigate(destination)
+                            }
+                        )
+                    }
+                }
             }
         },
         navigationIcon = {
@@ -268,7 +313,8 @@ private fun TranscriptTopBar(
                 page != AppPage.MAIN &&
                 page != AppPage.AI_DIAGNOSTICS &&
                 page != AppPage.AI_PERFORMANCE &&
-                page != AppPage.WHISPER_SETTINGS
+                page != AppPage.WHISPER_SETTINGS &&
+                page != AppPage.VAD_SETTINGS
             ) {
                 IconButton(onClick = { onNavigate(AppPage.MAIN) }) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
@@ -304,7 +350,8 @@ private fun TranscriptTopBar(
                         }
                     }
                 }
-                AppPage.AI_DIAGNOSTICS, AppPage.AI_PERFORMANCE, AppPage.WHISPER_SETTINGS -> {
+                AppPage.AI_DIAGNOSTICS, AppPage.AI_PERFORMANCE, AppPage.WHISPER_SETTINGS,
+                AppPage.VAD_SETTINGS -> {
                     OutlinedButton(
                         onClick = { onNavigate(AppPage.SETTINGS) },
                         modifier = Modifier
@@ -368,6 +415,7 @@ private val AppPage.title: String
         AppPage.AI_DIAGNOSTICS -> "KI-Diagnose"
         AppPage.AI_PERFORMANCE -> "KI-Leistung und Hardware"
         AppPage.WHISPER_SETTINGS -> "Whisper-Einstellungen"
+        AppPage.VAD_SETTINGS -> "VAD-Einstellungen"
         AppPage.ABOUT -> "Über die App"
     }
 
