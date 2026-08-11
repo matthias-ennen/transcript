@@ -132,6 +132,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 state = state,
                 onOpenAiDiagnostics = { page = AppPage.AI_DIAGNOSTICS },
                 onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
+                onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
@@ -176,6 +177,13 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onExportConfiguration = viewModel::exportAiPerformanceConfiguration,
                 onJsonChanged = viewModel::updateAiPerformanceJson,
                 onImportConfiguration = viewModel::importAiPerformanceConfiguration,
+                modifier = Modifier.padding(innerPadding)
+            )
+            AppPage.WHISPER_SETTINGS -> WhisperSettingsScreen(
+                state = state,
+                onLanguageChanged = viewModel::setLanguage,
+                onSettingsChanged = viewModel::updateWhisperSettings,
+                onResetGroup = viewModel::resetWhisperSettings,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.MAIN -> MainContent(
@@ -227,7 +235,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     }
 }
 
-private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, AI_PERFORMANCE, ABOUT }
+private enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, AI_PERFORMANCE, WHISPER_SETTINGS, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -247,7 +255,8 @@ private fun TranscriptTopBar(
             if (
                 page != AppPage.MAIN &&
                 page != AppPage.AI_DIAGNOSTICS &&
-                page != AppPage.AI_PERFORMANCE
+                page != AppPage.AI_PERFORMANCE &&
+                page != AppPage.WHISPER_SETTINGS
             ) {
                 IconButton(onClick = { onNavigate(AppPage.MAIN) }) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
@@ -283,7 +292,7 @@ private fun TranscriptTopBar(
                         }
                     }
                 }
-                AppPage.AI_DIAGNOSTICS, AppPage.AI_PERFORMANCE -> {
+                AppPage.AI_DIAGNOSTICS, AppPage.AI_PERFORMANCE, AppPage.WHISPER_SETTINGS -> {
                     OutlinedButton(
                         onClick = { onNavigate(AppPage.SETTINGS) },
                         modifier = Modifier
@@ -346,6 +355,7 @@ private val AppPage.title: String
         AppPage.SETTINGS -> "Einstellungen"
         AppPage.AI_DIAGNOSTICS -> "KI-Diagnose"
         AppPage.AI_PERFORMANCE -> "KI-Leistung und Hardware"
+        AppPage.WHISPER_SETTINGS -> "Whisper-Einstellungen"
         AppPage.ABOUT -> "Über die App"
     }
 

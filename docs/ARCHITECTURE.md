@@ -89,6 +89,17 @@ Textzeilen und richtet Sprite sowie Text oben aus. Ein optionaler Seitenstatus
 wird in derselben pulsierenden Wechselanzeige dargestellt; dadurch benötigt die
 Leistungsseite keine zweite Statusausgabe.
 
+Die Seite `WhisperSettingsScreen` bearbeitet eine gemeinsame, in
+`WhisperSettingsPreferences` gespeicherte Konfiguration. Die Sprachauswahl ist
+identisch mit der Hauptseite. Threads, CPU-/GPU-Wahl, Vorgabetext,
+Dekodierungsverfahren, Suchbreite, Temperatur, Kontext, Segmentierung,
+Zeitstempelberechnung und Halluzinationsschwellen werden validiert und über
+`WhisperConfiguration` bis in `whisper_full_params` durchgereicht. Die vorhandene
+sequenzielle Abschnittsplanung verwendet eine einstellbare Dauer von einer bis
+zehn Minuten. VAD bleibt deaktiviert, solange kein separates VAD-Modell zur App
+gehört; parallele Modellkontexte werden zum Schutz des Arbeitsspeichers nicht
+erzeugt.
+
 Der Teilen-Dialog besitzt eine eigene, nur beim Öffnen gestartete Sequenz aus
 Rechtslauf, Sprung und Winken. Kurze Idle-Pausen trennen die Gesten; anschließend
 bleibt CannaBot ruhig im Idle-Zustand.

@@ -22,7 +22,8 @@ class TranscriptionCheckpointStoreTest {
             uri = "content://audio/long-recording",
             fileName = "Aufnahme.m4a",
             modelId = "base",
-            language = "auto"
+            language = "auto",
+            settingsSignature = "WhisperSettings(sectionMinutes=5)"
         )
         val checkpoint = TranscriptionCheckpoint(
             request = request,

@@ -39,6 +39,7 @@ fun SettingsScreen(
     state: TranscriptUiState,
     onOpenAiDiagnostics: () -> Unit,
     onOpenAiPerformance: () -> Unit,
+    onOpenWhisperSettings: () -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
@@ -64,6 +65,17 @@ fun SettingsScreen(
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Whisper-Modellverwaltung", style = MaterialTheme.typography.headlineSmall)
                 Text("Hier kannst du installierte Modelle und unvollständige Downloads entfernen, um Speicherplatz freizugeben.", style = MaterialTheme.typography.bodyMedium)
+                TextButton(
+                    onClick = onOpenWhisperSettings,
+                    modifier = Modifier.align(Alignment.Start),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        "Whisper-Einstellungen",
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                }
                 Text("Belegter Speicher: ${formatDownloadSize(totalBytes)}", style = MaterialTheme.typography.titleMedium)
                 state.modelInstallations.forEach { installation ->
                     ModelStorageCard(
@@ -125,6 +137,10 @@ fun SettingsScreen(
                 )
 
                 Text("Lokales KI-Modell", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Belegter Speicher: ${formatDownloadSize(state.aiModelInstallations.sumOf(AiModelInstallation::storedBytes))}",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 state.aiModelInstallations.forEach { installation ->
                     AiModelStorageCard(
                         installation = installation,

@@ -30,11 +30,13 @@ class WhisperContext private constructor(private var ptr: Long) {
     suspend fun transcribeSegments(
         data: FloatArray,
         language: String = "auto",
+        configuration: WhisperConfiguration = WhisperConfiguration(),
         shouldCancel: () -> Boolean = { false },
         onProgress: (Int) -> Unit = {}
     ): WhisperTranscriptResult = withContext(scope.coroutineContext) {
         require(ptr != 0L)
-        val numThreads = WhisperCpuConfig.preferredThreadCount
+        val numThreads = configuration.threads.takeIf { it > 0 }
+            ?: WhisperCpuConfig.preferredThreadCount
         Log.d(LOG_TAG, "Selecting $numThreads threads")
         val abortToken = WhisperLib.createAbortToken()
         check(abortToken != 0L) { "Das Abbruchsignal für Whisper konnte nicht vorbereitet werden." }
@@ -48,6 +50,20 @@ class WhisperContext private constructor(private var ptr: Long) {
                 numThreads,
                 data,
                 language,
+                configuration.beamSearch,
+                configuration.beamSize,
+                configuration.bestOf,
+                configuration.temperature,
+                configuration.initialPrompt,
+                configuration.carryContext,
+                configuration.maximumSegmentCharacters,
+                configuration.splitOnWord,
+                configuration.tokenTimestamps,
+                configuration.suppressBlank,
+                configuration.suppressNonSpeechTokens,
+                configuration.logProbabilityThreshold,
+                configuration.noSpeechThreshold,
+                configuration.entropyThreshold,
                 abortToken,
                 WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
             )
@@ -108,8 +124,8 @@ class WhisperContext private constructor(private var ptr: Long) {
     }
 
     companion object {
-        fun createContextFromFile(filePath: String): WhisperContext {
-            val ptr = WhisperLib.initContext(filePath)
+        fun createContextFromFile(filePath: String, useGpu: Boolean = true): WhisperContext {
+            val ptr = WhisperLib.initContext(filePath, useGpu)
             if (ptr == 0L) {
                 throw java.lang.RuntimeException("Couldn't create context with path $filePath")
             }
@@ -183,7 +199,7 @@ private class WhisperLib {
         // JNI methods
         external fun initContextFromInputStream(inputStream: InputStream): Long
         external fun initContextFromAsset(assetManager: AssetManager, assetPath: String): Long
-        external fun initContext(modelPath: String): Long
+        external fun initContext(modelPath: String, useGpu: Boolean): Long
         external fun freeContext(contextPtr: Long)
         external fun createAbortToken(): Long
         external fun requestAbort(abortToken: Long)
@@ -194,6 +210,20 @@ private class WhisperLib {
             numThreads: Int,
             audioData: FloatArray,
             language: String,
+            beamSearch: Boolean,
+            beamSize: Int,
+            bestOf: Int,
+            temperature: Float,
+            initialPrompt: String,
+            carryContext: Boolean,
+            maximumSegmentCharacters: Int,
+            splitOnWord: Boolean,
+            tokenTimestamps: Boolean,
+            suppressBlank: Boolean,
+            suppressNonSpeechTokens: Boolean,
+            logProbabilityThreshold: Float,
+            noSpeechThreshold: Float,
+            entropyThreshold: Float,
             abortToken: Long,
             progressListener: WhisperProgressListener
         ): Int

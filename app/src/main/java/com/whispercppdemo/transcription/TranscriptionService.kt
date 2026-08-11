@@ -20,6 +20,8 @@ import de.matthiasennen.transcript.media.AudioDecoderOutputOverflowException
 import de.matthiasennen.transcript.media.decodeAudioChunk
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.ui.main.WhisperModel
+import de.matthiasennen.transcript.ui.main.WhisperSettings
+import de.matthiasennen.transcript.ui.main.WhisperSettingsPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,7 @@ private const val EXTRA_URI = "uri"
 private const val EXTRA_FILE_NAME = "file_name"
 private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_LANGUAGE = "language"
+private const val EXTRA_SETTINGS_SIGNATURE = "whisper_settings_signature"
 private const val CHECKPOINT_FILE_NAME = "active-transcription.bin"
 
 class TranscriptionService : Service() {
@@ -105,8 +108,10 @@ class TranscriptionService : Service() {
 
             addDiagnostic("Audiospur wird geprüft.")
             val audioInfo = inspectAudioTrack(this, uri)
+            val whisperSettings = WhisperSettingsPreferences(this).load()
             val saved = checkpointStore.read()?.takeIf {
                 it.isCompatibleWith(request, audioInfo.durationMs) &&
+                    request.settingsSignature == whisperSettings.normalized().toString() &&
                     it.hasMeaningfulProgress()
             }
             if (saved == null) checkpointStore.clear()
@@ -132,15 +137,22 @@ class TranscriptionService : Service() {
                 }
             )
 
-            activeWhisperContext = WhisperContext.createContextFromFile(modelFile.absolutePath)
+            activeWhisperContext = WhisperContext.createContextFromFile(
+                modelFile.absolutePath,
+                useGpu = whisperSettings.toNativeConfiguration().useGpu
+            )
             addDiagnostic("${model.modelLabel} wurde geladen.")
 
             val sections = planTranscriptionSections(
                 durationMs = audioInfo.durationMs,
-                startAtMs = checkpoint.nextStartMs
+                startAtMs = checkpoint.nextStartMs,
+                sectionDurationMs = whisperSettings.sectionMinutes * 60_000L
             ).toMutableList()
             var sectionIndex = 0
-            val previouslyCompletedSections = completedSectionCount(checkpoint.nextStartMs)
+            val previouslyCompletedSections = completedSectionCount(
+                checkpoint.nextStartMs,
+                whisperSettings.sectionMinutes * 60_000L
+            )
             var sectionCount = sections.size + previouslyCompletedSections
 
             while (sectionIndex < sections.size) {
@@ -155,7 +167,8 @@ class TranscriptionService : Service() {
                         section = section,
                         sectionNumber = absoluteSectionNumber.coerceAtMost(sectionCount),
                         sectionCount = sectionCount,
-                        checkpoint = checkpoint
+                        checkpoint = checkpoint,
+                        whisperSettings = whisperSettings
                     )
                     latestCheckpoint = checkpoint
                     sectionIndex++
@@ -238,7 +251,8 @@ class TranscriptionService : Service() {
         section: TranscriptionSection,
         sectionNumber: Int,
         sectionCount: Int,
-        checkpoint: TranscriptionCheckpoint
+        checkpoint: TranscriptionCheckpoint,
+        whisperSettings: WhisperSettings
     ): TranscriptionCheckpoint {
         val fallbackLabel = if (section.usedFallbackSize) " · Sicherheitsgröße 2,5 min" else ""
         publishRunning(
@@ -293,6 +307,7 @@ class TranscriptionService : Service() {
         val result = checkNotNull(activeWhisperContext).transcribeSegments(
             data = chunk.samples,
             language = language,
+            configuration = whisperSettings.toNativeConfiguration(),
             shouldCancel = stopRequested::get
         ) { nativePercent ->
             publishRunning(
@@ -463,7 +478,8 @@ class TranscriptionService : Service() {
         val fileName = getStringExtra(EXTRA_FILE_NAME) ?: return null
         val modelId = getStringExtra(EXTRA_MODEL_ID) ?: return null
         val language = getStringExtra(EXTRA_LANGUAGE) ?: return null
-        return TranscriptionRequest(uri, fileName, modelId, language)
+        val settingsSignature = getStringExtra(EXTRA_SETTINGS_SIGNATURE) ?: return null
+        return TranscriptionRequest(uri, fileName, modelId, language, settingsSignature)
     }
 
     companion object {
@@ -472,7 +488,8 @@ class TranscriptionService : Service() {
             uri: Uri,
             fileName: String,
             model: WhisperModel,
-            language: String
+            language: String,
+            settings: WhisperSettings
         ) {
             val intent = Intent(context, TranscriptionService::class.java).apply {
                 action = ACTION_START
@@ -480,6 +497,7 @@ class TranscriptionService : Service() {
                 putExtra(EXTRA_FILE_NAME, fileName)
                 putExtra(EXTRA_MODEL_ID, model.id)
                 putExtra(EXTRA_LANGUAGE, language)
+                putExtra(EXTRA_SETTINGS_SIGNATURE, settings.normalized().toString())
             }
             ContextCompat.startForegroundService(context, intent)
         }
@@ -492,9 +510,9 @@ class TranscriptionService : Service() {
     }
 }
 
-private fun completedSectionCount(positionMs: Long): Int =
+private fun completedSectionCount(positionMs: Long, sectionDurationMs: Long): Int =
     if (positionMs <= 0L) 0 else {
-        ((positionMs + STANDARD_SECTION_DURATION_MS - 1L) / STANDARD_SECTION_DURATION_MS).toInt()
+        ((positionMs + sectionDurationMs - 1L) / sectionDurationMs).toInt()
     }
 
 private fun userFacingError(throwable: Throwable, canResume: Boolean): String {
