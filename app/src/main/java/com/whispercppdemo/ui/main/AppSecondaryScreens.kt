@@ -41,6 +41,8 @@ fun SettingsScreen(
     onOpenAiDiagnostics: () -> Unit,
     onOpenAiPerformance: () -> Unit,
     onOpenWhisperSettings: () -> Unit,
+    onOpenVadSettings: () -> Unit,
+    onSelectModel: (WhisperModel) -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
     onDownloadVadModel: () -> Unit,
@@ -86,6 +88,7 @@ fun SettingsScreen(
                         installation = installation,
                         selected = installation.model == state.selectedModel,
                         enabled = !state.isBusy && !state.isRecording,
+                        onSelect = { onSelectModel(installation.model) },
                         onDelete = { modelToDelete = installation.model }
                     )
                 }
@@ -112,8 +115,8 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                TextButton(onClick = onOpenWhisperSettings, contentPadding = PaddingValues(0.dp)) {
-                    Text("Whisper-Einstellungen", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
+                TextButton(onClick = onOpenVadSettings, contentPadding = PaddingValues(0.dp)) {
+                    Text("VAD-Einstellungen", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
                 }
                 if (state.vadModelInstallation.isInstalled) {
                     OutlinedButton(onClick = { confirmDeleteVad = true }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
@@ -150,7 +153,7 @@ fun SettingsScreen(
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Text(
-                        "KI-Diagnose-Seite",
+                        "KI-Diagnose",
                         color = MaterialTheme.colorScheme.primary,
                         textDecoration = TextDecoration.Underline
                     )
@@ -381,6 +384,7 @@ private fun ModelStorageCard(
     installation: ModelInstallation,
     selected: Boolean,
     enabled: Boolean,
+    onSelect: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -396,7 +400,7 @@ private fun ModelStorageCard(
             Text(
                 when {
                     installation.isInstalled ->
-                        "Installiert · ${formatDownloadSize(installation.installedBytes)}"
+                        "Installiert · ${formatDownloadSize(installation.installedBytes)}${if (selected) " · Ausgewählt" else ""}"
                     installation.partialBytes > 0L ->
                         "Download angefangen · ${formatDownloadSize(installation.partialBytes)}"
                     installation.installedBytes > 0L ->
@@ -405,6 +409,13 @@ private fun ModelStorageCard(
                 },
                 style = MaterialTheme.typography.bodySmall
             )
+            if (installation.isInstalled && !selected) {
+                Button(
+                    onClick = onSelect,
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Auswählen") }
+            }
             if (installation.storedBytes > 0L) {
                 OutlinedButton(
                     onClick = onDelete,
