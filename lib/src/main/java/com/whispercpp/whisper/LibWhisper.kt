@@ -7,6 +7,7 @@ import kotlinx.coroutines.*
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val LOG_TAG = "LibWhisper"
 
@@ -17,15 +18,26 @@ data class WhisperTranscriptResult(
     val detectedLanguage: String
 )
 
+data class WhisperVadSegment(val startMs: Long, val endMs: Long)
+
+data class WhisperRuntimeBackend(
+    val name: String,
+    val gpuRequested: Boolean,
+    val gpuAvailable: Boolean,
+    val fellBackToCpu: Boolean
+)
+
 fun interface WhisperProgressListener {
     fun onProgress(percent: Int)
 }
 
-class WhisperContext private constructor(private var ptr: Long) {
+class WhisperContext private constructor(
+    private var ptr: Long,
+    val runtimeBackend: WhisperRuntimeBackend
+) {
     // Meet Whisper C++ constraint: Don't access from more than one thread at a time.
-    private val scope: CoroutineScope = CoroutineScope(
-        Executors.newSingleThreadExecutor().asCoroutineDispatcher()
-    )
+    private val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    private val released = AtomicBoolean(false)
 
     suspend fun transcribeSegments(
         data: FloatArray,
@@ -33,7 +45,8 @@ class WhisperContext private constructor(private var ptr: Long) {
         configuration: WhisperConfiguration = WhisperConfiguration(),
         shouldCancel: () -> Boolean = { false },
         onProgress: (Int) -> Unit = {}
-    ): WhisperTranscriptResult = withContext(scope.coroutineContext) {
+    ): WhisperTranscriptResult = withContext(dispatcher) {
+        check(!released.get()) { "Der Whisper-Kontext wurde bereits freigegeben." }
         require(ptr != 0L)
         val numThreads = configuration.threads.takeIf { it > 0 }
             ?: WhisperCpuConfig.preferredThreadCount
@@ -74,15 +87,7 @@ class WhisperContext private constructor(private var ptr: Long) {
                 abortToken,
                 WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
             )
-            var result = run(configuration.vadModelPath.orEmpty())
-            if (
-                result != 0 &&
-                !configuration.vadModelPath.isNullOrBlank() &&
-                !WhisperLib.isAbortRequested(abortToken)
-            ) {
-                Log.w(LOG_TAG, "VAD processing failed with $result; retrying without VAD")
-                result = run("")
-            }
+            val result = run(configuration.vadModelPath.orEmpty())
             if (WhisperLib.isAbortRequested(abortToken)) {
                 throw java.util.concurrent.CancellationException("Whisper-Transkription abgebrochen.")
             }
@@ -118,34 +123,63 @@ class WhisperContext private constructor(private var ptr: Long) {
         }
     }
 
-    suspend fun benchMemory(nthreads: Int): String = withContext(scope.coroutineContext) {
+    suspend fun benchMemory(nthreads: Int): String = withContext(dispatcher) {
         return@withContext WhisperLib.benchMemcpy(nthreads)
     }
 
-    suspend fun benchGgmlMulMat(nthreads: Int): String = withContext(scope.coroutineContext) {
+    suspend fun benchGgmlMulMat(nthreads: Int): String = withContext(dispatcher) {
         return@withContext WhisperLib.benchGgmlMulMat(nthreads)
     }
 
-    suspend fun release() = withContext(scope.coroutineContext) {
-        if (ptr != 0L) {
-            WhisperLib.freeContext(ptr)
-            ptr = 0
+    suspend fun release() {
+        if (!released.compareAndSet(false, true)) return
+        try {
+            withContext(NonCancellable + dispatcher) {
+                if (ptr != 0L) {
+                    WhisperLib.freeContext(ptr)
+                    ptr = 0
+                }
+            }
+        } finally {
+            dispatcher.close()
         }
     }
 
     protected fun finalize() {
-        runBlocking {
-            release()
+        if (!released.get()) {
+            runBlocking {
+                release()
+            }
         }
     }
 
     companion object {
         fun createContextFromFile(filePath: String, useGpu: Boolean = true): WhisperContext {
-            val ptr = WhisperLib.initContext(filePath, useGpu)
+            val gpuBackend = if (useGpu) WhisperLib.getGpuBackendName().takeIf(String::isNotBlank) else null
+            val gpuAvailable = gpuBackend != null
+            var ptr = WhisperLib.initContext(filePath, useGpu && gpuAvailable)
+            var fellBackToCpu = false
+            if (ptr == 0L && useGpu && gpuAvailable) {
+                Log.w(LOG_TAG, "Whisper GPU initialization failed; retrying with CPU")
+                ptr = WhisperLib.initContext(filePath, false)
+                fellBackToCpu = true
+            }
             if (ptr == 0L) {
                 throw java.lang.RuntimeException("Couldn't create context with path $filePath")
             }
-            return WhisperContext(ptr)
+            return WhisperContext(
+                ptr = ptr,
+                runtimeBackend = WhisperRuntimeBackend(
+                    name = if (useGpu && gpuAvailable && !fellBackToCpu) {
+                        checkNotNull(gpuBackend)
+                    } else {
+                        "CPU"
+                    },
+                    gpuRequested = useGpu,
+                    gpuAvailable = gpuAvailable,
+                    fellBackToCpu = fellBackToCpu || useGpu && !gpuAvailable
+                )
+            )
         }
 
         fun createContextFromInputStream(stream: InputStream): WhisperContext {
@@ -154,7 +188,7 @@ class WhisperContext private constructor(private var ptr: Long) {
             if (ptr == 0L) {
                 throw java.lang.RuntimeException("Couldn't create context from input stream")
             }
-            return WhisperContext(ptr)
+            return WhisperContext(ptr, WhisperRuntimeBackend("CPU", false, false, false))
         }
 
         fun createContextFromAsset(assetManager: AssetManager, assetPath: String): WhisperContext {
@@ -163,11 +197,72 @@ class WhisperContext private constructor(private var ptr: Long) {
             if (ptr == 0L) {
                 throw java.lang.RuntimeException("Couldn't create context from asset $assetPath")
             }
-            return WhisperContext(ptr)
+            return WhisperContext(ptr, WhisperRuntimeBackend("CPU", false, false, false))
         }
 
         fun getSystemInfo(): String {
             return WhisperLib.getSystemInfo()
+        }
+    }
+}
+
+class WhisperVadContext private constructor(private var ptr: Long) {
+    private val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    private val released = AtomicBoolean(false)
+
+    suspend fun detectSegments(
+        samples: FloatArray,
+        threshold: Float,
+        minimumSpeechDurationMs: Int,
+        minimumSilenceDurationMs: Int,
+        maximumSpeechDurationSeconds: Float,
+        speechPadMs: Int,
+        overlapSeconds: Float
+    ): List<WhisperVadSegment> = withContext(dispatcher) {
+        check(!released.get()) { "Der VAD-Kontext wurde bereits freigegeben." }
+        require(ptr != 0L)
+        val raw = WhisperLib.detectVadSegments(
+            ptr,
+            samples,
+            threshold,
+            minimumSpeechDurationMs,
+            minimumSilenceDurationMs,
+            maximumSpeechDurationSeconds,
+            speechPadMs,
+            overlapSeconds
+        ) ?: error("Silero VAD konnte den Audioabschnitt nicht analysieren.")
+        check(raw.size % 2 == 0) { "Silero VAD lieferte ungültige Segmentdaten." }
+        List(raw.size / 2) { index ->
+            WhisperVadSegment(
+                startMs = (raw[index * 2] * 1_000f).toLong().coerceAtLeast(0L),
+                endMs = (raw[index * 2 + 1] * 1_000f).toLong().coerceAtLeast(0L)
+            )
+        }
+    }
+
+    suspend fun release() {
+        if (!released.compareAndSet(false, true)) return
+        try {
+            withContext(NonCancellable + dispatcher) {
+                if (ptr != 0L) {
+                    WhisperLib.freeVadContext(ptr)
+                    ptr = 0L
+                }
+            }
+        } finally {
+            dispatcher.close()
+        }
+    }
+
+    protected fun finalize() {
+        if (!released.get()) runBlocking { release() }
+    }
+
+    companion object {
+        fun createContextFromFile(filePath: String): WhisperVadContext {
+            val ptr = WhisperLib.initVadContext(filePath)
+            check(ptr != 0L) { "Das Silero-VAD-Modell konnte nicht geladen werden." }
+            return WhisperVadContext(ptr)
         }
     }
 }
@@ -217,6 +312,19 @@ private class WhisperLib {
         external fun initContextFromAsset(assetManager: AssetManager, assetPath: String): Long
         external fun initContext(modelPath: String, useGpu: Boolean): Long
         external fun freeContext(contextPtr: Long)
+        external fun getGpuBackendName(): String
+        external fun initVadContext(modelPath: String): Long
+        external fun freeVadContext(contextPtr: Long)
+        external fun detectVadSegments(
+            contextPtr: Long,
+            audioData: FloatArray,
+            threshold: Float,
+            minimumSpeechDurationMs: Int,
+            minimumSilenceDurationMs: Int,
+            maximumSpeechDurationSeconds: Float,
+            speechPadMs: Int,
+            overlapSeconds: Float
+        ): FloatArray?
         external fun createAbortToken(): Long
         external fun requestAbort(abortToken: Long)
         external fun isAbortRequested(abortToken: Long): Boolean

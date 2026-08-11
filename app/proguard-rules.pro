@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# JNI entry-point names are part of the native ABI and must survive R8.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+-keep class com.whispercpp.whisper.WhisperLib* { *; }
+-keep class de.matthiasennen.transcript.ai.LocalAiEngine* { *; }

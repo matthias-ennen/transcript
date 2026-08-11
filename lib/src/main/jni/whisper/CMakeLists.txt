@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.22.1)
 
 project(whisper.cpp)
 
@@ -28,6 +28,16 @@ set(
 find_library(LOG_LIB log)
 
 include(FetchContent)
+
+# Android's cross-compilation root hides the host SPIR-V package used only by
+# ggml-vulkan's host shader generator. Reuse the checked-in package shim and
+# staged Khronos headers already used by the local llama.cpp module.
+list(PREPEND CMAKE_PREFIX_PATH
+    "${CMAKE_SOURCE_DIR}/../../../../../llm/src/main/cpp/cmake")
+set(SPIRV-Headers_DIR
+    "${CMAKE_SOURCE_DIR}/../../../../../llm/src/main/cpp/cmake/SPIRV-Headers"
+    CACHE PATH "Host SPIR-V header package for Vulkan shader generation" FORCE)
+set(GGML_VULKAN ON CACHE BOOL "Build the real Whisper Vulkan backend" FORCE)
 
 function(build_library target_name)
     add_library(
@@ -63,6 +73,14 @@ function(build_library target_name)
         FetchContent_Declare(ggml SOURCE_DIR ${WHISPER_LIB_DIR}/ggml)
     endif()
     FetchContent_MakeAvailable(ggml)
+    if (TARGET ggml-vulkan)
+        # llama.cpp packages its independently pinned Vulkan backend under the
+        # upstream name. Give Whisper's copy a unique SONAME so both runtimes
+        # can coexist in one APK without Android's native-library merge clash.
+        set_target_properties(ggml-vulkan PROPERTIES OUTPUT_NAME whisper-ggml-vulkan)
+        target_include_directories(ggml-vulkan PRIVATE
+            "${CMAKE_SOURCE_DIR}/../../../../../llm/src/main/cpp/host-vulkan-headers")
+    endif()
     target_compile_options(ggml PRIVATE ${GGML_COMPILE_OPTIONS})
     target_link_libraries(${target_name} ${LOG_LIB} android ggml)
 

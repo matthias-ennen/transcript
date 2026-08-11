@@ -31,9 +31,11 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - Fünf-Minuten-Abschnitte mit zwei Sekunden Kontextüberlappung und absoluten Zeitstempeln
 - automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
 - Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
+- atomare Wiederherstellung des fertigen Whisper-Originals und des zuletzt
+  übernommenen Bearbeitungsstands nach einem Prozessneustart
 - lokale Modellverwaltung mit fünf Qualitätsstufen
-- optionales Silero VAD 6.2.0 zur lokalen Erkennung von Sprache und zum
-  Überspringen längerer Nicht-Sprachbereiche
+- optionales Silero VAD 6.2.0 zur echten lokalen Sprachanalyse; die konservative
+  Automatik aktiviert VAD nur bei klaren längeren Pausen und stabilen Sprachbereichen
 - optionale lokale KI-Nachbearbeitung mit drei auswählbaren Qwen3.5-Größen
 - automatische KI-Korrektur nach dem Entladen von Whisper
 - gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
@@ -59,6 +61,8 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
   als Metadaten in TXT- und JSON-Exporten
 - automatischer Debug-APK-Build mit GitHub Actions
+- getrennte signierte Release-APK und Release-AAB mit Signatur-, Datenschutz-
+  und Native-Backend-Prüfung
 - dauerhafte APK-Signierung für installierbare Updates
 - automatisch steigende Versionsnummer bei jedem GitHub-Build
 - sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
@@ -111,6 +115,11 @@ aktualisiert das Ergebnis, das anschließend einheitlich für TXT, SRT und JSON
 verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
 Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
 App, wenn dadurch ein geänderter Entwurf verloren ginge.
+
+Whisper-Original und übernommener Bearbeitungsstand werden getrennt und atomar
+im privaten App-Speicher gehalten. Nach einem Prozessneustart stellt die App das
+zuletzt fertige Ergebnis wieder her; eine neue Datei, Aufnahme oder Transkription
+ersetzt diesen Stand bewusst.
 
 Die vollständige Fünf-Minuten-Gruppe wird einmal als gemeinsamer, schreibgeschützter
 Whisper-Rohkontext an das lokale Modell übergeben. Danach prüft die KI jedes
@@ -199,6 +208,11 @@ Whisper-Engine meldet ihren tatsächlichen Fortschritt in Prozent an die
 Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die App außerdem
 an, seit wann kein neuer Fortschrittswert empfangen wurde.
 
+Whisper enthält ein echtes Vulkan-Backend. Wird GPU-Nutzung gewünscht, prüft die
+App das von der nativen Laufzeit gemeldete Gerät und nennt das tatsächlich aktive
+Backend in der Diagnose. Fehlt ein nutzbares Vulkan-Gerät oder scheitert dessen
+Initialisierung, wird einmal kontrolliert auf CPU zurückgefallen.
+
 CannaBot nutzt alle neun Zeilen des Sprite-Sheets. Dauerzustände laufen ruhig
 weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
 werden einmal abgespielt und kehren anschließend automatisch zum passenden
@@ -242,6 +256,10 @@ und Abschnittsnummer und bietet einen Abbruchknopf. Bei automatischer
 Spracherkennung wird die Sprache erst nach einem Abschnitt mit erkanntem Text
 festgehalten und für alle folgenden Abschnitte wiederverwendet.
 
+Fertige Transkripte, Modelle, Aufnahmen und Einstellungen bleiben ausschließlich
+im privaten App-Speicher. Android-Cloud-Backup und Geräteübertragung sind für die
+gesamte App deaktiviert.
+
 Die Debug-APK baut den rechenintensiven nativen Whisper-Code mit
 Release-Optimierungen. Die Optimierung muss im `lib`-Modul gesetzt sein, weil
 dort der CMake-/NDK-Build stattfindet.
@@ -263,13 +281,24 @@ cd transcript
 Die APK liegt anschließend unter
 `app/build/outputs/apk/debug/app-debug.apk`.
 
+Für einen vollständigen lokalen Produktbuild:
+
+```bash
+./gradlew testDebugUnitTest assembleDebug assembleRelease bundleRelease
+```
+
 Alternativ baut der Workflow **Build Android APK** bei jedem Push und Pull
-Request eine APK. Zum Herunterladen auf GitHub:
+Request eine Debug-APK sowie eine signierte Release-APK und ein Release-AAB.
+Zum Herunterladen auf GitHub:
 
 1. Im Repository den Bereich **Actions** öffnen.
 2. Den neuesten erfolgreichen Lauf **Build Android APK** auswählen.
-3. Unten unter **Artifacts** die Datei `transcript-signed-apk-…` herunterladen.
-4. Das ZIP entpacken und `app-debug.apk` auf dem Android-Gerät installieren.
+3. Für die Produktversion `transcript-signed-release-…` herunterladen.
+4. Das ZIP entpacken und `app-release.apk` auf dem Android-Gerät installieren;
+   `app-release.aab` ist das getrennte Store-Artefakt.
+
+Das zusätzliche Artefakt `transcript-signed-debug-apk-…` ist ausschließlich für
+Entwicklung und Fehlersuche bestimmt.
 
 ## APK-Updates und Signierung
 
@@ -291,8 +320,9 @@ Benötigte GitHub-Actions-Secrets:
 - `ANDROID_SIGNING_KEY_ALIAS`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 
-Der Workflow führt vor dem APK-Build die JVM-Unit-Tests aus und prüft vor dem
-Upload zusätzlich die APK-Signatur.
+Der Workflow führt vor dem Build die JVM-Unit-Tests aus und prüft vor dem Upload
+die Signaturen, die Release-/Debug-Trennung, die deaktivierte Backup-Fähigkeit
+sowie die eingebauten KleidiAI- und Whisper-Vulkan-Laufzeitpfade.
 
 ## Modelle und Speicherbedarf
 

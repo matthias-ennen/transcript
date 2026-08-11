@@ -3,11 +3,13 @@
 #include <android/asset_manager_jni.h>
 #include <android/log.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdatomic.h>
 #include <sys/sysinfo.h>
 #include <string.h>
 #include "whisper.h"
 #include "ggml.h"
+#include "ggml-backend.h"
 
 #define UNUSED(x) (void)(x)
 #define TAG "JNI"
@@ -268,6 +270,98 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeContext(
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     whisper_free(context);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_getGpuBackendName(
+        JNIEnv *env, jobject thiz) {
+    UNUSED(thiz);
+    const size_t count = ggml_backend_dev_count();
+    for (size_t index = 0; index < count; ++index) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(index);
+        const enum ggml_backend_dev_type type = device != NULL
+                ? ggml_backend_dev_type(device)
+                : GGML_BACKEND_DEVICE_TYPE_CPU;
+        if (device != NULL &&
+                (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU)) {
+            const char *name = ggml_backend_dev_name(device);
+            const char *description = ggml_backend_dev_description(device);
+            char report[512] = {0};
+            snprintf(report, sizeof(report), "%s%s%s",
+                    name != NULL ? name : "GPU",
+                    description != NULL && description[0] != '\0' ? " · " : "",
+                    description != NULL ? description : "");
+            return (*env)->NewStringUTF(env, report);
+        }
+    }
+    return (*env)->NewStringUTF(env, "");
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_initVadContext(
+        JNIEnv *env, jobject thiz, jstring model_path_str) {
+    UNUSED(thiz);
+    const char *model_path = (*env)->GetStringUTFChars(env, model_path_str, NULL);
+    struct whisper_vad_context_params params = whisper_vad_default_context_params();
+    // The small VAD probe deliberately stays on CPU. Whisper's separately
+    // selected backend is loaded only after the automatic decision is complete.
+    params.use_gpu = false;
+    struct whisper_vad_context *context =
+            whisper_vad_init_from_file_with_params(model_path, params);
+    (*env)->ReleaseStringUTFChars(env, model_path_str, model_path);
+    return (jlong) context;
+}
+
+JNIEXPORT void JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeVadContext(
+        JNIEnv *env, jobject thiz, jlong context_ptr) {
+    UNUSED(env);
+    UNUSED(thiz);
+    whisper_vad_free((struct whisper_vad_context *) context_ptr);
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_detectVadSegments(
+        JNIEnv *env, jobject thiz, jlong context_ptr, jfloatArray audio_data,
+        jfloat threshold, jint minimum_speech_duration_ms,
+        jint minimum_silence_duration_ms, jfloat maximum_speech_duration_seconds,
+        jint speech_pad_ms, jfloat overlap_seconds) {
+    UNUSED(thiz);
+    struct whisper_vad_context *context = (struct whisper_vad_context *) context_ptr;
+    if (context == NULL) return NULL;
+
+    jfloat *samples = (*env)->GetFloatArrayElements(env, audio_data, NULL);
+    const jsize sample_count = (*env)->GetArrayLength(env, audio_data);
+    struct whisper_vad_params params = whisper_vad_default_params();
+    params.threshold = threshold;
+    params.min_speech_duration_ms = minimum_speech_duration_ms;
+    params.min_silence_duration_ms = minimum_silence_duration_ms;
+    params.max_speech_duration_s = maximum_speech_duration_seconds;
+    params.speech_pad_ms = speech_pad_ms;
+    params.samples_overlap = overlap_seconds;
+
+    struct whisper_vad_segments *segments =
+            whisper_vad_segments_from_samples(context, params, samples, sample_count);
+    (*env)->ReleaseFloatArrayElements(env, audio_data, samples, JNI_ABORT);
+    if (segments == NULL) return NULL;
+
+    const int segment_count = whisper_vad_segments_n_segments(segments);
+    jfloatArray result = (*env)->NewFloatArray(env, segment_count * 2);
+    if (result != NULL && segment_count > 0) {
+        jfloat *values = (jfloat *) malloc(sizeof(jfloat) * segment_count * 2);
+        if (values == NULL) {
+            whisper_vad_free_segments(segments);
+            return NULL;
+        }
+        for (int index = 0; index < segment_count; ++index) {
+            values[index * 2] = whisper_vad_segments_get_segment_t0(segments, index);
+            values[index * 2 + 1] = whisper_vad_segments_get_segment_t1(segments, index);
+        }
+        (*env)->SetFloatArrayRegion(env, result, 0, segment_count * 2, values);
+        free(values);
+    }
+    whisper_vad_free_segments(segments);
+    return result;
 }
 
 JNIEXPORT jint JNICALL

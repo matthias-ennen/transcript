@@ -48,6 +48,9 @@ import de.matthiasennen.transcript.media.WaveformCache
 import de.matthiasennen.transcript.media.generateWaveform
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.transcription.TranscriptionCoordinator
+import de.matthiasennen.transcript.transcription.StoredTranscriptResult
+import de.matthiasennen.transcript.transcription.TranscriptResultPersistence
+import de.matthiasennen.transcript.transcription.TranscriptResultStore
 import de.matthiasennen.transcript.transcription.TranscriptionService
 import de.matthiasennen.transcript.transcription.TranscriptionState
 import kotlinx.coroutines.CancellationException
@@ -66,80 +69,6 @@ private const val PREFERENCES_NAME = "transcript_preferences"
 private const val SELECTED_MODEL_KEY = "selected_model"
 private const val LANGUAGE_KEY = "transcription_language"
 
-enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
-
-enum class CannaBotCue { NONE, RUNNING_RIGHT, RUNNING_LEFT, JUMPING, WAVING, SUCCESS, FAILED }
-
-data class TranscriptUiState(
-    val selectedAudio: Uri? = null,
-    val selectedFileName: String? = null,
-    val isRecording: Boolean = false,
-    val isPlaying: Boolean = false,
-    val playbackPositionMs: Long = 0L,
-    val audioDurationMs: Long = 0L,
-    val mediaReadyStatus: String? = null,
-    val waveform: List<Float> = emptyList(),
-    val liveWaveform: List<Float> = emptyList(),
-    val isWaveformLoading: Boolean = false,
-    val waveformProgress: Float? = null,
-    val language: String = "auto",
-    val whisperSettings: WhisperSettings = WhisperSettings(),
-    val selectedModel: WhisperModel = WhisperModel.BASE,
-    val modelInstallations: List<ModelInstallation> = emptyList(),
-    val modelReady: Boolean = false,
-    val downloadingModel: WhisperModel? = null,
-    val downloadedBytes: Long = 0L,
-    val downloadTotalBytes: Long = 0L,
-    val vadModelInstallation: VadModelInstallation = VadModelInstallation(),
-    val isVadDownloading: Boolean = false,
-    val vadDownloadedBytes: Long = 0L,
-    val vadDownloadTotalBytes: Long = 0L,
-    val selectedAiModel: AiModel = AiModel.BALANCED,
-    val aiModelInstallations: List<AiModelInstallation> = emptyList(),
-    val aiPostProcessingEnabled: Boolean = false,
-    val automaticAiPostProcessingEnabled: Boolean = false,
-    val downloadingAiModel: AiModel? = null,
-    val aiDownloadedBytes: Long = 0L,
-    val aiDownloadTotalBytes: Long = 0L,
-    val isAiPostProcessing: Boolean = false,
-    val isAiSelfTest: Boolean = false,
-    val aiTestPrompt: String = "",
-    val aiSelfTestResponse: String? = null,
-    val aiSelfTestModel: AiModel? = null,
-    val aiSelfTestMetrics: AiSelfTestMetrics? = null,
-    val latestAiCorrectionTrace: AiCorrectionTrace? = null,
-    val performanceProfileModel: AiModel = AiModel.BALANCED,
-    val aiPerformanceConfiguration: LocalAiConfiguration = LocalAiConfiguration(),
-    val aiHardwareSnapshot: AiHardwareSnapshot? = null,
-    val performanceModelLayerCount: Int = 0,
-    val isAiBenchmarkRunning: Boolean = false,
-    val aiBenchmarkProgress: Float = 0f,
-    val aiBenchmarkResult: AiBenchmarkResult? = null,
-    val aiPerformanceJson: String = "",
-    val aiPerformanceMessage: String? = null,
-    val isBusy: Boolean = false,
-    val isTranscribing: Boolean = false,
-    val isCancellationRequested: Boolean = false,
-    val progress: Float? = null,
-    val status: String = "Bitte zuerst das Whisper-Modell herunterladen.",
-    val runtimeEstimateAnnouncementId: Long = 0L,
-    val transcriptionEstimateSeconds: Long? = null,
-    val elapsedSeconds: Long = 0L,
-    val activityDetail: String? = null,
-    val diagnostics: List<String> = emptyList(),
-    val segments: List<WhisperSegment> = emptyList(),
-    val isEditingTranscript: Boolean = false,
-    val editingTranscriptGroupStartMs: Long? = null,
-    val draftSegments: List<WhisperSegment> = emptyList(),
-    val detectedLanguage: String? = null,
-    val completedModel: WhisperModel? = null,
-    val transcriptionDurationSeconds: Long? = null,
-    val error: String? = null,
-    val cannaBotMode: CannaBotMode = CannaBotMode.IDLE,
-    val cannaBotCue: CannaBotCue = CannaBotCue.NONE,
-    val cannaBotCueId: Long = 0L
-)
-
 class MainScreenViewModel(private val application: Application) : ViewModel() {
     var uiState by mutableStateOf(TranscriptUiState())
         private set
@@ -150,6 +79,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val aiPreferences = AiPreferences(application)
     private val aiPerformancePreferences = AiPerformancePreferences(application)
     private val waveformCache = WaveformCache(File(application.filesDir, "waveforms"))
+    private val transcriptResultStore = TranscriptResultStore(
+        File(application.filesDir, "transcripts/current-transcript.bin")
+    )
+    private val transcriptResultPersistence = TranscriptResultPersistence(transcriptResultStore)
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
     private val audioRecorder = AudioRecorder(application)
@@ -216,6 +149,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             performanceModelLayerCount = inspectAiModelLayers(aiSettings.selectedModel)
         )
         refreshAiModelInstallations(aiSettings.selectedModel)
+        restoreStoredTranscript()
         viewModelScope.launch {
             ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
         }
@@ -250,11 +184,13 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     fun startRecording() {
         if (uiState.isBusy || uiState.isRecording) return
         stopPlayback(release = true)
+        transcriptResultPersistence.clear()
         runCatching { audioRecorder.start() }
             .onSuccess {
                 uiState = uiState.copy(
                     isRecording = true,
                     liveWaveform = emptyList(),
+                    rawWhisperSegments = emptyList(),
                     segments = emptyList(),
                     isEditingTranscript = false,
                     editingTranscriptGroupStartMs = null,
@@ -351,6 +287,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     private fun selectAudioInternal(uri: Uri, fileName: String, status: String) {
         stopPlayback(release = true)
+        transcriptResultPersistence.clear()
         waveformJob?.cancel()
         uiState = uiState.copy(
             selectedAudio = uri,
@@ -362,6 +299,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             waveform = emptyList(),
             isWaveformLoading = true,
             waveformProgress = 0f,
+            rawWhisperSegments = emptyList(),
             segments = emptyList(),
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
@@ -917,18 +855,20 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         ) {
             return
         }
+        val appliedSegments = applyTranscriptGroupEdits(
+            original = uiState.segments,
+            draft = uiState.draftSegments,
+            groupStartMs = groupStartMs
+        )
         uiState = uiState.copy(
-            segments = applyTranscriptGroupEdits(
-                original = uiState.segments,
-                draft = uiState.draftSegments,
-                groupStartMs = groupStartMs
-            ),
+            segments = appliedSegments,
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
             status = "Textkorrekturen übernommen. Die Exporte sind aktualisiert.",
             cannaBotMode = CannaBotMode.IDLE
         )
+        persistCurrentTranscript(appliedSegments)
         cue(CannaBotCue.WAVING)
     }
 
@@ -1137,6 +1077,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
         stopPlayback(release = false)
+        transcriptResultPersistence.clear()
         uiState = uiState.withRecalculatedTranscriptionEstimate()
         uiState = uiState.copy(
             isBusy = true,
@@ -1148,6 +1089,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
+            rawWhisperSegments = emptyList(),
             error = null,
             activityDetail = null,
             status = "Transkription wird im Hintergrund vorbereitet …",
@@ -1560,6 +1502,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     },
                     cannaBotMode = CannaBotMode.IDLE
                 )
+                if (!manual) persistCurrentTranscript(state.segments)
                 cue(CannaBotCue.SUCCESS)
                 AiPostProcessingCoordinator.reset()
             }
@@ -1579,6 +1522,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     status = "KI-Nachbearbeitung fehlgeschlagen. Der ursprüngliche Text bleibt erhalten.",
                     cannaBotMode = CannaBotMode.IDLE
                 )
+                if (!manual) persistCurrentTranscript(state.originalSegments)
                 cue(CannaBotCue.FAILED)
                 AiPostProcessingCoordinator.reset()
             }
@@ -1617,6 +1561,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     status = state.status,
                     activityDetail = state.activityDetail,
                     diagnostics = state.diagnostics,
+                    rawWhisperSegments = emptyList(),
                     segments = state.committedSegments,
                     detectedLanguage = state.detectedLanguage,
                     error = null,
@@ -1647,6 +1592,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isCancellationRequested = false,
                     progress = null,
                     activityDetail = null,
+                    rawWhisperSegments = state.segments,
                     segments = state.segments,
                     isEditingTranscript = false,
                     editingTranscriptGroupStartMs = null,
@@ -1666,6 +1612,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     },
                     cannaBotMode = if (canRunAutomaticAi) CannaBotMode.REVIEW else CannaBotMode.IDLE
                 )
+                persistCurrentTranscript(state.segments)
                 if (canRunAutomaticAi) {
                     uiState = uiState.copy(
                         isAiPostProcessing = true,
@@ -1699,6 +1646,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isCancellationRequested = false,
                     progress = null,
                     activityDetail = null,
+                    rawWhisperSegments = emptyList(),
                     segments = emptyList(),
                     isEditingTranscript = false,
                     editingTranscriptGroupStartMs = null,
@@ -1719,6 +1667,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     isCancellationRequested = false,
                     progress = null,
                     activityDetail = null,
+                    rawWhisperSegments = emptyList(),
                     segments = state.committedSegments,
                     isEditingTranscript = false,
                     editingTranscriptGroupStartMs = null,
@@ -1737,6 +1686,39 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun modelFile(model: WhisperModel): File = File(modelsDirectory, model.fileName)
+
+    private fun restoreStoredTranscript() {
+        val stored = transcriptResultStore.read() ?: return
+        val sourceUri = stored.sourceUri.takeIf(String::isNotBlank)?.let(Uri::parse)
+        uiState = uiState.copy(
+            selectedAudio = sourceUri,
+            selectedFileName = stored.fileName,
+            rawWhisperSegments = stored.rawWhisperSegments,
+            segments = stored.displayedSegments,
+            detectedLanguage = stored.detectedLanguage,
+            completedModel = WhisperModel.fromId(stored.modelId),
+            transcriptionDurationSeconds = stored.transcriptionDurationSeconds,
+            status = "Gespeichertes Transkript wiederhergestellt: ${stored.displayedSegments.size} Textabschnitte.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
+    private fun persistCurrentTranscript(displayedSegments: List<WhisperSegment>) {
+        if (displayedSegments.isEmpty()) return
+        val model = uiState.completedModel ?: return
+        transcriptResultPersistence.save(
+            StoredTranscriptResult(
+                sourceUri = uiState.selectedAudio?.toString().orEmpty(),
+                fileName = uiState.selectedFileName ?: "Transkript",
+                modelId = model.id,
+                detectedLanguage = uiState.detectedLanguage.orEmpty(),
+                transcriptionDurationSeconds = uiState.transcriptionDurationSeconds ?: 0L,
+                savedAtEpochMs = System.currentTimeMillis(),
+                rawWhisperSegments = uiState.rawWhisperSegments.ifEmpty { displayedSegments },
+                displayedSegments = displayedSegments
+            )
+        )
+    }
 
     private fun partialModelFile(model: WhisperModel): File =
         File(modelsDirectory, "${model.fileName}.part")
@@ -1868,6 +1850,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         stopTranscriptionElapsedTimer()
         audioRecorder.release()
         audioPlayer.release()
+        transcriptResultPersistence.close()
     }
 
     companion object {
