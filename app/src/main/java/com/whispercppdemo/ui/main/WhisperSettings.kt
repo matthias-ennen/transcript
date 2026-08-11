@@ -6,6 +6,7 @@ import com.whispercpp.whisper.WhisperConfiguration
 enum class WhisperComputeBackend { AUTO, CPU, VULKAN }
 enum class WhisperDecoding { GREEDY, BEAM_SEARCH }
 enum class WhisperTimestampMode { SEGMENTS, WORDS }
+enum class WhisperVadMode { OFF, AUTOMATIC, ON }
 
 data class WhisperSettings(
     val initialPrompt: String = "",
@@ -24,7 +25,14 @@ data class WhisperSettings(
     val logProbabilityThresholdPercent: Int = -100,
     val noSpeechThresholdPercent: Int = 60,
     val entropyThresholdPercent: Int = 240,
-    val sectionMinutes: Int = 5
+    val sectionMinutes: Int = 5,
+    val vadMode: WhisperVadMode = WhisperVadMode.AUTOMATIC,
+    val vadThresholdPercent: Int = 50,
+    val vadMinSpeechDurationMs: Int = 250,
+    val vadMinSilenceDurationMs: Int = 100,
+    val vadMaxSpeechDurationSeconds: Int = 300,
+    val vadSpeechPadMs: Int = 100,
+    val vadOverlapMs: Int = 100
 ) {
     fun normalized(processors: Int = Runtime.getRuntime().availableProcessors()): WhisperSettings = copy(
         threads = threads.coerceIn(0, processors.coerceAtLeast(1)),
@@ -35,10 +43,16 @@ data class WhisperSettings(
         logProbabilityThresholdPercent = logProbabilityThresholdPercent.coerceIn(-500, 0),
         noSpeechThresholdPercent = noSpeechThresholdPercent.coerceIn(0, 100),
         entropyThresholdPercent = entropyThresholdPercent.coerceIn(0, 500),
-        sectionMinutes = sectionMinutes.coerceIn(1, 10)
+        sectionMinutes = sectionMinutes.coerceIn(1, 10),
+        vadThresholdPercent = vadThresholdPercent.coerceIn(10, 90),
+        vadMinSpeechDurationMs = vadMinSpeechDurationMs.coerceIn(50, 2_000),
+        vadMinSilenceDurationMs = vadMinSilenceDurationMs.coerceIn(50, 2_000),
+        vadMaxSpeechDurationSeconds = vadMaxSpeechDurationSeconds.coerceIn(30, 600),
+        vadSpeechPadMs = vadSpeechPadMs.coerceIn(0, 1_000),
+        vadOverlapMs = vadOverlapMs.coerceIn(0, 1_000)
     )
 
-    fun toNativeConfiguration(): WhisperConfiguration {
+    fun toNativeConfiguration(vadModelPath: String? = null): WhisperConfiguration {
         val value = normalized()
         return WhisperConfiguration(
             threads = value.threads,
@@ -56,18 +70,34 @@ data class WhisperSettings(
             suppressNonSpeechTokens = value.suppressNonSpeechTokens,
             logProbabilityThreshold = value.logProbabilityThresholdPercent / 100f,
             noSpeechThreshold = value.noSpeechThresholdPercent / 100f,
-            entropyThreshold = value.entropyThresholdPercent / 100f
+            entropyThreshold = value.entropyThresholdPercent / 100f,
+            vadModelPath = vadModelPath?.takeIf { value.vadMode != WhisperVadMode.OFF },
+            vadThreshold = value.vadThresholdPercent / 100f,
+            vadMinSpeechDurationMs = value.vadMinSpeechDurationMs,
+            vadMinSilenceDurationMs = value.vadMinSilenceDurationMs,
+            vadMaxSpeechDurationSeconds = value.vadMaxSpeechDurationSeconds.toFloat(),
+            vadSpeechPadMs = value.vadSpeechPadMs,
+            vadSamplesOverlapSeconds = value.vadOverlapMs / 1_000f
         )
     }
 }
 
-enum class WhisperSettingsGroup { COMPUTE, DETECTION, DECODING, SEGMENTS, PROTECTION }
+enum class WhisperSettingsGroup { COMPUTE, DETECTION, VAD, DECODING, SEGMENTS, PROTECTION }
 
 fun WhisperSettings.reset(group: WhisperSettingsGroup): WhisperSettings {
     val defaults = WhisperSettings()
     return when (group) {
         WhisperSettingsGroup.COMPUTE -> copy(threads = defaults.threads, backend = defaults.backend)
         WhisperSettingsGroup.DETECTION -> copy(initialPrompt = defaults.initialPrompt)
+        WhisperSettingsGroup.VAD -> copy(
+            vadMode = defaults.vadMode,
+            vadThresholdPercent = defaults.vadThresholdPercent,
+            vadMinSpeechDurationMs = defaults.vadMinSpeechDurationMs,
+            vadMinSilenceDurationMs = defaults.vadMinSilenceDurationMs,
+            vadMaxSpeechDurationSeconds = defaults.vadMaxSpeechDurationSeconds,
+            vadSpeechPadMs = defaults.vadSpeechPadMs,
+            vadOverlapMs = defaults.vadOverlapMs
+        )
         WhisperSettingsGroup.DECODING -> copy(
             decoding = defaults.decoding,
             beamSize = defaults.beamSize,
@@ -111,7 +141,14 @@ class WhisperSettingsPreferences(context: Context) {
         logProbabilityThresholdPercent = preferences.getInt("log_probability", -100),
         noSpeechThresholdPercent = preferences.getInt("no_speech", 60),
         entropyThresholdPercent = preferences.getInt("entropy", 240),
-        sectionMinutes = preferences.getInt("section_minutes", 5)
+        sectionMinutes = preferences.getInt("section_minutes", 5),
+        vadMode = enumValue(preferences.getString("vad_mode", null), WhisperVadMode.AUTOMATIC),
+        vadThresholdPercent = preferences.getInt("vad_threshold", 50),
+        vadMinSpeechDurationMs = preferences.getInt("vad_min_speech_ms", 250),
+        vadMinSilenceDurationMs = preferences.getInt("vad_min_silence_ms", 100),
+        vadMaxSpeechDurationSeconds = preferences.getInt("vad_max_speech_s", 300),
+        vadSpeechPadMs = preferences.getInt("vad_speech_pad_ms", 100),
+        vadOverlapMs = preferences.getInt("vad_overlap_ms", 100)
     ).normalized()
 
     fun save(value: WhisperSettings) {
@@ -134,6 +171,13 @@ class WhisperSettingsPreferences(context: Context) {
             .putInt("no_speech", settings.noSpeechThresholdPercent)
             .putInt("entropy", settings.entropyThresholdPercent)
             .putInt("section_minutes", settings.sectionMinutes)
+            .putString("vad_mode", settings.vadMode.name)
+            .putInt("vad_threshold", settings.vadThresholdPercent)
+            .putInt("vad_min_speech_ms", settings.vadMinSpeechDurationMs)
+            .putInt("vad_min_silence_ms", settings.vadMinSilenceDurationMs)
+            .putInt("vad_max_speech_s", settings.vadMaxSpeechDurationSeconds)
+            .putInt("vad_speech_pad_ms", settings.vadSpeechPadMs)
+            .putInt("vad_overlap_ms", settings.vadOverlapMs)
             .apply()
     }
 

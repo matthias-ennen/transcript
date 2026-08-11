@@ -32,6 +32,8 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
 - Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
 - lokale Modellverwaltung mit fünf Qualitätsstufen
+- optionales Silero VAD 6.2.0 zur lokalen Erkennung von Sprache und zum
+  Überspringen längerer Nicht-Sprachbereiche
 - optionale lokale KI-Nachbearbeitung mit drei auswählbaren Qwen3.5-Größen
 - automatische KI-Korrektur nach dem Entladen von Whisper
 - gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
@@ -44,7 +46,7 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
 - Transkriptionssprache wahlweise automatisch erkannt, Deutsch oder Englisch
 - dauerhaft gespeicherte Whisper-Einstellungen für Vorgabetext, Threads,
-  CPU/GPU, Dekodierung, Segmentierung, Zeitstempel und Halluzinationsschutz
+  CPU/GPU, VAD, Dekodierung, Segmentierung, Zeitstempel und Halluzinationsschutz
 - Ausgabe mit Segmentzeitstempeln
 - fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
   die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt

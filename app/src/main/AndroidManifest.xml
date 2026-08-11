@@ -50,6 +50,11 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".download.VadModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".ai.AiModelDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

@@ -79,10 +79,43 @@ fun WhisperSettingsScreen(
         }
 
         ExpandableSettingsCard("vad", "Spracherkennung und Pausen (VAD)", preferences) {
+            ChoiceSetting(
+                "VAD-Modus",
+                settings.vadMode,
+                listOf(
+                    WhisperVadMode.OFF to "Aus",
+                    WhisperVadMode.AUTOMATIC to "Automatisch – bei installiertem Modell",
+                    WhisperVadMode.ON to "Ein – bei installiertem Modell"
+                )
+            ) { onSettingsChanged(settings.copy(vadMode = it)) }
             Text(
-                "VAD benötigt zusätzlich ein separates Spracherkennungsmodell. Dieses Modell ist noch nicht Bestandteil der App; deshalb werden hier noch keine wirkungslosen Regler angeboten.",
+                if (state.vadModelInstallation.isInstalled) "${de.matthiasennen.transcript.download.SileroVadModel.modelLabel} ist installiert und einsatzbereit."
+                else "Silero VAD ist nicht installiert. Whisper arbeitet bis zum Download zuverlässig ohne VAD.",
                 style = MaterialTheme.typography.bodyMedium
             )
+            NumberSetting("Empfindlichkeit", settings.vadThresholdPercent, "10–90 Prozent; niedriger erkennt mehr als Sprache") {
+                onSettingsChanged(settings.copy(vadThresholdPercent = it))
+            }
+            NumberSetting("Mindestlänge Sprache", settings.vadMinSpeechDurationMs, "50–2000 ms; kurze Geräusche werden verworfen") {
+                onSettingsChanged(settings.copy(vadMinSpeechDurationMs = it))
+            }
+            NumberSetting("Mindestdauer Pause", settings.vadMinSilenceDurationMs, "50–2000 ms; beendet einen Sprachabschnitt") {
+                onSettingsChanged(settings.copy(vadMinSilenceDurationMs = it))
+            }
+            NumberSetting("Maximale Sprachdauer", settings.vadMaxSpeechDurationSeconds, "30–600 Sekunden; lange Abschnitte werden sicher getrennt") {
+                onSettingsChanged(settings.copy(vadMaxSpeechDurationSeconds = it))
+            }
+            NumberSetting("Sicherheitsabstand", settings.vadSpeechPadMs, "0–1000 ms vor und nach erkannter Sprache") {
+                onSettingsChanged(settings.copy(vadSpeechPadMs = it))
+            }
+            NumberSetting("Überlappung", settings.vadOverlapMs, "0–1000 ms zwischen erkannten Sprachbereichen") {
+                onSettingsChanged(settings.copy(vadOverlapMs = it))
+            }
+            Text(
+                "Konservative Standardwerte schützen leise Wortanfänge und -enden. Für Musik und Gesang kann VAD ausgeschaltet werden.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            ResetButton { onResetGroup(WhisperSettingsGroup.VAD) }
         }
 
         ExpandableSettingsCard("decoding", "Erkennungsgenauigkeit", preferences) {

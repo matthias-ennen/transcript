@@ -22,6 +22,8 @@ import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.ui.main.WhisperModel
 import de.matthiasennen.transcript.ui.main.WhisperSettings
 import de.matthiasennen.transcript.ui.main.WhisperSettingsPreferences
+import de.matthiasennen.transcript.ui.main.WhisperVadMode
+import de.matthiasennen.transcript.download.SileroVadModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -109,6 +111,18 @@ class TranscriptionService : Service() {
             addDiagnostic("Audiospur wird geprüft.")
             val audioInfo = inspectAudioTrack(this, uri)
             val whisperSettings = WhisperSettingsPreferences(this).load()
+            val vadFile = File(File(filesDir, "vad-models"), SileroVadModel.fileName)
+            val vadModelPath = vadFile.absolutePath.takeIf {
+                whisperSettings.vadMode != WhisperVadMode.OFF &&
+                    vadFile.isFile && vadFile.length() == SileroVadModel.expectedBytes
+            }
+            addDiagnostic(
+                when {
+                    whisperSettings.vadMode == WhisperVadMode.OFF -> "Silero VAD ist ausgeschaltet."
+                    vadModelPath != null -> "Silero VAD ist aktiv."
+                    else -> "Silero VAD ist nicht installiert; Whisper arbeitet ohne VAD."
+                }
+            )
             val saved = checkpointStore.read()?.takeIf {
                 it.isCompatibleWith(request, audioInfo.durationMs) &&
                     request.settingsSignature == whisperSettings.normalized().toString() &&
@@ -168,7 +182,8 @@ class TranscriptionService : Service() {
                         sectionNumber = absoluteSectionNumber.coerceAtMost(sectionCount),
                         sectionCount = sectionCount,
                         checkpoint = checkpoint,
-                        whisperSettings = whisperSettings
+                        whisperSettings = whisperSettings,
+                        vadModelPath = vadModelPath
                     )
                     latestCheckpoint = checkpoint
                     sectionIndex++
@@ -252,7 +267,8 @@ class TranscriptionService : Service() {
         sectionNumber: Int,
         sectionCount: Int,
         checkpoint: TranscriptionCheckpoint,
-        whisperSettings: WhisperSettings
+        whisperSettings: WhisperSettings,
+        vadModelPath: String?
     ): TranscriptionCheckpoint {
         val fallbackLabel = if (section.usedFallbackSize) " · Sicherheitsgröße 2,5 min" else ""
         publishRunning(
@@ -307,7 +323,7 @@ class TranscriptionService : Service() {
         val result = checkNotNull(activeWhisperContext).transcribeSegments(
             data = chunk.samples,
             language = language,
-            configuration = whisperSettings.toNativeConfiguration(),
+            configuration = whisperSettings.toNativeConfiguration(vadModelPath),
             shouldCancel = stopRequested::get
         ) { nativePercent ->
             publishRunning(

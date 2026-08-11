@@ -45,7 +45,7 @@ class WhisperContext private constructor(private var ptr: Long) {
         }
         try {
             if (shouldCancel()) WhisperLib.requestAbort(abortToken)
-            val result = WhisperLib.fullTranscribe(
+            fun run(modelPath: String): Int = WhisperLib.fullTranscribe(
                 ptr,
                 numThreads,
                 data,
@@ -64,9 +64,25 @@ class WhisperContext private constructor(private var ptr: Long) {
                 configuration.logProbabilityThreshold,
                 configuration.noSpeechThreshold,
                 configuration.entropyThreshold,
+                modelPath,
+                configuration.vadThreshold,
+                configuration.vadMinSpeechDurationMs,
+                configuration.vadMinSilenceDurationMs,
+                configuration.vadMaxSpeechDurationSeconds,
+                configuration.vadSpeechPadMs,
+                configuration.vadSamplesOverlapSeconds,
                 abortToken,
                 WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
             )
+            var result = run(configuration.vadModelPath.orEmpty())
+            if (
+                result != 0 &&
+                !configuration.vadModelPath.isNullOrBlank() &&
+                !WhisperLib.isAbortRequested(abortToken)
+            ) {
+                Log.w(LOG_TAG, "VAD processing failed with $result; retrying without VAD")
+                result = run("")
+            }
             if (WhisperLib.isAbortRequested(abortToken)) {
                 throw java.util.concurrent.CancellationException("Whisper-Transkription abgebrochen.")
             }
@@ -224,6 +240,13 @@ private class WhisperLib {
             logProbabilityThreshold: Float,
             noSpeechThreshold: Float,
             entropyThreshold: Float,
+            vadModelPath: String,
+            vadThreshold: Float,
+            vadMinSpeechDurationMs: Int,
+            vadMinSilenceDurationMs: Int,
+            vadMaxSpeechDurationSeconds: Float,
+            vadSpeechPadMs: Int,
+            vadSamplesOverlapSeconds: Float,
             abortToken: Long,
             progressListener: WhisperProgressListener
         ): Int

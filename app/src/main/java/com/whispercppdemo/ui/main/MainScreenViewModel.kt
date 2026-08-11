@@ -36,6 +36,11 @@ import de.matthiasennen.transcript.ai.LocalAiEngine
 import de.matthiasennen.transcript.download.ModelDownloadCoordinator
 import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
+import de.matthiasennen.transcript.download.SileroVadModel
+import de.matthiasennen.transcript.download.VadModelDownloadCoordinator
+import de.matthiasennen.transcript.download.VadModelDownloadService
+import de.matthiasennen.transcript.download.VadModelDownloadState
+import de.matthiasennen.transcript.download.VadModelInstallation
 import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.AudioRecorder
 import de.matthiasennen.transcript.media.CachedWaveform
@@ -85,6 +90,10 @@ data class TranscriptUiState(
     val downloadingModel: WhisperModel? = null,
     val downloadedBytes: Long = 0L,
     val downloadTotalBytes: Long = 0L,
+    val vadModelInstallation: VadModelInstallation = VadModelInstallation(),
+    val isVadDownloading: Boolean = false,
+    val vadDownloadedBytes: Long = 0L,
+    val vadDownloadTotalBytes: Long = 0L,
     val selectedAiModel: AiModel = AiModel.BALANCED,
     val aiModelInstallations: List<AiModelInstallation> = emptyList(),
     val aiPostProcessingEnabled: Boolean = false,
@@ -136,6 +145,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         private set
 
     private val modelsDirectory = File(application.filesDir, "models")
+    private val vadModelsDirectory = File(application.filesDir, "vad-models")
     private val aiModelsDirectory = File(application.filesDir, "ai-models")
     private val aiPreferences = AiPreferences(application)
     private val aiPerformancePreferences = AiPerformancePreferences(application)
@@ -187,10 +197,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     init {
         modelsDirectory.mkdirs()
+        vadModelsDirectory.mkdirs()
         aiModelsDirectory.mkdirs()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
         val whisperSettings = whisperSettingsPreferences.load()
         refreshModelInstallations(selectedModel)
+        refreshVadModelInstallation()
         val aiSettings = aiPreferences.load()
         uiState = uiState.copy(
             language = preferences.getString(LANGUAGE_KEY, "auto") ?: "auto",
@@ -206,6 +218,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         refreshAiModelInstallations(aiSettings.selectedModel)
         viewModelScope.launch {
             ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
+        }
+        viewModelScope.launch {
+            VadModelDownloadCoordinator.state.collect(::handleVadModelDownloadState)
         }
         viewModelScope.launch {
             AiModelDownloadCoordinator.state.collect(::handleAiModelDownloadState)
@@ -1086,6 +1101,38 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     }
 
+    fun downloadVadModel() {
+        if (uiState.isBusy) return
+        uiState = uiState.copy(
+            isBusy = true,
+            isVadDownloading = true,
+            progress = 0f,
+            error = null,
+            status = "${SileroVadModel.modelLabel} wird heruntergeladen …",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        cue(CannaBotCue.RUNNING_RIGHT)
+        VadModelDownloadService.start(application)
+    }
+
+    fun deleteVadModel() {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(isBusy = true, progress = null, status = "Silero VAD wird gelöscht …")
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val file = vadModelFile()
+                    check(!file.exists() || file.delete()) { "Das VAD-Modell konnte nicht gelöscht werden." }
+                    val partial = partialVadModelFile()
+                    check(!partial.exists() || partial.delete()) { "Der unvollständige VAD-Download konnte nicht gelöscht werden." }
+                }
+            }.onSuccess {
+                refreshVadModelInstallation()
+                uiState = uiState.copy(isBusy = false, status = "Silero VAD wurde gelöscht.", cannaBotMode = CannaBotMode.IDLE)
+            }.onFailure(::fail)
+        }
+    }
+
     fun transcribe() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
@@ -1355,6 +1402,39 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 )
                 cue(CannaBotCue.FAILED)
                 AiModelDownloadCoordinator.reset()
+            }
+        }
+    }
+
+    private fun handleVadModelDownloadState(downloadState: VadModelDownloadState) {
+        when (downloadState) {
+            VadModelDownloadState.Idle -> Unit
+            is VadModelDownloadState.Running -> uiState = uiState.copy(
+                isBusy = true,
+                isVadDownloading = true,
+                vadDownloadedBytes = downloadState.downloadedBytes,
+                vadDownloadTotalBytes = downloadState.totalBytes,
+                progress = if (downloadState.totalBytes > 0L) downloadState.downloadedBytes.toFloat() / downloadState.totalBytes else null,
+                status = if (downloadState.resumed) "Silero-VAD-Download wird fortgesetzt …" else "Silero VAD wird heruntergeladen …",
+                cannaBotMode = CannaBotMode.RUNNING
+            )
+            is VadModelDownloadState.Verifying -> uiState = uiState.copy(
+                isBusy = true, progress = null, status = "Silero VAD wird geprüft …", cannaBotMode = CannaBotMode.WAITING
+            )
+            VadModelDownloadState.Completed -> {
+                refreshVadModelInstallation()
+                uiState = uiState.copy(isBusy = false, isVadDownloading = false, progress = null, error = null,
+                    status = "${SileroVadModel.modelLabel} ist installiert.", cannaBotMode = CannaBotMode.IDLE)
+                cue(CannaBotCue.SUCCESS)
+                VadModelDownloadCoordinator.reset()
+            }
+            is VadModelDownloadState.Failed -> {
+                refreshVadModelInstallation()
+                uiState = uiState.copy(isBusy = false, isVadDownloading = false, progress = null,
+                    vadDownloadedBytes = downloadState.downloadedBytes, vadDownloadTotalBytes = downloadState.totalBytes,
+                    error = downloadState.message, status = "VAD-Modelldownload unterbrochen.", cannaBotMode = CannaBotMode.IDLE)
+                cue(CannaBotCue.FAILED)
+                VadModelDownloadCoordinator.reset()
             }
         }
     }
@@ -1660,6 +1740,18 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     private fun partialModelFile(model: WhisperModel): File =
         File(modelsDirectory, "${model.fileName}.part")
+
+    private fun vadModelFile(): File = File(vadModelsDirectory, SileroVadModel.fileName)
+    private fun partialVadModelFile(): File = File(vadModelsDirectory, "${SileroVadModel.fileName}.part")
+
+    private fun refreshVadModelInstallation() {
+        val file = vadModelFile()
+        uiState = uiState.copy(vadModelInstallation = VadModelInstallation(
+            isInstalled = file.isFile && file.length() == SileroVadModel.expectedBytes,
+            installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
+            partialBytes = partialVadModelFile().takeIf(File::isFile)?.length() ?: 0L
+        ))
+    }
 
     private fun aiModelFile(model: AiModel): File = File(aiModelsDirectory, model.fileName)
 

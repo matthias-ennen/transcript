@@ -12,13 +12,47 @@ class WhisperSettingsTest {
             threads = 99,
             beamSize = 0,
             temperaturePercent = 500,
-            sectionMinutes = 0
+            sectionMinutes = 0,
+            vadThresholdPercent = 100,
+            vadMinSpeechDurationMs = 1,
+            vadOverlapMs = 2_000
         ).normalized(processors = 8)
 
         assertEquals(8, value.threads)
         assertEquals(1, value.beamSize)
         assertEquals(100, value.temperaturePercent)
         assertEquals(1, value.sectionMinutes)
+        assertEquals(90, value.vadThresholdPercent)
+        assertEquals(50, value.vadMinSpeechDurationMs)
+        assertEquals(1_000, value.vadOverlapMs)
+    }
+
+    @Test
+    fun `vad reset preserves other groups`() {
+        val value = WhisperSettings(
+            initialPrompt = "ENERCON",
+            vadMode = WhisperVadMode.ON,
+            vadThresholdPercent = 80
+        ).reset(WhisperSettingsGroup.VAD)
+
+        assertEquals("ENERCON", value.initialPrompt)
+        assertEquals(WhisperSettings().vadMode, value.vadMode)
+        assertEquals(WhisperSettings().vadThresholdPercent, value.vadThresholdPercent)
+    }
+
+    @Test
+    fun `native configuration enables vad only with model path`() {
+        val withoutModel = WhisperSettings(vadMode = WhisperVadMode.ON).toNativeConfiguration()
+        val withModel = WhisperSettings(
+            vadMode = WhisperVadMode.ON,
+            vadThresholdPercent = 55,
+            vadSpeechPadMs = 120
+        ).toNativeConfiguration("/data/vad.bin")
+
+        assertEquals(null, withoutModel.vadModelPath)
+        assertEquals("/data/vad.bin", withModel.vadModelPath)
+        assertEquals(0.55f, withModel.vadThreshold)
+        assertEquals(120, withModel.vadSpeechPadMs)
     }
 
     @Test

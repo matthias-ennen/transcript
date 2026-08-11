@@ -97,13 +97,16 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     }
     var pendingModelDownload by remember { mutableStateOf<WhisperModel?>(null) }
     var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
+    var pendingVadModelDownload by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
         pendingModelDownload?.let(viewModel::downloadModel)
         pendingAiModelDownload?.let(viewModel::downloadAiModel)
+        if (pendingVadModelDownload) viewModel.downloadVadModel()
         pendingModelDownload = null
         pendingAiModelDownload = null
+        pendingVadModelDownload = false
     }
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -135,6 +138,15 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
+                onDownloadVadModel = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingVadModelDownload = true
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else viewModel.downloadVadModel()
+                },
+                onDeleteVadModel = viewModel::deleteVadModel,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
                 onAiAutomaticChanged = viewModel::setAutomaticAiPostProcessingEnabled,
                 onSelectAiModel = viewModel::selectAiModel,
