@@ -96,12 +96,19 @@ Dekodierungsverfahren, Suchbreite, Temperatur, Kontext, Segmentierung,
 Zeitstempelberechnung und Halluzinationsschwellen werden validiert und über
 `WhisperConfiguration` bis in `whisper_full_params` durchgereicht. Die vorhandene
 sequenzielle Abschnittsplanung verwendet eine einstellbare Dauer von einer bis
-zehn Minuten. Das optionale Silero-VAD-Modell wird getrennt unter `vad-models/`
-verwaltet. Nur ein vollständig installiertes Modell wird zusammen mit den
-persistierten VAD-Parametern bis in `whisper_full_params` durchgereicht. Die
+zehn Minuten. VAD besitzt eine eigene Einstellungsseite; die vier erweiterten
+Einstellungsseiten sind zusätzlich über den anklickbaren Seitentitel erreichbar.
+Das optionale Silero-VAD-Modell wird getrennt unter `vad-models/` verwaltet. Nur
+ein vollständig installiertes Modell wird zusammen mit den persistierten
+VAD-Parametern bis in `whisper_full_params` durchgereicht. **Aus** deaktiviert
+VAD, **Ein** aktiviert es und **Automatisch** führt vor dem Laden von Whisper
+eine konstantspeichernde Abschnittsanalyse durch. Diese verwendet VAD nur bei
+eindeutigen längeren Ruhephasen und geringer Zerstückelung; Grenzfälle bleiben
+vollständig bei Whisper. Die
 integrierte `whisper.cpp`-Pipeline entfernt Nicht-Sprachbereiche für die
 Berechnung und bildet Segmentzeitstempel anschließend wieder auf die
-Originalaudiodatei ab. Bei fehlendem Modell bleibt VAD aus; parallele
+Originalaudiodatei ab. Bei fehlendem Modell oder VAD-Laufzeitfehler bleibt
+beziehungsweise wechselt die Verarbeitung auf Whisper ohne VAD; parallele
 Modellkontexte werden zum Schutz des Arbeitsspeichers nicht erzeugt.
 
 Der Teilen-Dialog besitzt eine eigene, nur beim Öffnen gestartete Sequenz aus
