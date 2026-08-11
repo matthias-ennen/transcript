@@ -96,9 +96,13 @@ Dekodierungsverfahren, Suchbreite, Temperatur, Kontext, Segmentierung,
 Zeitstempelberechnung und Halluzinationsschwellen werden validiert und über
 `WhisperConfiguration` bis in `whisper_full_params` durchgereicht. Die vorhandene
 sequenzielle Abschnittsplanung verwendet eine einstellbare Dauer von einer bis
-zehn Minuten. VAD bleibt deaktiviert, solange kein separates VAD-Modell zur App
-gehört; parallele Modellkontexte werden zum Schutz des Arbeitsspeichers nicht
-erzeugt.
+zehn Minuten. Das optionale Silero-VAD-Modell wird getrennt unter `vad-models/`
+verwaltet. Nur ein vollständig installiertes Modell wird zusammen mit den
+persistierten VAD-Parametern bis in `whisper_full_params` durchgereicht. Die
+integrierte `whisper.cpp`-Pipeline entfernt Nicht-Sprachbereiche für die
+Berechnung und bildet Segmentzeitstempel anschließend wieder auf die
+Originalaudiodatei ab. Bei fehlendem Modell bleibt VAD aus; parallele
+Modellkontexte werden zum Schutz des Arbeitsspeichers nicht erzeugt.
 
 Der Teilen-Dialog besitzt eine eigene, nur beim Öffnen gestartete Sequenz aus
 Rechtslauf, Sprung und Winken. Kurze Idle-Pausen trennen die Gesten; anschließend

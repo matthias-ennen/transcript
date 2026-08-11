@@ -16,5 +16,12 @@ data class WhisperConfiguration(
     val suppressNonSpeechTokens: Boolean = false,
     val logProbabilityThreshold: Float = -1f,
     val noSpeechThreshold: Float = 0.6f,
-    val entropyThreshold: Float = 2.4f
+    val entropyThreshold: Float = 2.4f,
+    val vadModelPath: String? = null,
+    val vadThreshold: Float = 0.5f,
+    val vadMinSpeechDurationMs: Int = 250,
+    val vadMinSilenceDurationMs: Int = 100,
+    val vadMaxSpeechDurationSeconds: Float = 300f,
+    val vadSpeechPadMs: Int = 100,
+    val vadSamplesOverlapSeconds: Float = 0.1f
 )

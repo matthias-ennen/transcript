@@ -13,6 +13,16 @@ Der vollständige Lizenztext ist in
 Das Whisper-Modell wird nicht mit der APK ausgeliefert. Die App lädt das vom
 `whisper.cpp`-Projekt bereitgestellte GGML-Modell erst auf Wunsch des Nutzers.
 
+## Silero VAD
+
+- Projekt: <https://github.com/snakers4/silero-vad>
+- Copyright: 2020–heute Silero Team
+- Lizenz: MIT
+- Verwendung: Optional herunterladbare lokale Sprachaktivitätserkennung
+
+Das VAD-Modell wird nicht mit der APK ausgeliefert. Der vollständige Lizenztext
+ist in [`licenses/Silero-VAD-MIT.txt`](licenses/Silero-VAD-MIT.txt) enthalten.
+
 ## llama.cpp
 
 - Projekt: <https://github.com/ggml-org/llama.cpp>

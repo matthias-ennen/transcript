@@ -279,7 +279,10 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         jint maximum_segment_characters, jboolean split_on_word,
         jboolean token_timestamps, jboolean suppress_blank,
         jboolean suppress_non_speech_tokens, jfloat log_probability_threshold,
-        jfloat no_speech_threshold, jfloat entropy_threshold, jlong abort_token,
+        jfloat no_speech_threshold, jfloat entropy_threshold, jstring vad_model_path_str,
+        jfloat vad_threshold, jint vad_min_speech_duration_ms,
+        jint vad_min_silence_duration_ms, jfloat vad_max_speech_duration_seconds,
+        jint vad_speech_pad_ms, jfloat vad_samples_overlap_seconds, jlong abort_token,
         jobject progress_listener) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
@@ -318,6 +321,15 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.logprob_thold = log_probability_threshold;
     params.no_speech_thold = no_speech_threshold;
     params.entropy_thold = entropy_threshold;
+    const char *vad_model_path = (*env)->GetStringUTFChars(env, vad_model_path_str, NULL);
+    params.vad = vad_model_path[0] != '\0';
+    params.vad_model_path = params.vad ? vad_model_path : NULL;
+    params.vad_params.threshold = vad_threshold;
+    params.vad_params.min_speech_duration_ms = vad_min_speech_duration_ms;
+    params.vad_params.min_silence_duration_ms = vad_min_silence_duration_ms;
+    params.vad_params.max_speech_duration_s = vad_max_speech_duration_seconds;
+    params.vad_params.speech_pad_ms = vad_speech_pad_ms;
+    params.vad_params.samples_overlap = vad_samples_overlap_seconds;
     params.abort_callback = on_whisper_abort;
     params.abort_callback_user_data = (void *) abort_token;
 
@@ -349,6 +361,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio_data_arr, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, language_str, language);
     (*env)->ReleaseStringUTFChars(env, initial_prompt_str, initial_prompt);
+    (*env)->ReleaseStringUTFChars(env, vad_model_path_str, vad_model_path);
     if (progress_context.listener != NULL) {
         (*env)->DeleteGlobalRef(env, progress_context.listener);
     }

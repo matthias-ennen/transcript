@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.BuildConfig
 import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelInstallation
+import de.matthiasennen.transcript.download.SileroVadModel
 
 @Composable
 fun SettingsScreen(
@@ -42,6 +43,8 @@ fun SettingsScreen(
     onOpenWhisperSettings: () -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
+    onDownloadVadModel: () -> Unit,
+    onDeleteVadModel: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
     onAiAutomaticChanged: (Boolean) -> Unit,
     onSelectAiModel: (AiModel) -> Unit,
@@ -52,6 +55,7 @@ fun SettingsScreen(
     var modelToDelete by remember { mutableStateOf<WhisperModel?>(null) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var aiModelToDelete by remember { mutableStateOf<AiModel?>(null) }
+    var confirmDeleteVad by remember { mutableStateOf(false) }
     val totalBytes = state.modelInstallations.sumOf(ModelInstallation::storedBytes)
 
     Column(
@@ -86,6 +90,47 @@ fun SettingsScreen(
                     )
                 }
                 OutlinedButton(onClick = { confirmDeleteAll = true }, enabled = totalBytes > 0L && !state.isBusy && !state.isRecording, modifier = Modifier.fillMaxWidth()) { Text("Alle Modelle löschen") }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Silero VAD", style = MaterialTheme.typography.headlineSmall)
+                Text("Erkennt Sprachbereiche vor der Transkription. Stille und längere Pausen können übersprungen werden; Zeitstempel bleiben auf die Originaldatei bezogen.")
+                Text(
+                    when {
+                        state.vadModelInstallation.isInstalled -> "Status: Installiert"
+                        state.vadModelInstallation.partialBytes > 0L -> "Status: Download unvollständig"
+                        else -> "Status: Nicht installiert"
+                    },
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text("Belegter Speicher: ${formatDownloadSize(state.vadModelInstallation.storedBytes)}")
+                if (state.isVadDownloading && state.vadDownloadTotalBytes > 0L) {
+                    LinearProgressIndicator(
+                        progress = (state.vadDownloadedBytes.toFloat() / state.vadDownloadTotalBytes).coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                TextButton(onClick = onOpenWhisperSettings, contentPadding = PaddingValues(0.dp)) {
+                    Text("Whisper-Einstellungen", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
+                }
+                if (state.vadModelInstallation.isInstalled) {
+                    OutlinedButton(onClick = { confirmDeleteVad = true }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                        Text("Silero VAD löschen")
+                    }
+                } else if (state.vadModelInstallation.partialBytes > 0L) {
+                    Button(onClick = onDownloadVadModel, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                        Text("Download fortsetzen")
+                    }
+                    OutlinedButton(onClick = { confirmDeleteVad = true }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                        Text("Unvollständigen Download löschen")
+                    }
+                } else {
+                    Button(onClick = onDownloadVadModel, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                        Text("${SileroVadModel.modelLabel} herunterladen · 0,9 MB")
+                    }
+                }
             }
         }
 
@@ -216,6 +261,16 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { confirmDeleteAll = false }) { Text("Abbrechen") }
             }
+        )
+    }
+
+    if (confirmDeleteVad) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteVad = false },
+            title = { Text("Silero VAD löschen?") },
+            text = { Text("Das installierte Modell und ein eventuell unvollständiger Download werden entfernt.") },
+            confirmButton = { TextButton(onClick = { confirmDeleteVad = false; onDeleteVadModel() }) { Text("Löschen") } },
+            dismissButton = { TextButton(onClick = { confirmDeleteVad = false }) { Text("Abbrechen") } }
         )
     }
 }
