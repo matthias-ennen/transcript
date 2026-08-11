@@ -74,6 +74,10 @@ function(build_library target_name)
     endif()
     FetchContent_MakeAvailable(ggml)
     if (TARGET ggml-vulkan)
+        # llama.cpp packages its independently pinned Vulkan backend under the
+        # upstream name. Give Whisper's copy a unique SONAME so both runtimes
+        # can coexist in one APK without Android's native-library merge clash.
+        set_target_properties(ggml-vulkan PROPERTIES OUTPUT_NAME whisper-ggml-vulkan)
         target_include_directories(ggml-vulkan PRIVATE
             "${CMAKE_SOURCE_DIR}/../../../../../llm/src/main/cpp/host-vulkan-headers")
     endif()
