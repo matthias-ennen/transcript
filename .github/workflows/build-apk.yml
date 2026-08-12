@@ -98,11 +98,11 @@ jobs:
           grep -F \
             "com.whispercpp.whisper.NativeWhisperProgressListener -> com.whispercpp.whisper.NativeWhisperProgressListener:" \
             "$mapping"
-          awk '
-            /^com\.whispercpp\.whisper\.NativeWhisperProgressListener -> com\.whispercpp\.whisper\.NativeWhisperProgressListener:$/ { inside=1; next }
-            inside && /^[^ ]/ { exit }
-            inside { print }
-          ' "$mapping" | grep -E 'void onProgress\(int\).* -> onProgress$'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" dex code \
+            --class com.whispercpp.whisper.NativeWhisperProgressListener \
+            --method 'onProgress(I)V' \
+            app/build/outputs/apk/release/app-release.apk \
+            | grep -F 'onProgress'
 
       - name: Verify KleidiAI runtime payload
         run: |
