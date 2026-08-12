@@ -30,7 +30,10 @@ Internetverbindung.
    der ursprünglichen Abtastrate wird nicht gesammelt. Ein fester
    Fünf-Sekunden-Sicherheitsspielraum fängt Codec-Vorlauf, Padding und
    Zeitstempelrundungen auf; vor Whisper wird der Abschnitt wieder exakt auf
-   seine Sollgröße begrenzt.
+   seine Sollgröße begrenzt. Ein monotoner Stillstandswächter begrenzt sowohl
+   Leerlaufzeit als auch Leerlaufzyklen. Bei Stillstand werden Codec und
+   Extractor vollständig freigegeben und genau einmal neu erzeugt; danach kann
+   höchstens noch die bereits begrenzte 2,5-Minuten-Sicherheitsaufteilung greifen.
 5. `WhisperContext` verarbeitet den aktuellen Abschnitt. Bei automatischer
    Auswahl wird eine anhand eines brauchbaren Textabschnitts erkannte Sprache
    für die folgenden Abschnitte festgehalten.
@@ -107,6 +110,9 @@ ein vollständig installiertes Modell wird zusammen mit den persistierten
 VAD-Parametern bis in `whisper_full_params` durchgereicht. **Aus** deaktiviert
 VAD, **Ein** aktiviert es und **Automatisch** führt vor dem Laden von Whisper
 eine konstantspeichernde Abschnittsanalyse mit dem echten Silero-Kontext durch.
+Die vollständige Audiospur bleibt dabei bewusst die Entscheidungsgrundlage;
+eine Stichprobenanalyse wird wegen möglicher Fehlgewichtung nicht verwendet.
+Auch diese Voranalyse läuft durch denselben begrenzten Decoder-Watchdog.
 Sie aggregiert erkannte Sprachbereiche, Sprach-/Pausenanteil, die längste Pause
 und Zerstückelung über Abschnittsgrenzen. VAD wird nur bei eindeutigen längeren
 Ruhephasen und stabilen Sprachbereichen verwendet; Grenzfälle bleiben
