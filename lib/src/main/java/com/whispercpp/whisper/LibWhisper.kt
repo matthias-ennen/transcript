@@ -1,6 +1,7 @@
 package com.whispercpp.whisper
 
 import android.content.res.AssetManager
+import androidx.annotation.Keep
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.*
@@ -29,6 +30,17 @@ data class WhisperRuntimeBackend(
 
 fun interface WhisperProgressListener {
     fun onProgress(percent: Int)
+}
+
+/** The native layer resolves this method by name, so it must not be obfuscated. */
+@Keep
+private class NativeWhisperProgressListener(
+    private val callback: (Int) -> Unit
+) : WhisperProgressListener {
+    @Keep
+    override fun onProgress(percent: Int) {
+        callback(percent.coerceIn(0, 100))
+    }
 }
 
 class WhisperContext private constructor(
@@ -85,7 +97,7 @@ class WhisperContext private constructor(
                 configuration.vadSpeechPadMs,
                 configuration.vadSamplesOverlapSeconds,
                 abortToken,
-                WhisperProgressListener { percent -> onProgress(percent.coerceIn(0, 100)) }
+                NativeWhisperProgressListener { percent -> onProgress(percent) }
             )
             val result = run(configuration.vadModelPath.orEmpty())
             if (WhisperLib.isAbortRequested(abortToken)) {
