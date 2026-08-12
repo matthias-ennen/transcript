@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="560" viewBox="0 0 270 140" role="img" aria-labelledby="title desc">
+  <title id="title">Statussymbole in vorgesehener App-Größe neben Nummernkapseln</title>
+  <desc id="desc">Drei Statussymbole mit jeweils 28 dp Höhe und einer gleich hohen Nummernkapsel.</desc>
+  <rect width="270" height="140" rx="8" fill="#15171C"/>
+  <text x="135" y="18" fill="#F5F7FF" font-family="sans-serif" font-size="6" font-weight="700" text-anchor="middle">Vorgesehene GUI-Proportion: Symbol 28 dp · Kapsel 28 dp</text>
+
+  <g transform="translate(17 39)">
+    <g transform="scale(.4375)">
+      <path d="M14 4h28l14 14v39a3 3 0 0 1-3 3H14a6 6 0 0 1-6-6V10a6 6 0 0 1 6-6Z" fill="#5B7CFA"/>
+      <path d="M15 8h24v10a7 7 0 0 0 7 7h6v28a3 3 0 0 1-3 3H15a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z" fill="#FFFFFF"/>
+      <path d="m43 9 12 12h-9a3 3 0 0 1-3-3V9Z" fill="#C7D8FF"/>
+      <path d="M19 32h26M19 41h26M19 50h20" fill="none" stroke="#5B7CFA" stroke-width="3.5" stroke-linecap="round" opacity=".42"/>
+    </g>
+    <rect x="35" width="34" height="28" rx="14" fill="#5B7CFA"/>
+    <text x="52" y="18.8" fill="#FFFFFF" font-family="sans-serif" font-size="10" font-weight="700" text-anchor="middle">1</text>
+    <text x="34.5" y="43" fill="#F5F7FF" font-family="sans-serif" font-size="5.5" text-anchor="middle">Whisper-Original</text>
+  </g>
+
+  <g transform="translate(101 39)" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="scale(.4375)">
+      <path d="M14 4h28l14 14v39a3 3 0 0 1-3 3H14a6 6 0 0 1-6-6V10a6 6 0 0 1 6-6Z" fill="#5B7CFA"/>
+      <path d="M15 8h24v10a7 7 0 0 0 7 7h6v28a3 3 0 0 1-3 3H15a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z" fill="#FFFFFF"/>
+      <path d="m43 9 12 12h-9a3 3 0 0 1-3-3V9Z" fill="#C7D8FF"/>
+      <path d="M19 32h21M19 41h15M19 50h11" fill="none" stroke="#5B7CFA" stroke-width="3.5" opacity=".34"/>
+      <path d="m24 49 20-20 6 6-20 20-6-6Z" fill="#5B7CFA" stroke="#FFFFFF" stroke-width="1.5"/>
+      <path d="m44 29 3-3 6 6-3 3-6-6Z" fill="#C7D8FF" stroke="#FFFFFF" stroke-width="1.2"/>
+      <path d="m47 26 3-3 6 6-3 3-6-6Z" fill="#E85B5B" stroke="#FFFFFF" stroke-width="1.2"/>
+      <path d="m24 49 6 6-8 2.5 2-8.5Z" fill="#4569D9" stroke="#FFFFFF" stroke-width="1.2"/>
+      <path d="m22 57.5 2-3 3 3-5 0Z" fill="#2B2F3A"/>
+    </g>
+    <rect x="35" width="34" height="28" rx="14" fill="#5B7CFA" stroke="none"/>
+    <text x="52" y="18.8" fill="#FFFFFF" font-family="sans-serif" font-size="10" font-weight="700" text-anchor="middle" stroke="none">2</text>
+    <text x="34.5" y="43" fill="#F5F7FF" font-family="sans-serif" font-size="5.5" text-anchor="middle" stroke="none">Manuell bearbeitet</text>
+  </g>
+
+  <g transform="translate(185 39)" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="scale(.4375)">
+      <path d="M14 4h28l14 14v39a3 3 0 0 1-3 3H14a6 6 0 0 1-6-6V10a6 6 0 0 1 6-6Z" fill="#5B7CFA"/>
+      <path d="M15 8h24v10a7 7 0 0 0 7 7h6v28a3 3 0 0 1-3 3H15a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z" fill="#FFFFFF"/>
+      <path d="m43 9 12 12h-9a3 3 0 0 1-3-3V9Z" fill="#C7D8FF"/>
+      <path d="M19 32h25M19 41h7M19 50h7" fill="none" stroke="#5B7CFA" stroke-width="3.5" opacity=".34"/>
+      <path d="M28 38h4.2v6.1l6-6.1h5.5l-8.1 7.4 8.6 8.6h-5.6l-6.4-6.8V54H28V38Zm18 0h4.2v16H46V38Z" fill="#5B7CFA" stroke="#FFFFFF" stroke-width="1.4" paint-order="stroke fill"/>
+      <path d="m18 8 2.1 4.9L25 15l-4.9 2.1L18 22l-2.1-4.9L11 15l4.9-2.1L18 8Z" fill="#5B7CFA" stroke="#FFFFFF" stroke-width="1.1"/>
+      <path d="m29 5 1.45 3.55L34 10l-3.55 1.45L29 15l-1.45-3.55L24 10l3.55-1.45L29 5Z" fill="#5B7CFA" stroke="#FFFFFF" stroke-width=".9"/>
+      <path d="m29 19 1.15 2.85L33 23l-2.85 1.15L29 27l-1.15-2.85L25 23l2.85-1.15L29 19Z" fill="#5B7CFA" stroke="#FFFFFF" stroke-width=".8"/>
+    </g>
+    <rect x="35" width="34" height="28" rx="14" fill="#5B7CFA" stroke="none"/>
+    <text x="52" y="18.8" fill="#FFFFFF" font-family="sans-serif" font-size="10" font-weight="700" text-anchor="middle" stroke="none">3</text>
+    <text x="34.5" y="43" fill="#F5F7FF" font-family="sans-serif" font-size="5.5" text-anchor="middle" stroke="none">Mit KI bearbeitet</text>
+  </g>
+
+  <rect x="17" y="105" width="236" height="20" rx="5" fill="#22252D"/>
+  <text x="135" y="113" fill="#C8CDD8" font-family="sans-serif" font-size="4.4" text-anchor="middle">Die Vorschau ist 4× vergrößert gerendert.</text>
+  <text x="135" y="120" fill="#C8CDD8" font-family="sans-serif" font-size="4.4" text-anchor="middle">Entscheidend ist das Größenverhältnis 1:1 zwischen Symbol und Kapselhöhe.</text>
+</svg>
