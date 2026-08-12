@@ -1,185 +1,235 @@
-# Professionelles Fundament – Bestandsanalyse und Roadmap
+# Professionelles Fundament und Roadmap bis Version 1.0
 
 ## Zweck und Status
 
-Dieses Dokument ist das verbindliche Projektgedächtnis für die am 12.08.2026
-erstellte Fundamentanalyse. Es trennt den langfristigen Professionalisierungsbedarf
-vom nächsten, bewusst begrenzten Arbeitspaket bis zu einer erneut testbaren APK.
+Dieses Dokument ist das verbindliche Projektgedächtnis für die weitere Entwicklung
+von Transcript. Die operative Gesamtübersicht liegt in
+[Issue #26](https://github.com/matthias-ennen/transcript/issues/26).
+Jedes Arbeitspaket besitzt ein eigenes GitHub-Issue und wird vor der Umsetzung
+gemeinsam geprüft. Ein Issue ist eine Planungsgrundlage, keine automatische
+Freigabe zur Programmierung.
 
-Geprüfter Ausgangspunkt:
+Geprüfter Ausgangspunkt am 12.08.2026:
 
-- Remote-Branch `main`, Merge-Commit `baee3bf` aus PR #23
-- vollständig grüner Reparatur-Build #205 mit signierter Release-APK und AAB
-- lokale Verarbeitung; Android-Cloud-Backup und Gerätetransfer vollständig deaktiviert
-- atomare Sicherung und Wiederherstellung des aktuellen Transkripts
-- konservative Silero-VAD-Automatik mit Rückfall ohne VAD
-- R8- und JNI-Absicherung für `onProgress(int)`
-- rund 90 JVM-Tests, aber noch keine ausgeführten Android-Geräte-/Instrumentierungstests
+- `main`, Merge-Commit `d41542a` aus PR #24
+- signierte Release-APK `0.5.217-signed`, VersionCode `1217`
+- Hauptbranch-Build #217 vollständig grün
+- Decoder-Watchdog, genau ein kontrollierter Decoder-Neustart und begrenzte
+  Rückfallpfade
+- vollständige Silero-VAD-Voranalyse bleibt bewusst erhalten
+- Debug- und Release-Unit-Tests, `lintRelease`, R8-/JNI-Callback-, Native-
+  Payload-, Signatur- und Datenschutzprüfungen
+- 96 JVM-Tests; noch keine Android-Instrumentierungstests
+- Android-Cloud-Backup und Geräteübertragung vollständig deaktiviert
 
-Die Release-APK aus Build #205 ist der bekannte Vergleichsstand. Ein neuer Build
-gilt erst dann als Fortschritt, wenn seine Prüfungen vollständig grün sind und das
-Artefakt auf dem Xiaomi 13T Pro installiert und praktisch getestet werden kann.
+## Produktgrenze
 
-## Langfristiger Professionalisierungsbedarf
+Transcript bleibt bewusst ein Werkzeug für **einen aktuellen
+Transkriptionsvorgang**:
 
-Die App besitzt ein gutes technisches Grundgerüst, ist aber noch nicht vollständig
-release- oder Store-reif. Die weitere Fundamentarbeit umfasst:
+1. Audio- oder Videodatei auswählen oder aufnehmen.
+2. Lokal mit Whisper transkribieren.
+3. Ergebnis prüfen und optional manuell oder per KI nachbearbeiten.
+4. Gewünschte Fassung exportieren oder teilen.
+5. Ein neuer Vorgang darf den bisherigen aktuellen Vorgang ersetzen.
 
-1. Decoder und Audio-Vorbereitung gegen Stillstand, fehlerhafte Codecs und
-   endlose `MediaCodec`-Schleifen absichern.
-2. Die VAD-Automatik mit vollständiger Voranalyse beibehalten und alle
-   Rückfallzustände eindeutig melden. Eine mögliche Laufzeitoptimierung wird
-   erst später anhand echter Messwerte bewertet.
-3. Release-, R8-, JNI- und echte Gerätetests mit einem festen Audio-Testkorpus
-   aufbauen.
-4. GitHub Actions in nachvollziehbare Qualitätsstufen teilen, Lint ergänzen,
-   Laufzeiten begrenzen und Release-Artefakte dauerhaft versionieren.
-5. `MainScreenViewModel`, große Compose-Screens, Services und native JNI-Dateien
-   schrittweise in fachliche Komponenten zerlegen.
-6. Aus dem einzelnen aktuellen Transkript später eine verwaltete lokale
-   Transkriptbibliothek mit IDs, Metadaten, Versionen, Migration und Löschregeln
-   entwickeln.
-7. KI-Ausgaben vor der Übernahme anhand von Länge, Ähnlichkeit, Zahlen,
-   Eigennamen und möglichen Auslassungen oder Erfindungen prüfen; Vergleich,
-   Änderungsprotokoll und Rückgängig-Funktion ergänzen.
-8. Aktives KI-Modell und lediglich bearbeitetes Leistungsprofil in der Oberfläche
-   eindeutig voneinander trennen.
-9. ARM64-Test-APK, getrennte Debug-App-ID, vollständige Ressourcenübersetzung,
-   Barrierefreiheit und Displaytests ergänzen.
-10. Eigene Lizenz, `SECURITY.md`, Changelog, Tags, GitHub Releases, SBOM und
-    Abhängigkeitsprüfung einführen.
+Eine Bibliothek, Historie oder dauerhafte Verwaltung früherer Transkripte ist
+nicht vorgesehen.
 
-Diese Punkte bleiben erhalten, gehören aber ausdrücklich nicht alle in den
-nächsten APK-Bau.
+Für den aktuellen Vorgang werden zwei getrennte Fassungen erhalten:
 
-## Nächstes Arbeitspaket
+- das unveränderliche Whisper-Original
+- die nachbearbeitete Fassung aus übernommenen manuellen und/oder KI-Änderungen
 
-### Name
+## Verbindliche Begriffe zur KI-Nachbearbeitung
 
-**Decoder-, VAD- und Release-Qualitätsgate**
+**Manuelle KI-Nachbearbeitung** bedeutet: Der Benutzer startet die
+KI-Nachbearbeitung über den Button eines einzelnen Abschnitts. Nur dieser
+ausgewählte Abschnitt wird gezielt bearbeitet.
 
-### Ziel
+**Automatische KI-Nachbearbeitung** bedeutet: Nach Fertigstellung der gesamten
+Whisper-Transkription wird automatisch das vollständige Transkript
+abschnittsweise nachbearbeitet.
 
-Die nächste APK soll den bekannten Release-Callback-Fix enthalten und bei der
-Audio-Vorbereitung weder unendlich hängen noch einen unklaren Zustand anzeigen.
-VAD darf den Lauf nicht blockieren. Die vollständige VAD-Voranalyse bleibt aus
-Qualitätsgründen bewusst unverändert. Die Build-Pipeline muss den tatsächlich auszuliefernden
-Release-Stand nachvollziehbar prüfen.
+Beide Abläufe werden in Issue #30 zuverlässig abgesichert. Die sichtbare
+Umschaltung und Herkunftskennzeichnung der beiden Transkriptfassungen folgt
+nachgelagert in Issue #31.
 
-### Verbindlicher Umfang
+## Bereits abgeschlossene Fundamentarbeit
 
-#### A – Ausgangsstand sichern
+Die frühere Arbeitseinheit „Decoder-, VAD- und Release-Qualitätsgate“ wurde mit
+PR #24 und Build #217 abgeschlossen:
 
-- Aktuellen Remote-Stand von `main` einschließlich PR #23 synchronisieren.
-- Den bekannten grünen Build #205 und seine Release-APK als Vergleichspunkt
-  festhalten.
-- Keine unabhängigen lokalen oder fremden Änderungen überschreiben.
+- Decoderstillstand wird zeitlich und über Leerlaufzyklen begrenzt erkannt.
+- Codec und Extractor werden im Fehlerfall sicher freigegeben.
+- Ein festgefahrener Abschnitt erhält genau einen vollständigen Decoder-Neustart.
+- Weitere 2,5-Minuten-Rückfälle bleiben ebenfalls begrenzt.
+- Derselbe Watchdog schützt die vollständige VAD-Voranalyse.
+- Grenzfälle und VAD-Fehler führen kontrolliert zu Whisper ohne VAD.
+- Die minifizierte Release-APK wird direkt auf die JNI-signifikante
+  `onProgress(I)V`-Methode geprüft.
+- Signatur, `debuggable=false`, `allowBackup=false` und native Backends
+  bleiben verbindliche Release-Prüfungen.
 
-#### B – Decoder-Watchdog und kontrollierte Wiederholung
+Diese Punkte sind kein offenes Arbeitspaket mehr.
 
-- Fortschritt des `MediaCodec`-Decoders mit monotoner Zeit erfassen.
-- Erfolgreiches Zuführen eines Eingabepuffers, Ausgabeformatwechsel und
-  verarbeitete Ausgabepuffer gelten als echter Fortschritt.
-- Aufeinanderfolgende Leerlaufzyklen und die Zeit seit dem letzten Fortschritt
-  begrenzen.
-- Bei Stillstand eine eigene, diagnostisch aussagekräftige Exception werfen,
-  statt die Schleife unbegrenzt fortzusetzen.
-- Codec und Extractor im Fehlerpfad sicher stoppen und freigeben.
-- Den betroffenen Audioabschnitt genau einmal mit einem vollständig neuen
-  Decoder versuchen. Ein zweiter Stillstand wird nicht endlos wiederholt.
-- Erst danach greift, soweit sinnvoll, die vorhandene kleinere
-  2,5-Minuten-Sicherheitsaufteilung. Jede Wiederholung besitzt ein festes Limit.
-- Diagnose enthält Dateiformat, Abschnittsgrenzen, letzten Zeitstempel,
-  Leerlaufdauer sowie Ein-/Ausgabeaktivität, jedoch keine Audioinhalte.
+## Roadmap und Reihenfolge
 
-#### C – Vollständige VAD-Voranalyse absichern
+### 1. Statusdarstellung und Benachrichtigung
 
-- Der Decoder-Watchdog gilt auch während der VAD-Automatik.
-- Im Modus **Automatisch** wird weiterhin die komplette Audiospur abschnittsweise
-  analysiert. Stichproben könnten stille oder sprachreiche Bereiche falsch
-  gewichten und werden in diesem Paket ausdrücklich nicht eingeführt.
-- Die Entscheidung bleibt konservativ: Ein unvollständiges, widersprüchliches
-  oder fehlgeschlagenes Ergebnis führt zu Whisper **ohne VAD**.
-- Die technischen Zustände werden einheitlich geführt und gemeldet:
-  `verwendet`, `übersprungen` oder `fehlgeschlagen – ohne VAD fortgesetzt`.
-- Der bestehende Laufzeit-Rückfall eines Whisper-Abschnitts von VAD auf ohne VAD
-  bleibt erhalten und wird nicht verdoppelt.
+[Issue #25](https://github.com/matthias-ennen/transcript/issues/25)
 
-#### D – Status und Diagnose
+Korrektes Transkript-Symbol, Laufzeit in der KanaBot-Statuszeile, ruhiger Wechsel
+zwischen Status und Laufzeit. Nur der Text pulsiert; KanaBots bestehende
+Sprite-Sheet-Animation bleibt unverändert erhalten.
 
-- Die sichtbare Verarbeitung unterscheidet mindestens:
-  Audiospur prüfen, Decoder starten, auf 16 kHz Mono umwandeln,
-  VAD analysieren/überspringen, Whisper starten und Whisper-Fortschritt.
-- Ein Decoder-Neustart und ein VAD-Rückfall werden ausdrücklich angezeigt.
-- Fehlermeldungen nennen die konkrete Stufe und ob ein Zwischenstand fortgesetzt
-  werden kann.
-- Abbruch durch den Nutzer bleibt in jeder Stufe wirksam.
+Ergebnis: signierte Test-APK und Xiaomi-Prüfung.
 
-#### E – Automatisierte Prüfungen
+### 2. Testkorpus und Android-Geräte-Qualitätsgate
 
-- Reine Logik für Watchdog und Wiederholungslimit wird aus
-  Android-Code herauslösbar und per JVM-Test geprüft.
-- Tests decken mindestens normalen Fortschritt, Decoderstillstand, genau einen
-  Neustart, endgültigen Fehler, Abbruch und konservativen VAD-Rückfall ab.
-- Debug- und Release-Unit-Tests sowie `lintRelease` werden ausgeführt.
-- Die minifizierte Release-Variante wird gebaut.
-- Die Pipeline prüft zusätzlich, dass die JNI-Progressklasse und
-  `onProgress(int)` nach R8 weiterhin unter dem erwarteten Namen erreichbar
-  sind.
-- Buildschritte erhalten klare Bezeichnungen und ein festes Zeitlimit; ein
-  hängender Build darf nicht stundenlang ohne Ergebnis offenbleiben.
-- Signatur, `debuggable=false`, `allowBackup=false`, native ARM64-Payload und
-  APK/AAB-Upload bleiben Pflichtprüfungen.
+[Issue #27](https://github.com/matthias-ennen/transcript/issues/27)
 
-#### F – APK-Bereitstellung und Gerätetest
+Reproduzierbarer Audio-/Video-Testkorpus, Release-Smoke- und erste
+Instrumentierungstests sowie ein Xiaomi-Protokoll für Laufzeit, Speicher, Wärme,
+Auslassungen, Zeitstempel, VAD, Abbruch und Wiederaufnahme.
 
-- Änderungen in einem eigenen Branch committen und über einen Pull Request in
-  `main` integrieren.
-- Erst ein vollständig grüner Hauptbranch-Build erzeugt die neue Testfreigabe.
-- Bereitgestellt werden die signierte Release-APK, Versionsnummer, Buildnummer
-  und SHA-256-Prüfsumme.
-- Anschließender Test auf dem Xiaomi 13T Pro:
-  1. kurze eigene Aufnahme, die zuvor am Progress-Callback scheiterte,
-  2. problematische Datei, die bei der 16-kHz-Vorbereitung hing,
-  3. je ein Lauf mit VAD **Aus** und **Automatisch**,
-  4. Abbruch während Decoder- und Whisper-Phase,
-  5. Wiederaufnahme eines echten Zwischenstands,
-  6. erfolgreicher TXT-, SRT- und JSON-Export.
+Ergebnis: belastbarer Referenzstand für alle folgenden Änderungen.
 
-### Nicht Bestandteil dieses APK-Pakets
+### 3. Architektur-Refactoring ohne Funktionsänderung
 
-- großes ViewModel-/UI-Refactoring
-- Transkriptbibliothek für mehrere Projekte
-- neue Whisper- oder Qwen-Modelle
-- Erweiterung der KI-Nachbearbeitung
-- vollständige deutsche/englische Lokalisierung
-- Store-Veröffentlichung, Lizenzentscheidung oder GitHub-Release-Automatik
-- allgemeine optische Überarbeitung
+[Issue #28](https://github.com/matthias-ennen/transcript/issues/28)
 
-Diese Abgrenzung verhindert, dass die Stabilitätsprüfung durch neue Funktionen
-verwässert wird.
+`MainScreenViewModel`, große Compose-Screens und Services werden schrittweise
+nach fachlichen Verantwortlichkeiten aufgeteilt. Oberfläche, Einstellungen,
+Transkriptions- und Exportverhalten bleiben unverändert.
 
-## Abnahmekriterien bis zur nächsten APK
+Ergebnis: wartbarer Unterbau in kleinen, einzeln prüfbaren Pull Requests.
 
-Das Arbeitspaket ist erst abgeschlossen, wenn:
+### 4. Hintergrunddienste und Download-Infrastruktur
 
-- Decoderstillstand begrenzt erkannt und verständlich behandelt wird,
-- kein Wiederholungs- oder VAD-Pfad unbegrenzt laufen kann,
-- die vollständige automatische VAD-Voranalyse unverändert und durch denselben
-  Decoder-Watchdog abgesichert ist,
-- die Release-Callback-Bridge weiterhin R8-sicher ist,
-- alle neuen und vorhandenen Tests, `lintRelease`, Release-Build, Signatur- und
-  Datenschutzprüfungen grün sind,
-- der entsprechende Stand in `main` liegt,
-- eine signierte Release-APK mit Prüfsumme herunterladbar ist.
+[Issue #29](https://github.com/matthias-ennen/transcript/issues/29)
 
-Der Xiaomi-Test ist anschließend der verbindliche Praxistest. Erst seine
-Ergebnisse entscheiden, ob das Qualitätsgate bestanden ist oder eine gezielte
-Korrekturrunde vor dem nächsten Fundamentpaket nötig wird.
+Eindeutige Notification-IDs, gemeinsame Symbol- und Benachrichtigungsverwaltung,
+einheitliche Downloadbasis sowie robuste Fortsetzungs-, Fehler- und
+Bereinigungspfade für Whisper-, VAD- und Qwen-Modelle.
 
-## Danach vorgesehene Reihenfolge
+Ergebnis: konfliktfreie und nachvollziehbare Hintergrundvorgänge.
 
-1. Architektur-Refactoring in kleinen, vorher dokumentierten Patches.
-2. Daten- und KI-Sicherheit einschließlich Transkriptbibliothek und Undo.
-3. Produktions-/Store-Vorbereitung mit ARM64-Artefakt, Versionierung,
-   Lokalisierung, Barrierefreiheit und Repository-Standards.
+### 5. Manuelle und automatische KI-Nachbearbeitung
+
+[Issue #30](https://github.com/matthias-ennen/transcript/issues/30)
+
+Genau ein Zielsegment pro Auftrag; zwei vorherige und zwei nachfolgende Segmente
+nur als Lesekontext. Längen-, Ähnlichkeits-, Zahlen-, Namen-, Auslassungs- und
+Erfindungsprüfungen schützen vor unsicheren Übernahmen. Manuelle Einzelabschnitt-
+und automatische Gesamttranskript-Nachbearbeitung werden eindeutig getrennt.
+
+Ergebnis: zuverlässige, abbrechbare und nachvollziehbare lokale KI-Korrektur.
+
+### 6. Whisper-Original und nachbearbeitete Fassung vergleichen
+
+[Issue #31](https://github.com/matthias-ennen/transcript/issues/31)
+
+Umschaltung zwischen Whisper-Original und nachbearbeiteter Fassung,
+Herkunftskennzeichnung bearbeiteter Segmente und bewusste Auswahl der Fassung
+für Export und Teilen. Die genaue Bedienung und Symbolgestaltung werden vor der
+Implementierung gemeinsam festgelegt. Vorgesehene Gestaltungsrichtung:
+Textdatei für Whisper, Textdatei mit Zauberstab und Sternen für KI.
+
+Ergebnis: transparente Kontrolle ohne Transkriptbibliothek.
+
+### 7. Android-Import über „Teilen mit Transcript“
+
+[Issue #32](https://github.com/matthias-ennen/transcript/issues/32)
+
+Unterstützte Audio- und Videodateien können aus Dateimanager, Galerie oder einer
+anderen App direkt an Transcript übergeben werden. MIME-Filter,
+URI-Berechtigungen und der Schutz des aktuellen Vorgangs werden abgesichert.
+
+Ergebnis: vollständiger Android-Dateiarbeitsablauf für eine einzelne Datei.
+
+### 8. Deutsche und englische Oberfläche, Barrierefreiheit und Displaytests
+
+[Issue #33](https://github.com/matthias-ennen/transcript/issues/33)
+
+Alle sichtbaren Texte werden in Ressourcen überführt und vollständig auf Deutsch
+und Englisch angeboten. TalkBack, große Schrift, Touch-Ziele, Kontrast und
+verschiedene Displaygrößen werden geprüft. Die GUI-Sprache bleibt unabhängig von
+der Whisper-Sprache.
+
+Ergebnis: vollständige, verständliche Produktoberfläche.
+
+### 9. Android-Plattform und Release-Pipeline modernisieren
+
+[Issue #34](https://github.com/matthias-ennen/transcript/issues/34)
+
+Umstellung auf targetSdk/API 36, kontrollierte Werkzeugaktualisierung, getrennte
+Debug-App-ID, ARM64-Test-APK, Release-AAB, Instrumentierungstests in CI,
+versionierte Native-Patches und archivierte Mapping-/Symbols-Dateien.
+
+Ergebnis: aktueller und reproduzierbarer Release-Kandidat.
+
+### 10. Repository-, Lizenz- und Store-Abschluss
+
+[Issue #35](https://github.com/matthias-ennen/transcript/issues/35)
+
+Lizenz, Sicherheitsdokument, Changelog, SBOM, GitHub Release,
+Datenschutzerklärung, Play-Store-Angaben, Screenshots sowie interner und
+geschlossener Test. Eine Donate-/Unterstützungsfunktion wird gesondert auf
+Store-Konformität geprüft und nicht ungeprüft aktiviert.
+
+Ergebnis: menschlich freigegebener Version-1.0-Release-Kandidat.
+
+## Abhängigkeiten
+
+```mermaid
+flowchart TD
+    I25["#25 Status"] --> I27["#27 Qualitätsgate"]
+    I27 --> I28["#28 Architektur"]
+    I28 --> I29["#29 Hintergrunddienste"]
+    I28 --> I30["#30 KI-Zuverlässigkeit"]
+    I30 --> I31["#31 Original/KI-Ansicht"]
+    I28 --> I32["#32 Android-Import"]
+    I31 --> I33["#33 Lokalisierung"]
+    I32 --> I33
+    I29 --> I34["#34 Plattform/CI"]
+    I33 --> I34
+    I34 --> I35["#35 Version 1.0"]
+```
+
+Die Reihenfolge ist eine belastbare Planung, kein starres Verbot kleiner
+Korrekturen. Eine Abweichung wird im Tracking-Issue #26 begründet und darf keine
+ungetestete Vermischung unabhängiger Arbeitspakete verursachen.
+
+## Einheitliche Issue-Struktur
+
+Jedes Arbeitspaket dokumentiert:
+
+1. Ausgangslage
+2. Ziel
+3. verbindlichen Umfang
+4. ausdrücklich nicht enthaltene Punkte
+5. Abhängigkeiten
+6. geplante Prüfungen
+7. Abnahmekriterien
+8. erforderlichen Gerätetest
+9. offene Produktentscheidungen
+
+Vor Beginn werden Ergänzungen und Streichungen direkt im Issue festgehalten.
+Branch und Pull Request verweisen auf das Issue. Geschlossen wird ein Issue erst
+nach erfüllten Abnahmekriterien; ein benötigter Xiaomi-Praxistest wird dabei
+ausdrücklich ausgewiesen.
+
+## Definition von Version 1.0
+
+Version 1.0 ist erreicht, wenn:
+
+- alle für 1.0 freigegebenen Issues abgeschlossen sind,
+- Whisper-Original und Nachbearbeitung sicher getrennt bleiben,
+- der Testkorpus ohne blockierende Fehler bestanden ist,
+- Release-Tests, Lint, R8/JNI, Signatur und Datenschutz grün sind,
+- die App targetSdk 36 erfüllt,
+- der signierte Release-Kandidat auf dem Xiaomi 13T Pro und mindestens einer
+  weiteren Android-Konfiguration praktisch geprüft ist,
+- Lizenz-, Sicherheits-, Datenschutz- und Release-Dokumentation vollständig ist,
+- die Veröffentlichung ausdrücklich menschlich freigegeben wurde.
