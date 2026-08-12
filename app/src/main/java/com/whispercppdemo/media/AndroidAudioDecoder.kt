@@ -54,7 +54,7 @@ fun inspectAudioTrack(context: Context, uri: Uri): AudioTrackInfo {
  * consumed. Source-rate PCM is never accumulated, so the peak Java memory is
  * bounded by the current 16-kHz Whisper section.
  */
-fun decodeAudioChunk(
+internal fun decodeAudioChunk(
     context: Context,
     uri: Uri,
     startMs: Long,
