@@ -78,13 +78,31 @@ jobs:
             -o "$RUNNER_TEMP/utf8-to-utf16-test"
           "$RUNNER_TEMP/utf8-to-utf16-test"
 
-      - name: Run unit tests and build signed debug and release artifacts
+      - name: Run debug and release quality checks
+        timeout-minutes: 25
+        run: ./gradlew --no-daemon testDebugUnitTest testReleaseUnitTest lintRelease
+
+      - name: Build signed debug and release artifacts
+        timeout-minutes: 60
         env:
           ANDROID_SIGNING_STORE_FILE: ${{ runner.temp }}/transcript-signing.jks
           ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease bundleRelease
+        run: ./gradlew --no-daemon assembleDebug assembleRelease bundleRelease
+
+      - name: Verify release progress callback mapping
+        run: |
+          mapping="app/build/outputs/mapping/release/mapping.txt"
+          test -f "$mapping"
+          grep -F \
+            "com.whispercpp.whisper.NativeWhisperProgressListener -> com.whispercpp.whisper.NativeWhisperProgressListener:" \
+            "$mapping"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" dex code \
+            --class com.whispercpp.whisper.NativeWhisperProgressListener \
+            --method 'onProgress(I)V' \
+            app/build/outputs/apk/release/app-release.apk \
+            | grep -F 'onProgress'
 
       - name: Verify KleidiAI runtime payload
         run: |

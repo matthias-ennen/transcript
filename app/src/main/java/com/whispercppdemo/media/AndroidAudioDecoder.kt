@@ -6,6 +6,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.SystemClock
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CancellationException
@@ -53,13 +54,25 @@ fun inspectAudioTrack(context: Context, uri: Uri): AudioTrackInfo {
  * consumed. Source-rate PCM is never accumulated, so the peak Java memory is
  * bounded by the current 16-kHz Whisper section.
  */
-fun decodeAudioChunk(
+internal fun decodeAudioChunk(
     context: Context,
     uri: Uri,
     startMs: Long,
     endMs: Long,
     shouldCancel: () -> Boolean = { false },
+    onDecoderRestart: (AudioDecoderStallException) -> Unit = {},
     onProgress: (Float) -> Unit = {}
+): DecodedAudioChunk = withSingleDecoderRestart(onDecoderRestart) {
+    decodeAudioChunkAttempt(context, uri, startMs, endMs, shouldCancel, onProgress)
+}
+
+private fun decodeAudioChunkAttempt(
+    context: Context,
+    uri: Uri,
+    startMs: Long,
+    endMs: Long,
+    shouldCancel: () -> Boolean,
+    onProgress: (Float) -> Unit
 ): DecodedAudioChunk {
     require(startMs >= 0L && endMs > startMs) { "Ungültiger Audioabschnitt." }
 
@@ -97,9 +110,11 @@ fun decodeAudioChunk(
         var inputEnded = false
         var outputEnded = false
         var reachedRequestedEnd = false
+        val watchdog = DecoderProgressWatchdog(SystemClock.elapsedRealtime())
 
         while (!outputEnded && !reachedRequestedEnd) {
             if (shouldCancel()) throw CancellationException("Audiodekodierung abgebrochen.")
+            var madeProgress = false
 
             if (!inputEnded) {
                 val inputIndex = decoder.dequeueInputBuffer(DECODER_TIMEOUT_US)
@@ -121,6 +136,8 @@ fun decodeAudioChunk(
                         decoder.queueInputBuffer(inputIndex, 0, size, sampleTime, 0)
                         extractor.advance()
                     }
+                    madeProgress = true
+                    watchdog.recordProgress(SystemClock.elapsedRealtime(), inputQueued = true)
                 }
             }
 
@@ -137,6 +154,8 @@ fun decodeAudioChunk(
                         AudioFormat.ENCODING_PCM_16BIT
                     )
                     resampler = StreamingMonoResampler(sampleRate, TARGET_SAMPLE_RATE, samples)
+                    madeProgress = true
+                    watchdog.recordProgress(SystemClock.elapsedRealtime())
                 }
 
                 MediaCodec.INFO_TRY_AGAIN_LATER,
@@ -168,6 +187,17 @@ fun decodeAudioChunk(
                     }
                     outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     decoder.releaseOutputBuffer(outputIndex, false)
+                    madeProgress = true
+                    watchdog.recordProgress(
+                        nowMs = SystemClock.elapsedRealtime(),
+                        outputReleased = true,
+                        presentationTimeUs = bufferInfo.presentationTimeUs
+                    )
+                }
+            }
+            if (!madeProgress) {
+                watchdog.recordIdle(SystemClock.elapsedRealtime())?.let { snapshot ->
+                    throw AudioDecoderStallException(mime, startMs, endMs, snapshot)
                 }
             }
         }

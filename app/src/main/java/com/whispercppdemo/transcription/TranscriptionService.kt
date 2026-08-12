@@ -18,6 +18,7 @@ import com.whispercpp.whisper.WhisperVadContext
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
 import de.matthiasennen.transcript.media.AudioDecoderOutputOverflowException
+import de.matthiasennen.transcript.media.AudioDecoderStallException
 import de.matthiasennen.transcript.media.decodeAudioChunk
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.ui.main.WhisperModel
@@ -111,6 +112,7 @@ class TranscriptionService : Service() {
             }
 
             addDiagnostic("Audiospur wird geprüft.")
+            updateNotification("Audiospur wird geprüft …", 0, indeterminate = true)
             val audioInfo = inspectAudioTrack(this, uri)
             val whisperSettings = WhisperSettingsPreferences(this).load()
             val vadFile = File(File(filesDir, "vad-models"), SileroVadModel.fileName)
@@ -209,6 +211,13 @@ class TranscriptionService : Service() {
                         "Abschnitt ab ${formatClock(section.mainStartMs / 1_000L)} wird nach einem " +
                             "Fehler mit 2,5 Minuten wiederholt."
                     )
+                    publishRunning(
+                        request, model, section, absoluteSectionNumber.coerceAtMost(sectionCount),
+                        sectionCount, checkpoint, 0f,
+                        "Audioaufbereitung wird mit 2,5-Minuten-Sicherheitsabschnitten fortgesetzt",
+                        "Der ursprüngliche Abschnitt ist endgültig fehlgeschlagen; " +
+                            "die begrenzte Sicherheitsaufteilung wird einmal verwendet."
+                    )
                     System.gc()
                 }
             }
@@ -293,7 +302,19 @@ class TranscriptionService : Service() {
             uri = uri,
             startMs = section.decodeStartMs,
             endMs = section.decodeEndMs,
-            shouldCancel = stopRequested::get
+            shouldCancel = stopRequested::get,
+            onDecoderRestart = { stall ->
+                addDiagnostic(
+                    "Decoder-Stillstand in Abschnitt $sectionNumber erkannt; " +
+                        "Decoder wird genau einmal vollständig neu gestartet. ${stall.message}"
+                )
+                publishRunning(
+                    request, model, section, sectionNumber, sectionCount, checkpoint,
+                    progressWithinSection = 0f,
+                    status = "Decoder-Neustart · Abschnitt $sectionNumber von $sectionCount",
+                    detail = "Die Audioaufbereitung war ohne Fortschritt und wird einmal sauber neu gestartet."
+                )
+            }
         ) { decoderProgress ->
             publishRunning(
                 request,
@@ -435,7 +456,24 @@ class TranscriptionService : Service() {
                 publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
                     0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
                     "Silero prüft reale Sprachbereiche; die Datei bleibt abschnittsweise im Speicher.")
-                val chunk = decodeAudioChunk(this, uri, section.mainStartMs, section.mainEndMs, stopRequested::get) { progress ->
+                val chunk = decodeAudioChunk(
+                    this,
+                    uri,
+                    section.mainStartMs,
+                    section.mainEndMs,
+                    stopRequested::get,
+                    onDecoderRestart = { stall ->
+                        addDiagnostic(
+                            "Decoder-Stillstand während der VAD-Analyse; Decoder wird genau " +
+                                "einmal neu gestartet. ${stall.message}"
+                        )
+                        publishRunning(
+                            request, model, section, index + 1, analysisSections.size, checkpoint,
+                            0f, "VAD-Automatik: Decoder wird neu gestartet",
+                            "Die vollständige VAD-Analyse wird für diesen Abschnitt einmal neu begonnen."
+                        )
+                    }
+                ) { progress ->
                     publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
                         progress, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
                         "Silero bewertet Sprachanteil, Pausenlänge und Zerstückelungsrisiko.")
@@ -656,6 +694,9 @@ private fun userFacingError(throwable: Throwable, canResume: Boolean): String {
     return when (throwable) {
         is AudioDecoderOutputOverflowException ->
             "Der Audiodecoder hat ungewöhnlich viele zusätzliche Audiodaten geliefert." +
+                checkpointSuffix
+        is AudioDecoderStallException ->
+            "Die Audioaufbereitung blieb auch nach einem kontrollierten Decoder-Neustart stehen." +
                 checkpointSuffix
         is OutOfMemoryError ->
             "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß.$checkpointSuffix"
