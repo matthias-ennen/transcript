@@ -439,8 +439,15 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
                 "(I)V"
         );
         (*env)->DeleteLocalRef(env, listener_class);
-        params.progress_callback = on_whisper_progress;
-        params.progress_callback_user_data = &progress_context;
+        if (progress_context.on_progress == NULL || (*env)->ExceptionCheck(env)) {
+            LOGW("Whisper progress callback is unavailable; continuing without progress updates");
+            if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+            (*env)->DeleteGlobalRef(env, progress_context.listener);
+            progress_context.listener = NULL;
+        } else {
+            params.progress_callback = on_whisper_progress;
+            params.progress_callback_user_data = &progress_context;
+        }
     }
 
     whisper_reset_timings(context);

@@ -26,3 +26,13 @@
 }
 -keep class com.whispercpp.whisper.WhisperLib* { *; }
 -keep class de.matthiasennen.transcript.ai.LocalAiEngine* { *; }
+
+
+# The progress listener is looked up by the native Whisper bridge at runtime.
+# Keep both the interface contract and its concrete bridge name in release builds.
+-keep,allowoptimization interface com.whispercpp.whisper.WhisperProgressListener {
+    void onProgress(int);
+}
+-keep,allowoptimization class com.whispercpp.whisper.NativeWhisperProgressListener {
+    void onProgress(int);
+}
