@@ -85,7 +85,18 @@ Sprite-Sheet-Animation bleibt unverändert erhalten.
 
 Ergebnis: signierte Test-APK und Xiaomi-Prüfung.
 
-### 2. Testkorpus und Android-Geräte-Qualitätsgate
+### 2. Einstellungsseite: Modellverwaltungen vereinheitlichen
+
+[Issue #37](https://github.com/matthias-ennen/transcript/issues/37)
+
+Whisper-, Silero-VAD- und lokale KI-Modellkarten erhalten dieselbe
+Informationshierarchie und Auswahlhervorhebung. Whisper zeigt kurze
+Modellbeschreibungen und einen Empfehlungstext; Silero VAD erhält eine
+vollständige Modellkarte; alle KI-Modelle können gemeinsam gelöscht werden.
+
+Ergebnis: einheitliche Modellverwaltung in der signierten Test-APK.
+
+### 3. Testkorpus und Android-Geräte-Qualitätsgate
 
 [Issue #27](https://github.com/matthias-ennen/transcript/issues/27)
 
@@ -95,7 +106,7 @@ Auslassungen, Zeitstempel, VAD, Abbruch und Wiederaufnahme.
 
 Ergebnis: belastbarer Referenzstand für alle folgenden Änderungen.
 
-### 3. Architektur-Refactoring ohne Funktionsänderung
+### 4. Architektur-Refactoring ohne Funktionsänderung
 
 [Issue #28](https://github.com/matthias-ennen/transcript/issues/28)
 
@@ -105,7 +116,7 @@ Transkriptions- und Exportverhalten bleiben unverändert.
 
 Ergebnis: wartbarer Unterbau in kleinen, einzeln prüfbaren Pull Requests.
 
-### 4. Hintergrunddienste und Download-Infrastruktur
+### 5. Hintergrunddienste und Download-Infrastruktur
 
 [Issue #29](https://github.com/matthias-ennen/transcript/issues/29)
 
@@ -115,7 +126,7 @@ Bereinigungspfade für Whisper-, VAD- und Qwen-Modelle.
 
 Ergebnis: konfliktfreie und nachvollziehbare Hintergrundvorgänge.
 
-### 5. Manuelle und automatische KI-Nachbearbeitung
+### 6. Manuelle und automatische KI-Nachbearbeitung
 
 [Issue #30](https://github.com/matthias-ennen/transcript/issues/30)
 
@@ -126,7 +137,7 @@ und automatische Gesamttranskript-Nachbearbeitung werden eindeutig getrennt.
 
 Ergebnis: zuverlässige, abbrechbare und nachvollziehbare lokale KI-Korrektur.
 
-### 6. Whisper-Original und nachbearbeitete Fassung vergleichen
+### 7. Whisper-Original und nachbearbeitete Fassung vergleichen
 
 [Issue #31](https://github.com/matthias-ennen/transcript/issues/31)
 
@@ -138,7 +149,7 @@ Textdatei für Whisper, Textdatei mit Zauberstab und Sternen für KI.
 
 Ergebnis: transparente Kontrolle ohne Transkriptbibliothek.
 
-### 7. Android-Import über „Teilen mit Transcript“
+### 8. Android-Import über „Teilen mit Transcript“
 
 [Issue #32](https://github.com/matthias-ennen/transcript/issues/32)
 
@@ -148,7 +159,7 @@ URI-Berechtigungen und der Schutz des aktuellen Vorgangs werden abgesichert.
 
 Ergebnis: vollständiger Android-Dateiarbeitsablauf für eine einzelne Datei.
 
-### 8. Deutsche und englische Oberfläche, Barrierefreiheit und Displaytests
+### 9. Deutsche und englische Oberfläche, Barrierefreiheit und Displaytests
 
 [Issue #33](https://github.com/matthias-ennen/transcript/issues/33)
 
@@ -159,7 +170,7 @@ der Whisper-Sprache.
 
 Ergebnis: vollständige, verständliche Produktoberfläche.
 
-### 9. Android-Plattform und Release-Pipeline modernisieren
+### 10. Android-Plattform und Release-Pipeline modernisieren
 
 [Issue #34](https://github.com/matthias-ennen/transcript/issues/34)
 
@@ -169,7 +180,7 @@ versionierte Native-Patches und archivierte Mapping-/Symbols-Dateien.
 
 Ergebnis: aktueller und reproduzierbarer Release-Kandidat.
 
-### 10. Repository-, Lizenz- und Store-Abschluss
+### 11. Repository-, Lizenz- und Store-Abschluss
 
 [Issue #35](https://github.com/matthias-ennen/transcript/issues/35)
 
@@ -184,7 +195,7 @@ Ergebnis: menschlich freigegebener Version-1.0-Release-Kandidat.
 
 ```mermaid
 flowchart TD
-    I25["#25 Status"] --> I27["#27 Qualitätsgate"]
+    I25["#25 Status"] --> I37["#37 Einstellungen"]\n    I37 --> I27["#27 Qualitätsgate"]
     I27 --> I28["#28 Architektur"]
     I28 --> I29["#29 Hintergrunddienste"]
     I28 --> I30["#30 KI-Zuverlässigkeit"]
