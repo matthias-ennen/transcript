@@ -14,7 +14,7 @@ Freigegebene Symbolfamilie für Issue #46 und die spätere technische Einbindung
 - Manuelle Bearbeitung: diagonaler blauer Bleistift mit rotem Radiergummi.
 - KI-Bearbeitung: großes, sauber konstruiertes `KI` und drei Funkelsterne oben links.
 - Die Zustände unterscheiden sich durch ihre Form und nicht ausschließlich durch Farbe.
-- Vorgesehene Anzeigegröße: 28 dp; 24 dp bleibt als Mindestgröße prüfbar.
+- Verbindliche Anzeigegröße: 32 dp; 24 dp bleibt als zusätzliche Mindestgrößenprüfung erhalten.
 - Vorgesehene Position: links neben der vorhandenen Nummernkapsel eines Transkriptabschnitts.
 
 ## Farben
