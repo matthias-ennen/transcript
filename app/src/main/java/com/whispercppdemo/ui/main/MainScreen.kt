@@ -62,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -440,13 +441,12 @@ private fun MainContent(
         var showMissingAiModelDialog by remember { mutableStateOf(false) }
         val scrollState = rememberScrollState()
         val scrollScope = rememberCoroutineScope()
-        var transcriptHeadingContentBottomPx by remember { mutableStateOf<Float?>(null) }
-        var exportActionsContentTopPx by remember { mutableStateOf<Float?>(null) }
-        var exportActionsContentBottomPx by remember { mutableStateOf<Float?>(null) }
+        var transcriptHeadingBottomPx by remember { mutableStateOf<Float?>(null) }
+        var exportActionsTopPx by remember { mutableStateOf<Float?>(null) }
+        var exportActionsBottomPx by remember { mutableStateOf<Float?>(null) }
         var viewportTopPx by remember { mutableStateOf<Float?>(null) }
         var viewportBottomPx by remember { mutableStateOf<Float?>(null) }
         val hasCompletedTranscript = state.completedModel != null && state.segments.isNotEmpty()
-        val scrollOffsetPx = scrollState.value.toFloat()
         val activeSegment = if (hasCompletedTranscript) {
             activeTranscriptSegment(state.segments, state.playbackPositionMs)
         } else {
@@ -454,9 +454,9 @@ private fun MainContent(
         }
         val showFloatingTranscriptControls = shouldShowFloatingTranscriptControls(
             hasCompletedTranscript = hasCompletedTranscript,
-            transcriptHeadingBottomPx = transcriptHeadingContentBottomPx?.minus(scrollOffsetPx),
-            exportActionsTopPx = exportActionsContentTopPx?.minus(scrollOffsetPx),
-            exportActionsBottomPx = exportActionsContentBottomPx?.minus(scrollOffsetPx),
+            transcriptHeadingBottomPx = transcriptHeadingBottomPx,
+            exportActionsTopPx = exportActionsTopPx,
+            exportActionsBottomPx = exportActionsBottomPx,
             viewportTopPx = viewportTopPx,
             viewportBottomPx = viewportBottomPx
         )
@@ -467,9 +467,9 @@ private fun MainContent(
 
         LaunchedEffect(state.selectedAudio) {
             scrollState.scrollTo(0)
-            transcriptHeadingContentBottomPx = null
-            exportActionsContentTopPx = null
-            exportActionsContentBottomPx = null
+            transcriptHeadingBottomPx = null
+            exportActionsTopPx = null
+            exportActionsBottomPx = null
         }
 
         if (confirmTranscriptionCancellation) {
@@ -692,8 +692,8 @@ private fun MainContent(
                             "Transkript",
                             style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.onGloballyPositioned { coordinates ->
-                                transcriptHeadingContentBottomPx =
-                                    coordinates.boundsInRoot().bottom + scrollState.value
+                                transcriptHeadingBottomPx =
+                                    coordinates.positionInRoot().y + coordinates.size.height
                             }
                         )
                         TranscriptList(
@@ -722,9 +722,9 @@ private fun MainContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .onGloballyPositioned { coordinates ->
-                                    val bounds = coordinates.boundsInRoot()
-                                    exportActionsContentTopPx = bounds.top + scrollState.value
-                                    exportActionsContentBottomPx = bounds.bottom + scrollState.value
+                                    val top = coordinates.positionInRoot().y
+                                    exportActionsTopPx = top
+                                    exportActionsBottomPx = top + coordinates.size.height
                                 }
                         ) {
                             Button(

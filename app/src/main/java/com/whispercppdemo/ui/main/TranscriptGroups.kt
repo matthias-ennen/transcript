@@ -207,8 +207,8 @@ private fun TranscriptSegmentCard(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .offset(x = 8.dp, y = (-8).dp)
-                .width(52.dp)
-                .height(32.dp)
+                .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
+                .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT)
                 .background(MaterialTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center
         ) {
@@ -240,7 +240,7 @@ private fun TranscriptSegmentBody(
         Spacer(Modifier.height(4.dp))
         val textAreaShape = RoundedCornerShape(8.dp)
         val activeBorderColor = Color.White
-        val overlayColor = Color.White.copy(alpha = 0.15f)
+        val overlayColor = Color.White.copy(alpha = FLOATING_TRANSCRIPT_CONTROL_ALPHA)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -258,7 +258,7 @@ private fun TranscriptSegmentBody(
                 }
                 .then(
                     if (isPlaybackActive) {
-                        Modifier.border(1.dp, activeBorderColor, textAreaShape)
+                        Modifier.border(2.dp, activeBorderColor, textAreaShape)
                     } else {
                         Modifier
                     }
@@ -361,10 +361,15 @@ private fun TranscriptGroupEditorActions(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Text(
-                text = "Änderungen übernehmen",
+                text = "Übernehmen",
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
         }
     }
 }
+
+internal val TRANSCRIPT_NUMBER_CAPSULE_WIDTH = 52.dp
+internal val TRANSCRIPT_NUMBER_CAPSULE_HEIGHT = 32.dp

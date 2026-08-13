@@ -3,6 +3,7 @@ package de.matthiasennen.transcript.ui.main
 import com.whispercpp.whisper.WhisperSegment
 
 internal const val SEGMENT_START_TOLERANCE_MS = 500L
+internal const val FLOATING_TRANSCRIPT_CONTROL_ALPHA = 0.62f
 
 internal data class ActiveTranscriptSegment(
     val index: Int,

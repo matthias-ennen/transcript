@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
@@ -32,7 +32,9 @@ internal fun FloatingTranscriptControls(
     modifier: Modifier = Modifier
 ) {
     val colors = ButtonDefaults.buttonColors(
-        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.62f),
+        containerColor = MaterialTheme.colorScheme.primary.copy(
+            alpha = FLOATING_TRANSCRIPT_CONTROL_ALPHA
+        ),
         contentColor = MaterialTheme.colorScheme.onPrimary
     )
     Box(modifier = modifier.fillMaxWidth()) {
@@ -64,20 +66,20 @@ internal fun FloatingTranscriptControls(
                     contentDescription = "Zum nächsten Textabschnitt"
                 )
             }
-            Spacer(Modifier.width(52.dp))
+            Spacer(Modifier.width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH))
         }
 
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 20.dp)
+                .padding(end = 24.dp)
         ) {
             Button(
                 onClick = onScrollToTopClick,
                 modifier = Modifier
-                    .width(58.dp)
-                    .height(44.dp),
-                shape = RoundedCornerShape(50),
+                    .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
+                    .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT),
+                shape = CircleShape,
                 contentPadding = PaddingValues(0.dp),
                 colors = colors
             ) {
@@ -101,9 +103,9 @@ private fun FloatingTransportButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier
-            .width(52.dp)
-            .height(44.dp),
-        shape = RoundedCornerShape(50),
+            .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
+            .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT),
+        shape = CircleShape,
         contentPadding = PaddingValues(0.dp),
         colors = colors,
         content = { content() }
