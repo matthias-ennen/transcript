@@ -321,7 +321,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_freeVadContext(
 }
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_whispercpp_whisper_WhisperLib_00024Companion_detectVadSegments(
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_detectVadSegmentsCentiseconds(
         JNIEnv *env, jobject thiz, jlong context_ptr, jfloatArray audio_data,
         jfloat threshold, jint minimum_speech_duration_ms,
         jint minimum_silence_duration_ms, jfloat maximum_speech_duration_seconds,
@@ -354,6 +354,9 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_detectVadSegments(
             return NULL;
         }
         for (int index = 0; index < segment_count; ++index) {
+            // whisper.cpp exposes VAD timestamps in centiseconds, just like
+            // transcript segment timestamps. Kotlin performs the explicit
+            // centisecond-to-millisecond conversion at the JNI boundary.
             values[index * 2] = whisper_vad_segments_get_segment_t0(segments, index);
             values[index * 2 + 1] = whisper_vad_segments_get_segment_t1(segments, index);
         }

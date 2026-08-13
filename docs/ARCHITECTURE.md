@@ -113,10 +113,14 @@ eine konstantspeichernde Abschnittsanalyse mit dem echten Silero-Kontext durch.
 Die vollständige Audiospur bleibt dabei bewusst die Entscheidungsgrundlage;
 eine Stichprobenanalyse wird wegen möglicher Fehlgewichtung nicht verwendet.
 Auch diese Voranalyse läuft durch denselben begrenzten Decoder-Watchdog.
-Sie aggregiert erkannte Sprachbereiche, Sprach-/Pausenanteil, die längste Pause
-und Zerstückelung über Abschnittsgrenzen. VAD wird nur bei eindeutigen längeren
-Ruhephasen und stabilen Sprachbereichen verwendet; Grenzfälle bleiben
-vollständig bei Whisper. Die
+Sie wandelt die von `whisper.cpp` gelieferten VAD-Zeitstempel an der JNI-Grenze
+explizit von Zentisekunden in Millisekunden um und verwirft ungültige Paare.
+Anschließend aggregiert sie erkannte Sprachbereiche, Sprach-/Pausenanteil, die
+längste Pause und Zerstückelung über Abschnittsgrenzen. VAD wird nur bei
+eindeutigen längeren Ruhephasen und stabilen Sprachbereichen verwendet. Ein hoher
+Pausenanteil allein ist kein Ablehnungsgrund; Grenzfälle mit zu wenig oder stark
+fragmentierter Sprache bleiben vollständig bei Whisper. Die Diagnose nennt auch
+die analysierte Samplezahl und die davon erkannten Sprach-Samples. Die
 integrierte `whisper.cpp`-Pipeline entfernt Nicht-Sprachbereiche für die
 Berechnung und bildet Segmentzeitstempel anschließend wieder auf die
 Originalaudiodatei ab. Bei fehlendem Modell oder VAD-Laufzeitfehler bleibt
