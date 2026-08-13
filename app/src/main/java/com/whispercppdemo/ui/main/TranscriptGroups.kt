@@ -1,6 +1,7 @@
 package de.matthiasennen.transcript.ui.main
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,10 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.whispercpp.whisper.WhisperSegment
@@ -46,11 +51,13 @@ internal fun TranscriptList(
     onEditGroup: (Long) -> Unit,
     onCancelEditing: () -> Unit,
     onApplyEdits: () -> Unit,
+    activeSegmentIndex: Int?,
+    activeSegmentProgress: Float,
     modifier: Modifier = Modifier
 ) {
     if (segments.isEmpty()) return
 
-    val groups = groupTranscriptSegments(segments)
+    val groups = remember(segments) { groupTranscriptSegments(segments) }
     val expandedGroups = remember(state.selectedAudio) {
         mutableStateMapOf<Long, Boolean>().apply {
             groups.firstOrNull()?.let { firstGroup -> put(firstGroup.startMs, true) }
@@ -134,6 +141,12 @@ internal fun TranscriptList(
                             segment = indexedSegment.segment,
                             isEditing = isEditingGroup,
                             editingEnabled = !state.isAiPostProcessing,
+                            isPlaybackActive = indexedSegment.originalIndex == activeSegmentIndex,
+                            playbackProgress = if (indexedSegment.originalIndex == activeSegmentIndex) {
+                                activeSegmentProgress
+                            } else {
+                                0f
+                            },
                             onTextChanged = {
                                 onTextChanged(indexedSegment.originalIndex, it)
                             }
@@ -159,6 +172,8 @@ private fun TranscriptSegmentCard(
     segment: WhisperSegment,
     isEditing: Boolean,
     editingEnabled: Boolean,
+    isPlaybackActive: Boolean,
+    playbackProgress: Float,
     onTextChanged: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -173,11 +188,17 @@ private fun TranscriptSegmentCard(
                     segment = segment,
                     isEditing = true,
                     editingEnabled = editingEnabled,
+                    isPlaybackActive = isPlaybackActive,
+                    playbackProgress = playbackProgress,
                     onTextChanged = onTextChanged
                 )
             } else {
                 SelectionContainer {
-                    TranscriptSegmentBody(segment = segment)
+                    TranscriptSegmentBody(
+                        segment = segment,
+                        isPlaybackActive = isPlaybackActive,
+                        playbackProgress = playbackProgress
+                    )
                 }
             }
         }
@@ -186,8 +207,8 @@ private fun TranscriptSegmentCard(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .offset(x = 8.dp, y = (-8).dp)
-                .width(52.dp)
-                .height(32.dp)
+                .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
+                .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT)
                 .background(MaterialTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center
         ) {
@@ -207,6 +228,8 @@ private fun TranscriptSegmentBody(
     segment: WhisperSegment,
     isEditing: Boolean = false,
     editingEnabled: Boolean = true,
+    isPlaybackActive: Boolean = false,
+    playbackProgress: Float = 0f,
     onTextChanged: (String) -> Unit = {}
 ) {
     Column(modifier = Modifier.padding(12.dp)) {
@@ -215,17 +238,45 @@ private fun TranscriptSegmentBody(
             style = MaterialTheme.typography.labelMedium
         )
         Spacer(Modifier.height(4.dp))
-        if (isEditing) {
-            OutlinedTextField(
-                value = segment.text,
-                onValueChange = onTextChanged,
-                enabled = editingEnabled,
-                label = { Text("Text") },
-                minLines = 2,
-                modifier = Modifier.fillMaxWidth()
-            )
-        } else {
-            Text(segment.text)
+        val textAreaShape = RoundedCornerShape(8.dp)
+        val activeBorderColor = Color.White
+        val overlayColor = Color.White.copy(alpha = FLOATING_TRANSCRIPT_CONTROL_ALPHA)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(textAreaShape)
+                .drawBehind {
+                    if (isPlaybackActive) {
+                        drawRect(
+                            color = overlayColor,
+                            size = Size(
+                                width = size.width * playbackProgress.coerceIn(0f, 1f),
+                                height = size.height
+                            )
+                        )
+                    }
+                }
+                .then(
+                    if (isPlaybackActive) {
+                        Modifier.border(2.dp, activeBorderColor, textAreaShape)
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(8.dp)
+        ) {
+            if (isEditing) {
+                OutlinedTextField(
+                    value = segment.text,
+                    onValueChange = onTextChanged,
+                    enabled = editingEnabled,
+                    label = { Text("Text") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Text(segment.text)
+            }
         }
     }
 }
@@ -310,10 +361,15 @@ private fun TranscriptGroupEditorActions(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Text(
-                text = "Änderungen übernehmen",
+                text = "Übernehmen",
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
         }
     }
 }
+
+internal val TRANSCRIPT_NUMBER_CAPSULE_WIDTH = 52.dp
+internal val TRANSCRIPT_NUMBER_CAPSULE_HEIGHT = 32.dp
