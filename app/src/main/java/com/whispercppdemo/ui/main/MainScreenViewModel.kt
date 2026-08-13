@@ -97,7 +97,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             playbackTimer = null
             uiState = uiState.copy(
                 isPlaying = false,
-                playbackPositionMs = 0L,
+                playbackPositionMs = uiState.audioDurationMs,
                 status = "Wiedergabe beendet.",
                 cannaBotMode = CannaBotMode.IDLE
             )
@@ -279,8 +279,33 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun seekPlayback(fraction: Float) {
         val duration = uiState.audioDurationMs
-        if (duration <= 0L) return
+        if (duration <= 0L || uiState.isRecording || uiState.isBusy) return
         val position = (duration * fraction.coerceIn(0f, 1f)).toLong()
+        seekPlaybackTo(position)
+    }
+
+    fun skipToPreviousTranscriptSegment() {
+        if (!transcriptSegmentNavigationEnabled()) return
+        previousTranscriptSegmentPositionMs(
+            segments = uiState.segments,
+            positionMs = uiState.playbackPositionMs
+        )?.let(::seekPlaybackTo)
+    }
+
+    fun skipToNextTranscriptSegment() {
+        if (!transcriptSegmentNavigationEnabled()) return
+        nextTranscriptSegmentPositionMs(
+            segments = uiState.segments,
+            positionMs = uiState.playbackPositionMs
+        )?.let(::seekPlaybackTo)
+    }
+
+    private fun transcriptSegmentNavigationEnabled(): Boolean =
+        uiState.completedModel != null && uiState.segments.isNotEmpty() &&
+            !uiState.isRecording && !uiState.isBusy
+
+    private fun seekPlaybackTo(positionMs: Long) {
+        val position = positionMs.coerceIn(0L, uiState.audioDurationMs.coerceAtLeast(0L))
         audioPlayer.seekTo(position)
         uiState = uiState.copy(playbackPositionMs = position)
     }

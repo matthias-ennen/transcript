@@ -39,7 +39,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -53,7 +52,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,7 +60,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -441,19 +440,26 @@ private fun MainContent(
         var showMissingAiModelDialog by remember { mutableStateOf(false) }
         val scrollState = rememberScrollState()
         val scrollScope = rememberCoroutineScope()
-        val density = LocalDensity.current
-        val scrollToTopThresholdPx = remember(density) {
-            with(density) { 720.dp.roundToPx() }
+        var transcriptHeadingContentBottomPx by remember { mutableStateOf<Float?>(null) }
+        var exportActionsContentTopPx by remember { mutableStateOf<Float?>(null) }
+        var exportActionsContentBottomPx by remember { mutableStateOf<Float?>(null) }
+        var viewportTopPx by remember { mutableStateOf<Float?>(null) }
+        var viewportBottomPx by remember { mutableStateOf<Float?>(null) }
+        val hasCompletedTranscript = state.completedModel != null && state.segments.isNotEmpty()
+        val scrollOffsetPx = scrollState.value.toFloat()
+        val activeSegment = if (hasCompletedTranscript) {
+            activeTranscriptSegment(state.segments, state.playbackPositionMs)
+        } else {
+            null
         }
-        val showScrollToTop by remember(state.segments.size, scrollToTopThresholdPx) {
-            derivedStateOf {
-                shouldShowScrollToTop(
-                    segmentCount = state.segments.size,
-                    scrollOffsetPx = scrollState.value,
-                    thresholdPx = scrollToTopThresholdPx
-                )
-            }
-        }
+        val showFloatingTranscriptControls = shouldShowFloatingTranscriptControls(
+            hasCompletedTranscript = hasCompletedTranscript,
+            transcriptHeadingBottomPx = transcriptHeadingContentBottomPx?.minus(scrollOffsetPx),
+            exportActionsTopPx = exportActionsContentTopPx?.minus(scrollOffsetPx),
+            exportActionsBottomPx = exportActionsContentBottomPx?.minus(scrollOffsetPx),
+            viewportTopPx = viewportTopPx,
+            viewportBottomPx = viewportBottomPx
+        )
 
         LaunchedEffect(state.isTranscribing) {
             if (!state.isTranscribing) confirmTranscriptionCancellation = false
@@ -461,6 +467,9 @@ private fun MainContent(
 
         LaunchedEffect(state.selectedAudio) {
             scrollState.scrollTo(0)
+            transcriptHeadingContentBottomPx = null
+            exportActionsContentTopPx = null
+            exportActionsContentBottomPx = null
         }
 
         if (confirmTranscriptionCancellation) {
@@ -541,6 +550,11 @@ private fun MainContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .onGloballyPositioned { coordinates ->
+                    val bounds = coordinates.boundsInRoot()
+                    viewportTopPx = bounds.top
+                    viewportBottomPx = bounds.bottom
+                }
         ) {
             Column(
                 modifier = Modifier
@@ -599,6 +613,8 @@ private fun MainContent(
                     }
                 },
                 onPlayPauseClick = viewModel::togglePlayback,
+                onPreviousSegmentClick = viewModel::skipToPreviousTranscriptSegment,
+                onNextSegmentClick = viewModel::skipToNextTranscriptSegment,
                 onSeek = viewModel::seekPlayback
             )
 
@@ -672,7 +688,14 @@ private fun MainContent(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("Transkript", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Transkript",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.onGloballyPositioned { coordinates ->
+                                transcriptHeadingContentBottomPx =
+                                    coordinates.boundsInRoot().bottom + scrollState.value
+                            }
+                        )
                         TranscriptList(
                             state = state,
                             segments = if (state.isEditingTranscript) {
@@ -690,11 +713,19 @@ private fun MainContent(
                             },
                             onEditGroup = viewModel::startTranscriptEditing,
                             onCancelEditing = viewModel::cancelTranscriptEditing,
-                            onApplyEdits = viewModel::applyTranscriptEdits
+                            onApplyEdits = viewModel::applyTranscriptEdits,
+                            activeSegmentIndex = activeSegment?.index,
+                            activeSegmentProgress = activeSegment?.progress ?: 0f
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onGloballyPositioned { coordinates ->
+                                    val bounds = coordinates.boundsInRoot()
+                                    exportActionsContentTopPx = bounds.top + scrollState.value
+                                    exportActionsContentBottomPx = bounds.bottom + scrollState.value
+                                }
                         ) {
                             Button(
                                 onClick = textExporter,
@@ -756,39 +787,25 @@ private fun MainContent(
             }
 
             AnimatedVisibility(
-                visible = showScrollToTop,
+                visible = showFloatingTranscriptControls,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 20.dp, bottom = 20.dp)
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 20.dp)
             ) {
-                Button(
-                    onClick = {
+                FloatingTranscriptControls(
+                    isPlaying = state.isPlaying,
+                    playbackEnabled = hasCompletedTranscript &&
+                        !state.isRecording && !state.isBusy,
+                    onPreviousSegmentClick = viewModel::skipToPreviousTranscriptSegment,
+                    onPlayPauseClick = viewModel::togglePlayback,
+                    onNextSegmentClick = viewModel::skipToNextTranscriptSegment,
+                    onScrollToTopClick = {
                         scrollScope.launch { scrollState.animateScrollTo(0) }
-                    },
-                    modifier = Modifier
-                        .width(58.dp)
-                        .height(44.dp),
-                    shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.62f),
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowUp,
-                        contentDescription = "Zum Anfang der App"
-                    )
-                }
+                    }
+                )
             }
         }
     }
-
-internal fun shouldShowScrollToTop(
-    segmentCount: Int,
-    scrollOffsetPx: Int,
-    thresholdPx: Int
-): Boolean = segmentCount >= 20 && scrollOffsetPx >= thresholdPx
 
 @Composable
 internal fun ModelSelector(

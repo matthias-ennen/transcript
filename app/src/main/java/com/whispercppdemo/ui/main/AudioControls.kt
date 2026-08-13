@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -32,6 +33,8 @@ fun AudioControls(
     state: TranscriptUiState,
     onRecordClick: () -> Unit,
     onPlayPauseClick: () -> Unit,
+    onPreviousSegmentClick: () -> Unit,
+    onNextSegmentClick: () -> Unit,
     onSeek: (Float) -> Unit
 ) {
     val displayedWaveform = if (state.isRecording) state.liveWaveform else state.waveform
@@ -41,42 +44,67 @@ fun AudioControls(
         0f
     }
 
-    Row(
+    val segmentTransportEnabled = state.completedModel != null &&
+        state.segments.isNotEmpty() && !state.isRecording && !state.isBusy
+
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        FilledIconButton(
-            onClick = onRecordClick,
-            enabled = !state.isBusy,
-            modifier = Modifier.size(52.dp)
-        ) {
-            Icon(
-                painter = painterResource(
-                    if (state.isRecording) R.drawable.ic_stop else R.drawable.ic_mic
-                ),
-                contentDescription = if (state.isRecording) "Aufnahme beenden" else "Aufnahme starten"
-            )
+        TransportControlGrid {
+            OutlinedIconButton(
+                onClick = onPreviousSegmentClick,
+                enabled = segmentTransportEnabled,
+                modifier = Modifier.size(52.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_skip_previous),
+                    contentDescription = "Zum vorherigen Textabschnitt"
+                )
+            }
+
+            OutlinedIconButton(
+                onClick = onPlayPauseClick,
+                enabled = state.selectedAudio != null && !state.isRecording && !state.isBusy,
+                modifier = Modifier.size(52.dp)
+            ) {
+                PlaybackIcon(state.isPlaying)
+            }
+
+            OutlinedIconButton(
+                onClick = onNextSegmentClick,
+                enabled = segmentTransportEnabled,
+                modifier = Modifier.size(52.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_skip_next),
+                    contentDescription = "Zum nächsten Textabschnitt"
+                )
+            }
+
+            FilledIconButton(
+                onClick = onRecordClick,
+                enabled = !state.isBusy,
+                modifier = Modifier.size(52.dp)
+            ) {
+                Icon(
+                    painter = painterResource(
+                        if (state.isRecording) R.drawable.ic_stop else R.drawable.ic_mic
+                    ),
+                    contentDescription = if (state.isRecording) {
+                        "Aufnahme beenden"
+                    } else {
+                        "Aufnahme starten"
+                    }
+                )
+            }
         }
 
-        OutlinedIconButton(
-            onClick = onPlayPauseClick,
-            enabled = state.selectedAudio != null && !state.isRecording && !state.isBusy,
-            modifier = Modifier.size(52.dp)
-        ) {
-            Icon(
-                painter = painterResource(
-                    if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play
-                ),
-                contentDescription = if (state.isPlaying) "Wiedergabe pausieren" else "Wiedergabe starten"
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Waveform(
                 values = displayedWaveform,
                 progress = progress,
-                seekEnabled = !state.isRecording && state.audioDurationMs > 0L,
+                seekEnabled = !state.isRecording && !state.isBusy && state.audioDurationMs > 0L,
                 onSeek = onSeek,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -98,6 +126,27 @@ fun AudioControls(
             }
         }
     }
+}
+
+@Composable
+internal fun TransportControlGrid(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        content = content
+    )
+}
+
+@Composable
+internal fun PlaybackIcon(isPlaying: Boolean) {
+    Icon(
+        painter = painterResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
+        contentDescription = if (isPlaying) "Wiedergabe pausieren" else "Wiedergabe starten"
+    )
 }
 
 @Composable
