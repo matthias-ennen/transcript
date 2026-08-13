@@ -490,7 +490,8 @@ class TranscriptionService : Service() {
                 )
                 analyzer.add(
                     chunkDurationMs = chunk.samples.size * 1_000L / 16_000L,
-                    segments = speechSegments
+                    segments = speechSegments,
+                    chunkSampleCount = chunk.samples.size
                 )
             }
             analyzer.decide()
@@ -511,7 +512,8 @@ class TranscriptionService : Service() {
             vadContext.release()
         }
         val summary = "${decision.silencePercent} % Pause, ${decision.speechPercent} % Sprache, " +
-            "${decision.speechSegmentCount} Sprachbereiche, längste Pause ${decision.longestSilenceMs / 1_000.0} s"
+            "${decision.speechSegmentCount} Sprachbereiche, längste Pause ${decision.longestSilenceMs / 1_000.0} s, " +
+            "${decision.detectedSpeechSampleCount} von ${decision.analyzedSampleCount} Samples in Sprachbereichen"
         if (decision.useVad) {
             addDiagnostic("VAD-Automatik: VAD wird verwendet ($summary; ${decision.reason}).")
             analysisSections.lastOrNull()?.let { finalSection ->

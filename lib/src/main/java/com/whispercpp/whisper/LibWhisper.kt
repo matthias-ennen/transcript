@@ -9,6 +9,7 @@ import java.io.File
 import java.io.InputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToLong
 
 private const val LOG_TAG = "LibWhisper"
 
@@ -20,6 +21,29 @@ data class WhisperTranscriptResult(
 )
 
 data class WhisperVadSegment(val startMs: Long, val endMs: Long)
+
+/**
+ * Converts the centisecond time base returned by whisper.cpp's VAD API to the
+ * millisecond time base used by the Android application. Invalid native pairs
+ * are ignored so they cannot become zero-length speech segments in statistics.
+ */
+fun whisperVadSegmentsFromCentiseconds(rawCentiseconds: FloatArray): List<WhisperVadSegment> {
+    require(rawCentiseconds.size % 2 == 0) {
+        "Silero VAD lieferte eine unvollständige Zeitstempel-Paarung."
+    }
+    return buildList(rawCentiseconds.size / 2) {
+        rawCentiseconds.indices.step(2).forEach { index ->
+            val startCentiseconds = rawCentiseconds[index]
+            val endCentiseconds = rawCentiseconds[index + 1]
+            if (!startCentiseconds.isFinite() || !endCentiseconds.isFinite()) return@forEach
+            val startMs = (startCentiseconds * 10.0).roundToLong()
+            val endMs = (endCentiseconds * 10.0).roundToLong()
+            if (startMs >= 0L && endMs > startMs) {
+                add(WhisperVadSegment(startMs, endMs))
+            }
+        }
+    }
+}
 
 data class WhisperRuntimeBackend(
     val name: String,
@@ -233,7 +257,7 @@ class WhisperVadContext private constructor(private var ptr: Long) {
     ): List<WhisperVadSegment> = withContext(dispatcher) {
         check(!released.get()) { "Der VAD-Kontext wurde bereits freigegeben." }
         require(ptr != 0L)
-        val raw = WhisperLib.detectVadSegments(
+        val rawCentiseconds = WhisperLib.detectVadSegmentsCentiseconds(
             ptr,
             samples,
             threshold,
@@ -243,13 +267,7 @@ class WhisperVadContext private constructor(private var ptr: Long) {
             speechPadMs,
             overlapSeconds
         ) ?: error("Silero VAD konnte den Audioabschnitt nicht analysieren.")
-        check(raw.size % 2 == 0) { "Silero VAD lieferte ungültige Segmentdaten." }
-        List(raw.size / 2) { index ->
-            WhisperVadSegment(
-                startMs = (raw[index * 2] * 1_000f).toLong().coerceAtLeast(0L),
-                endMs = (raw[index * 2 + 1] * 1_000f).toLong().coerceAtLeast(0L)
-            )
-        }
+        whisperVadSegmentsFromCentiseconds(rawCentiseconds)
     }
 
     suspend fun release() {
@@ -327,7 +345,8 @@ private class WhisperLib {
         external fun getGpuBackendName(): String
         external fun initVadContext(modelPath: String): Long
         external fun freeVadContext(contextPtr: Long)
-        external fun detectVadSegments(
+        /** Returns alternating t0/t1 values in whisper.cpp's centisecond time base. */
+        external fun detectVadSegmentsCentiseconds(
             contextPtr: Long,
             audioData: FloatArray,
             threshold: Float,

@@ -56,6 +56,14 @@ class WhisperSettingsTest {
     }
 
     @Test
+    fun `off mode never passes a vad model to whisper`() {
+        val configuration = WhisperSettings(vadMode = WhisperVadMode.OFF)
+            .toNativeConfiguration("/data/vad.bin")
+
+        assertEquals(null, configuration.vadModelPath)
+    }
+
+    @Test
     fun `group reset preserves unrelated settings`() {
         val value = WhisperSettings(initialPrompt = "ENERCON", beamSize = 12, sectionMinutes = 9)
             .reset(WhisperSettingsGroup.DECODING)
