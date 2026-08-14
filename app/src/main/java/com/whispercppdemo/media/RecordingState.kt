@@ -7,6 +7,7 @@ import java.io.File
 sealed interface RecordingState {
     data object Idle : RecordingState
     data object Starting : RecordingState
+    data object Stopping : RecordingState
 
     data class Running(
         val file: File,
@@ -20,14 +21,35 @@ sealed interface RecordingState {
 }
 
 object RecordingCoordinator {
+    private val stateLock = Any()
     private val mutableState = MutableStateFlow<RecordingState>(RecordingState.Idle)
     val state = mutableState.asStateFlow()
 
-    fun update(state: RecordingState) {
+    fun update(state: RecordingState) = synchronized(stateLock) {
         mutableState.value = state
     }
 
-    fun reset() {
+    fun updateRunning(state: RecordingState.Running): Boolean = synchronized(stateLock) {
+        when (mutableState.value) {
+            RecordingState.Starting, is RecordingState.Running -> {
+                mutableState.value = state
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun beginStopping(): Boolean = synchronized(stateLock) {
+        when (mutableState.value) {
+            RecordingState.Starting, is RecordingState.Running -> {
+                mutableState.value = RecordingState.Stopping
+                true
+            }
+            else -> false
+        }
+    }
+
+    fun reset() = synchronized(stateLock) {
         mutableState.value = RecordingState.Idle
     }
 }
