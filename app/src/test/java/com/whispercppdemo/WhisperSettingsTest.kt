@@ -28,6 +28,13 @@ class WhisperSettingsTest {
     }
 
     @Test
+    fun `section duration accepts only whole minutes from one through five`() {
+        assertEquals(1, WhisperSettings(sectionMinutes = -3).normalized().sectionMinutes)
+        assertEquals(3, WhisperSettings().sectionMinutes)
+        assertEquals(5, WhisperSettings(sectionMinutes = 99).normalized().sectionMinutes)
+    }
+
+    @Test
     fun `vad reset preserves other groups`() {
         val value = WhisperSettings(
             initialPrompt = "ENERCON",

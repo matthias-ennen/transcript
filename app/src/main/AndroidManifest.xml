@@ -81,6 +81,11 @@
                 android:value="Lokale Offline-Transkription langer Audio- und Videodateien" />
         </service>
 
+        <receiver
+            android:name=".transcription.TranscriptionControlReceiver"
+            android:exported="false"
+            android:process=":control" />
+
         <service
             android:name=".media.RecordingService"
             android:exported="false"

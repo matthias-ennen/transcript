@@ -19,6 +19,7 @@ import java.io.File
 private const val STATE_FILE_NAME = "active-transcription-state.bin"
 private const val STATE_CHANGED_ACTION = "de.matthiasennen.transcript.TRANSCRIPTION_STATE_CHANGED"
 private const val EXIT_CHECK_INTERVAL_MS = 3_000L
+private const val WORKER_STALL_TIMEOUT_MS = 3 * 60_000L
 
 sealed interface TranscriptionState {
     data object Idle : TranscriptionState
@@ -62,6 +63,7 @@ object TranscriptionCoordinator {
     private var applicationContext: Context? = null
     private var receiverRegistered = false
     private var observedEnvelope: PersistedTranscriptionState? = null
+    private var watchdogRecoveryRequestedForStart = 0L
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -90,6 +92,16 @@ object TranscriptionCoordinator {
                     stateStore(context).write(failedEnvelope)
                     observedEnvelope = failedEnvelope
                     mutableState.value = failure
+                } else if (
+                    System.currentTimeMillis() - envelope.updatedAtEpochMs > WORKER_STALL_TIMEOUT_MS &&
+                    watchdogRecoveryRequestedForStart != envelope.workerStartedAtEpochMs
+                ) {
+                    watchdogRecoveryRequestedForStart = envelope.workerStartedAtEpochMs
+                    context.sendBroadcast(
+                        Intent(context, TranscriptionControlReceiver::class.java).apply {
+                            action = ACTION_RECOVER_TRANSCRIPTION_ON_CPU
+                        }
+                    )
                 }
             }
             if (observedEnvelope?.state?.isActive() == true) {

@@ -22,12 +22,12 @@ Internetverbindung.
    `RecordingService` besitzt die laufende Mikrofonaufnahme unabhängig von der
    Activity, hält dafür einen begrenzten Partial-Wakelock und veröffentlicht
    Pegel, Laufzeit, Abschluss oder Fehler über `RecordingCoordinator`.
-2. `WaveformGenerator` dekodiert die Audiospur blockweise und verdichtet die
-   gelesenen Puffer unmittelbar auf 180 Spitzenwerte. Die vollständigen PCM-
-   Daten werden dabei nie im Speicher gehalten. Nach 60 Sekunden wird nur die
-   optionale Wellenform abgebrochen; die Datei bleibt nutzbar.
+2. Die Transkriptionsvorbereitung verdichtet jeden dekodierten PCM-Abschnitt
+   unmittelbar auf 180 Spitzenwerte und schreibt beides atomar. Beim bloßen
+   Wiederöffnen werden zuerst diese Cachewerte gelesen; ein aktiver Worker wird
+   niemals durch einen zweiten UI-Decoder konkurriert.
 3. `TranscriptionService` läuft im privaten Android-Prozess `:transcription`,
-   plant Fünf-Minuten-Hauptabschnitte mit je zwei Sekunden Kontextüberlappung
+   plant Ein- bis Fünf-Minuten-Hauptabschnitte mit je zwei Sekunden Kontextüberlappung
    und arbeitet unabhängig von Activity und UI-HWUI.
 4. `AndroidAudioDecoder` dekodiert ausschließlich den aktuellen Bereich und
    resampelt MediaCodec-Ausgabepuffer unmittelbar auf 16-kHz-Mono-PCM. PCM in
@@ -36,18 +36,16 @@ Internetverbindung.
    Zeitstempelrundungen auf; vor Whisper wird der Abschnitt wieder exakt auf
    seine Sollgröße begrenzt. Ein monotoner Stillstandswächter begrenzt sowohl
    Leerlaufzeit als auch Leerlaufzyklen. Bei Stillstand werden Codec und
-   Extractor vollständig freigegeben und genau einmal neu erzeugt; danach kann
-   höchstens noch die bereits begrenzte 2,5-Minuten-Sicherheitsaufteilung greifen.
-5. Decoder und Whisper-Modell werden strikt sequenziell verwendet: Der Decoder
-   wird nach dem aktuellen Abschnitt vollständig freigegeben, erst danach wird
-   `WhisperContext` geladen. Nach der Inferenz wird auch dieses Modell vor dem
-   nächsten Decoderlauf freigegeben. Bei automatischer Auswahl wird eine anhand
+   Extractor vollständig freigegeben und genau einmal neu erzeugt.
+5. Decoder und Whisper-Modell werden strikt zweiphasig verwendet: Alle Abschnitte
+   werden zuerst einzeln dekodiert, als PCM16LE gesichert und aus dem RAM
+   freigegeben. Danach wird `WhisperContext` genau einmal geladen und über alle
+   vorbereiteten Abschnitte wiederverwendet. Bei automatischer Auswahl wird eine anhand
    eines brauchbaren Textabschnitts erkannte Sprache für die folgenden
    Abschnitte festgehalten.
 6. `TranscriptionChunking` verschiebt lokale Segmentzeiten auf die absolute
    Audioposition und ordnet Überlappungssegmente über ihren Mittelpunkt genau
-   einem Hauptbereich zu. Ein fehlgeschlagener Hauptabschnitt wird einmal in
-   2,5-Minuten-Bereiche geteilt.
+   einem Hauptbereich zu.
 7. `TranscriptionCheckpointStore` schreibt Segmente, Sprache und nächste
    Position nach jedem fertigen Abschnitt atomar in den privaten App-Speicher.
 8. `TranscriptResultStore` hält nach Abschluss das unveränderte Whisper-Original
@@ -60,6 +58,10 @@ Internetverbindung.
    Modellobjekte werden nie über Binder oder Intent transportiert. Ab Android 11
    erkennt die UI einen nativen Worker-Absturz über `ApplicationExitInfo`, bleibt
    selbst geöffnet und bietet einen gesicherten Zwischenstand zur Fortsetzung an.
+   Ein Fortschritts-Watchdog fordert nach drei Minuten Stillstand über den
+   separaten Prozess `:control` genau einen CPU-Neustart an. Der gleiche Prozess
+   setzt einen Benutzerabbruch notfalls per Prozessende durch, ohne einen bereits
+   beendeten Worker durch den Benachrichtigungs-Knopf neu zu starten.
 10. `TranscriptTimeline` ergänzt aus Whisper-Original und Audiodauer einmalig
    Anfangs-, Zwischen- und Endpausen. Lücken ab einer Sekunde erhalten leere,
    editierbare Pausensegmente; kürzere technische Abstände werden nur für die
@@ -121,17 +123,17 @@ identisch mit der Hauptseite. Threads, CPU-/GPU-Wahl, Vorgabetext,
 Dekodierungsverfahren, Suchbreite, Temperatur, Kontext, Segmentierung,
 Zeitstempelberechnung und Halluzinationsschwellen werden validiert und über
 `WhisperConfiguration` bis in `whisper_full_params` durchgereicht. Die vorhandene
-sequenzielle Abschnittsplanung verwendet eine einstellbare Dauer von einer bis
-zehn Minuten. VAD besitzt eine eigene Einstellungsseite; die vier erweiterten
+sequenzielle Abschnittsplanung verwendet ausschließlich ganze Dauern von einer bis
+fünf Minuten, standardmäßig drei. VAD besitzt eine eigene Einstellungsseite; die vier erweiterten
 Einstellungsseiten sind zusätzlich über den anklickbaren Seitentitel erreichbar.
 Das optionale Silero-VAD-Modell wird getrennt unter `vad-models/` verwaltet. Nur
 ein vollständig installiertes Modell wird zusammen mit den persistierten
 VAD-Parametern bis in `whisper_full_params` durchgereicht. **Aus** deaktiviert
 VAD, **Ein** aktiviert es und **Automatisch** führt vor dem Laden von Whisper
-eine konstantspeichernde Abschnittsanalyse mit dem echten Silero-Kontext durch.
+eine abschnittsweise Analyse der bereits vorbereiteten PCM-Dateien mit dem echten Silero-Kontext durch.
 Die vollständige Audiospur bleibt dabei bewusst die Entscheidungsgrundlage;
 eine Stichprobenanalyse wird wegen möglicher Fehlgewichtung nicht verwendet.
-Auch diese Voranalyse läuft durch denselben begrenzten Decoder-Watchdog.
+Eine zweite Dekodierung für VAD findet nicht statt.
 Sie wandelt die von `whisper.cpp` gelieferten VAD-Zeitstempel an der JNI-Grenze
 explizit von Zentisekunden in Millisekunden um und verwirft ungültige Paare.
 Anschließend aggregiert sie erkannte Sprachbereiche, Sprach-/Pausenanteil, die
@@ -181,8 +183,8 @@ App-Speicher. Modelldownload, Mikrofonaufnahme und Transkription besitzen getren
 Foreground-Services, getrennte Zustandskoordinatoren und getrennte
 Fehlerbehandlung. Downloads können über `.part`-Dateien fortgesetzt werden und
 werden vor der Aktivierung per SHA-256 geprüft. Modelle werden nicht in die APK
-aufgenommen. Ein bewusster Transkriptionsabbruch entfernt den Zwischenstand;
-eine Prozessunterbrechung lässt ihn für die Wiederaufnahme bestehen.
+aufgenommen. Ein bewusster Transkriptionsabbruch und eine Prozessunterbrechung
+lassen den kompatiblen Zwischenstand für die Wiederaufnahme bestehen.
 
 Der getrennte `AiModel`-Katalog enthält Qwen3.5 mit 0,8B, 2B und 4B Parametern.
 Auswahl, Download, SHA-256-Prüfung und Löschen liegen ausschließlich in den

@@ -149,8 +149,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             performanceModelLayerCount = inspectAiModelLayers(aiSettings.selectedModel)
         )
         refreshAiModelInstallations(aiSettings.selectedModel)
-        restoreStoredTranscript()
         TranscriptionCoordinator.initialize(application)
+        restoreStoredTranscript()
         viewModelScope.launch {
             ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
         }
@@ -393,12 +393,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             activityDetail = if (restoredTranscript == null) "Wellenform wird erstellt · 0 %" else null,
             cannaBotMode = if (restoredTranscript == null) CannaBotMode.WAITING else CannaBotMode.IDLE
         ).withRecalculatedTranscriptionEstimate()
-        runCatching { audioPlayer.prepare(uri) }
-            .onFailure { throwable ->
-                uiState = uiState.copy(
-                    error = throwable.localizedMessage ?: "Die Mediendatei konnte nicht geöffnet werden."
-                )
-            }
         waveformJob = viewModelScope.launch {
             try {
                 val metadataDurationMs = withContext(Dispatchers.IO) {
@@ -418,6 +412,32 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 val cached = withContext(Dispatchers.IO) { waveformCache.read(cacheKey) }
                 if (cached != null) {
                     finishWaveform(uri, cached.peaks, cached.durationMs, status)
+                    return@launch
+                }
+
+                val workerIsActive = when (TranscriptionCoordinator.state.value) {
+                    is TranscriptionState.Starting, is TranscriptionState.Running -> true
+                    else -> false
+                }
+                if (restoredTranscript != null && workerIsActive) {
+                    // The isolated worker is creating this exact cache from its prepared PCM.
+                    // Never start a competing decoder merely because the UI was reopened.
+                    var cachePolls = 0
+                    while (cachePolls < 180) {
+                        delay(1_000L)
+                        cachePolls++
+                        val preparedCache = withContext(Dispatchers.IO) { waveformCache.read(cacheKey) }
+                        if (preparedCache != null) {
+                            finishWaveform(uri, preparedCache.peaks, preparedCache.durationMs, status)
+                            return@launch
+                        }
+                        val stillActive = when (TranscriptionCoordinator.state.value) {
+                            is TranscriptionState.Starting, is TranscriptionState.Running -> true
+                            else -> false
+                        }
+                        if (!stillActive) break
+                    }
+                    finishWaveformWithoutPreview(uri)
                     return@launch
                 }
 
@@ -1767,7 +1787,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     completedModel = null,
                     transcriptionDurationSeconds = null,
                     error = null,
-                    status = "Transkription abgebrochen.",
+                    status = "Transkription angehalten · Der Zwischenstand bleibt erhalten.",
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 TranscriptionCoordinator.acknowledgeTerminal(application)
@@ -1803,6 +1823,15 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     private fun restoreStoredTranscript() {
         val stored = transcriptResultStore.read() ?: return
+        val pendingTerminal = TranscriptionCoordinator.state.value
+        if (pendingTerminal is TranscriptionState.Completed &&
+            pendingTerminal.fileName == stored.fileName &&
+            pendingTerminal.model.id == stored.modelId
+        ) {
+            // This result was already persisted before the process restart. Consuming the
+            // terminal envelope prevents automatic post-processing from running a second time.
+            TranscriptionCoordinator.acknowledgeTerminal(application)
+        }
         val sourceUri = stored.sourceUri.takeIf(String::isNotBlank)?.let(Uri::parse)
         if (sourceUri != null) {
             selectAudioInternal(
