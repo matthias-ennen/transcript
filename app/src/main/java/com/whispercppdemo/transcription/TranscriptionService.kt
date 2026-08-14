@@ -39,6 +39,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 private const val CHANNEL_ID = "offline_transcription"
 internal const val TRANSCRIPTION_NOTIFICATION_ID = 2108
@@ -69,6 +72,12 @@ class TranscriptionService : Service() {
     private val notificationUpdateThrottle = ProgressUpdateThrottle(2_000L)
     private var processStartedAtEpochMs = 0L
     private var forceCpuForRun = false
+    private var heartbeatScheduler: ScheduledExecutorService? = null
+    @Volatile private var activeJobId = ""
+    @Volatile private var activePhase = "idle"
+    @Volatile private var activeBackend = "none"
+    @Volatile private var activeSectionNumber = 0
+    @Volatile private var lastProgressAtEpochMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -111,6 +120,8 @@ class TranscriptionService : Service() {
     override fun onDestroy() {
         stopRequested.set(true)
         activeWhisperContext?.requestAbort()
+        heartbeatScheduler?.shutdownNow()
+        heartbeatScheduler = null
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -147,6 +158,7 @@ class TranscriptionService : Service() {
             val effectiveRequest = saved?.request ?: request.copy(
                 jobId = request.jobId.ifBlank { UUID.randomUUID().toString() }
             )
+            startHeartbeat(effectiveRequest.jobId)
             TranscriptionControlReceiver.cancellationFile(this).delete()
             TranscriptionControlReceiver.cpuRetryFile(this).let { retryFile ->
                 val retryJob = runCatching { retryFile.readText() }.getOrDefault("")
@@ -194,6 +206,7 @@ class TranscriptionService : Service() {
                 totalSectionCount = sectionCount,
                 sectionDurationMs = whisperSettings.sectionMinutes * 60_000L
             )
+            markWorkerProgress("vad", 0)
             activeVadModelPath = resolveVadModelPath(
                 request = effectiveRequest,
                 model = model,
@@ -206,6 +219,7 @@ class TranscriptionService : Service() {
             )
 
             ensureContinues()
+            markWorkerProgress("model_loading", 0)
             updateNotification("Whisper-Modell wird geladen …", 0, indeterminate = true)
             activeWhisperContext = WhisperContext.createContextFromFile(
                 modelFile.absolutePath,
@@ -216,10 +230,12 @@ class TranscriptionService : Service() {
                 "${model.modelLabel} einmal für alle Abschnitte geladen · " +
                     "Backend ${checkNotNull(activeWhisperContext).runtimeBackend.name}."
             )
+            activeBackend = checkNotNull(activeWhisperContext).runtimeBackend.name
             manifest.sections.forEachIndexed { index, prepared ->
                 ensureContinues()
                 val section = prepared.section
                 val absoluteSectionNumber = previouslyCompletedSections + index + 1
+                markWorkerProgress("inference", absoluteSectionNumber)
                 val samples = preparedAudioStore.readSection(prepared)
                 try {
                     checkpoint = transcribePreparedSection(
@@ -247,6 +263,7 @@ class TranscriptionService : Service() {
                             modelFile.absolutePath,
                             useGpu = false
                         )
+                        activeBackend = "CPU"
                         checkpoint = transcribePreparedSection(
                             request = effectiveRequest,
                             model = model,
@@ -269,6 +286,7 @@ class TranscriptionService : Service() {
             }
 
             ensureContinues()
+            markWorkerProgress("cleanup", sectionCount)
             checkpointStore.clear()
             preparedAudioStore.clear()
             TranscriptionControlReceiver.cpuRetryFile(this).delete()
@@ -285,6 +303,7 @@ class TranscriptionService : Service() {
             // Release Whisper before announcing completion so the ViewModel can
             // safely start automatic AI post-processing without both models
             // overlapping in memory.
+            markWorkerProgress("model_release", sectionCount)
             val completedWhisperContext = activeWhisperContext
             activeWhisperContext = null
             completedWhisperContext?.release()
@@ -319,6 +338,9 @@ class TranscriptionService : Service() {
             val context = activeWhisperContext
             activeWhisperContext = null
             runCatching { context?.release() }
+            heartbeatScheduler?.shutdownNow()
+            heartbeatScheduler = null
+            workerHeartbeatStore(filesDir).clear()
         }
     }
 
@@ -346,8 +368,10 @@ class TranscriptionService : Service() {
         val reusable = existing?.sections.orEmpty().takeWhile(preparedAudioStore::sectionExists)
         val missingSections = sections.drop(reusable.size)
         val requiredBytes = requiredPreparedAudioFreeBytes(estimatePreparedAudioBytes(missingSections))
-        check(preparedAudioStore.usableSpace >= requiredBytes) {
-            "Für die Audioaufbereitung werden mindestens ${requiredBytes / (1024L * 1024L)} MB freier Speicher benötigt."
+        val availableBytes = preparedAudioStore.usableSpace
+        check(availableBytes >= requiredBytes) {
+            "Für die Audioaufbereitung werden mindestens ${requiredBytes / (1024L * 1024L)} MB " +
+                "freier Speicher benötigt; verfügbar sind ${availableBytes / (1024L * 1024L)} MB."
         }
         val prepared = reusable.toMutableList()
         val waveform = PreparedWaveformAccumulator(durationMs).apply {
@@ -357,6 +381,7 @@ class TranscriptionService : Service() {
             ensureContinues()
             val index = reusable.size + relativeIndex
             val sectionNumber = sectionOffset + index + 1
+            markWorkerProgress("decoding", sectionNumber)
             publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint, 0f,
                 "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
                 "Dekodierung auf PCM 16 kHz Mono; Whisper ist noch nicht geladen.")
@@ -505,6 +530,7 @@ class TranscriptionService : Service() {
                 ensureContinues()
                 val section = prepared.section
                 val sectionNumber = sectionOffset + index + 1
+                markWorkerProgress("vad", sectionNumber)
                 publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint,
                     0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${preparedSections.size}",
                     "Silero liest den vorbereiteten PCM-Abschnitt; es findet keine zweite Dekodierung statt.")
@@ -574,6 +600,7 @@ class TranscriptionService : Service() {
         status: String,
         detail: String
     ) {
+        recordWorkerProgress()
         val now = SystemClock.elapsedRealtime()
         val boundary = progressWithinSection <= 0f || progressWithinSection >= 1f
         val uiSignature = "$sectionNumber|${(progressWithinSection * 200f).toInt()}|$status"
@@ -618,7 +645,52 @@ class TranscriptionService : Service() {
     }
 
     private fun ensureContinues() {
-        if (stopRequested.get()) throw CancellationException("Transkription abgebrochen.")
+        val cancelledJob = runCatching {
+            TranscriptionControlReceiver.cancellationFile(this).readText()
+        }.getOrDefault("")
+        if (stopRequested.get() || (activeJobId.isNotBlank() && cancelledJob == activeJobId)) {
+            throw CancellationException("Transkription abgebrochen.")
+        }
+    }
+
+    private fun startHeartbeat(jobId: String) {
+        activeJobId = jobId
+        activePhase = "preflight"
+        activeBackend = if (forceCpuForRun) "CPU" else "pending"
+        activeSectionNumber = 0
+        lastProgressAtEpochMs = System.currentTimeMillis()
+        heartbeatScheduler?.shutdownNow()
+        heartbeatScheduler = Executors.newSingleThreadScheduledExecutor().also { scheduler ->
+            scheduler.scheduleAtFixedRate(
+                { runCatching(::writeHeartbeat) }, 0L, 2L, TimeUnit.SECONDS
+            )
+        }
+    }
+
+    private fun markWorkerProgress(phase: String, sectionNumber: Int) {
+        activePhase = phase
+        activeSectionNumber = sectionNumber
+        recordWorkerProgress()
+    }
+
+    private fun recordWorkerProgress() {
+        lastProgressAtEpochMs = System.currentTimeMillis()
+    }
+
+    private fun writeHeartbeat() {
+        if (activeJobId.isBlank()) return
+        workerHeartbeatStore(filesDir).write(
+            WorkerHeartbeat(
+                jobId = activeJobId,
+                pid = android.os.Process.myPid(),
+                workerStartedAtEpochMs = processStartedAtEpochMs,
+                phase = activePhase,
+                backend = activeBackend,
+                sectionNumber = activeSectionNumber,
+                heartbeatAtEpochMs = System.currentTimeMillis(),
+                lastProgressAtEpochMs = lastProgressAtEpochMs
+            )
+        )
     }
 
     private fun addDiagnostic(message: String) {

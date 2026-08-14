@@ -20,6 +20,7 @@ private const val STATE_FILE_NAME = "active-transcription-state.bin"
 private const val STATE_CHANGED_ACTION = "de.matthiasennen.transcript.TRANSCRIPTION_STATE_CHANGED"
 private const val EXIT_CHECK_INTERVAL_MS = 3_000L
 private const val WORKER_STALL_TIMEOUT_MS = 3 * 60_000L
+private const val HEARTBEAT_MISSING_TIMEOUT_MS = 15_000L
 
 sealed interface TranscriptionState {
     data object Idle : TranscriptionState
@@ -76,6 +77,7 @@ object TranscriptionCoordinator {
             val context = applicationContext ?: return
             val envelope = observedEnvelope
             if (envelope != null && envelope.state.isActive()) {
+                val now = System.currentTimeMillis()
                 val exit = findWorkerExit(context, envelope.workerStartedAtEpochMs)
                 if (exit != null) {
                     val running = envelope.state as? TranscriptionState.Running
@@ -93,7 +95,7 @@ object TranscriptionCoordinator {
                     observedEnvelope = failedEnvelope
                     mutableState.value = failure
                 } else if (
-                    System.currentTimeMillis() - envelope.updatedAtEpochMs > WORKER_STALL_TIMEOUT_MS &&
+                    workerIsStalled(context, envelope, now) &&
                     watchdogRecoveryRequestedForStart != envelope.workerStartedAtEpochMs
                 ) {
                     watchdogRecoveryRequestedForStart = envelope.workerStartedAtEpochMs
@@ -158,6 +160,19 @@ object TranscriptionCoordinator {
 
     private fun stateStore(context: Context) =
         TranscriptionStateStore(File(context.filesDir, STATE_FILE_NAME))
+
+    private fun workerIsStalled(
+        context: Context,
+        envelope: PersistedTranscriptionState,
+        now: Long
+    ): Boolean {
+        val heartbeat = workerHeartbeatStore(context.filesDir).read()
+        if (heartbeat == null || heartbeat.workerStartedAtEpochMs != envelope.workerStartedAtEpochMs) {
+            return now - envelope.updatedAtEpochMs > WORKER_STALL_TIMEOUT_MS
+        }
+        return now - heartbeat.heartbeatAtEpochMs > HEARTBEAT_MISSING_TIMEOUT_MS ||
+            now - heartbeat.lastProgressAtEpochMs > WORKER_STALL_TIMEOUT_MS
+    }
 
     private fun findWorkerExit(context: Context, workerStartedAtEpochMs: Long): WorkerExit? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null

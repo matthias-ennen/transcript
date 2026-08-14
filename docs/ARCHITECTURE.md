@@ -58,7 +58,10 @@ Internetverbindung.
    Modellobjekte werden nie über Binder oder Intent transportiert. Ab Android 11
    erkennt die UI einen nativen Worker-Absturz über `ApplicationExitInfo`, bleibt
    selbst geöffnet und bietet einen gesicherten Zwischenstand zur Fortsetzung an.
-   Ein Fortschritts-Watchdog fordert nach drei Minuten Stillstand über den
+   Der Worker schreibt unabhängig vom nativen Fortschrittscallback alle zwei
+   Sekunden ein atomares Lebenszeichen mit Auftrags-ID, PID, Phase, Backend,
+   Abschnitt sowie letztem echten Fortschrittszeitpunkt. Ein Watchdog fordert
+   nach drei Minuten ohne echten Fortschritt über den
    separaten Prozess `:control` genau einen CPU-Neustart an. Der gleiche Prozess
    setzt einen Benutzerabbruch notfalls per Prozessende durch, ohne einen bereits
    beendeten Worker durch den Benachrichtigungs-Knopf neu zu starten.
