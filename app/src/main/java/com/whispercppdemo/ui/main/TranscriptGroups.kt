@@ -59,6 +59,9 @@ internal fun TranscriptList(
     if (segments.isEmpty()) return
 
     val groups = remember(segments) { groupTranscriptSegments(segments) }
+    val segmentNumbers = remember(segments, rawWhisperSegments) {
+        transcriptNumbers(segments, rawWhisperSegments)
+    }
     val expandedGroups = remember(state.selectedAudio) {
         mutableStateMapOf<Long, Boolean>().apply {
             groups.firstOrNull()?.let { firstGroup -> put(firstGroup.startMs, true) }
@@ -138,7 +141,7 @@ internal fun TranscriptList(
                 if (expanded) {
                     group.segments.forEach { indexedSegment ->
                         TranscriptSegmentCard(
-                            number = transcriptNumber(indexedSegment.segment, rawWhisperSegments),
+                            number = segmentNumbers[indexedSegment.originalIndex],
                             segment = indexedSegment.segment,
                             isEditing = isEditingGroup,
                             editingEnabled = !state.isAiPostProcessing,

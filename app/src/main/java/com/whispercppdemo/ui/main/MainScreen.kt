@@ -99,20 +99,39 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var pendingModelDownload by remember { mutableStateOf<WhisperModel?>(null) }
     var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
     var pendingVadModelDownload by remember { mutableStateOf(false) }
+    var pendingRecording by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) {
+    ) { granted ->
         pendingModelDownload?.let(viewModel::downloadModel)
         pendingAiModelDownload?.let(viewModel::downloadAiModel)
         if (pendingVadModelDownload) viewModel.downloadVadModel()
+        if (pendingRecording) {
+            if (granted) viewModel.startRecording()
+            else viewModel.reportRecordingNotificationPermissionDenied()
+        }
         pendingModelDownload = null
         pendingAiModelDownload = null
         pendingVadModelDownload = false
+        pendingRecording = false
     }
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) viewModel.startRecording() else viewModel.reportMicrophonePermissionDenied()
+        if (!granted) {
+            viewModel.reportMicrophonePermissionDenied()
+        } else if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingRecording = true
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.startRecording()
+        }
     }
     val textExporter = rememberExporter(context, state, ExportFormat.TEXT)
     val srtExporter = rememberExporter(context, state, ExportFormat.SUBRIP)
@@ -237,7 +256,18 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                             Manifest.permission.RECORD_AUDIO
                         ) == PackageManager.PERMISSION_GRANTED
                     ) {
-                        viewModel.startRecording()
+                        if (
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            pendingRecording = true
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            viewModel.startRecording()
+                        }
                     } else {
                         microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
                     }

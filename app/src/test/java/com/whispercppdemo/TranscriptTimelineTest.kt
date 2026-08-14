@@ -4,6 +4,7 @@ import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ui.main.buildTranscriptTimeline
 import de.matthiasennen.transcript.ui.main.isVirtualTimelineSegment
 import de.matthiasennen.transcript.ui.main.restoreManualTimelineText
+import de.matthiasennen.transcript.ui.main.transcriptNumbers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -63,5 +64,16 @@ class TranscriptTimelineTest {
 
         assertEquals("Sprechername", restored.first().text)
         assertEquals("Hallo", restored[1].text)
+    }
+
+    @Test
+    fun numbersOnlyWhisperCardsInTheContinuousTimeline() {
+        val raw = listOf(
+            WhisperSegment(2_000L, 4_000L, "Hallo"),
+            WhisperSegment(6_000L, 8_000L, "Welt")
+        )
+        val timeline = buildTranscriptTimeline(raw, 10_000L)
+
+        assertEquals(listOf(null, 1, null, 2, null), transcriptNumbers(timeline, raw))
     }
 }

@@ -55,27 +55,48 @@ internal fun isVirtualTimelineSegment(
     source.endMs > segment.startMs && source.startMs < segment.endMs
 }
 
-internal fun transcriptNumber(
-    segment: WhisperSegment,
+internal fun transcriptNumbers(
+    timeline: List<WhisperSegment>,
     rawWhisperSegments: List<WhisperSegment>
-): Int? {
-    val sourceIndex = rawWhisperSegments.indexOfFirst { source ->
-        source.endMs > segment.startMs && source.startMs < segment.endMs
+): List<Int?> {
+    val raw = rawWhisperSegments.withIndex().sortedBy { it.value.startMs }
+    var firstCandidate = 0
+    return timeline.map { segment ->
+        while (firstCandidate < raw.size && raw[firstCandidate].value.endMs <= segment.startMs) {
+            firstCandidate++
+        }
+        var candidate = firstCandidate
+        var number: Int? = null
+        while (candidate < raw.size && raw[candidate].value.startMs < segment.endMs) {
+            if (raw[candidate].value.endMs > segment.startMs) {
+                number = raw[candidate].index + 1
+                break
+            }
+            candidate++
+        }
+        number
     }
-    return sourceIndex.takeIf { it >= 0 }?.plus(1)
 }
 
 internal fun restoreManualTimelineText(
     timeline: List<WhisperSegment>,
     previouslyDisplayed: List<WhisperSegment>,
     rawWhisperSegments: List<WhisperSegment>
-): List<WhisperSegment> = timeline.map { segment ->
-    if (!isVirtualTimelineSegment(segment, rawWhisperSegments)) return@map segment
-    val manual = previouslyDisplayed.firstOrNull { previous ->
-        previous.startMs == segment.startMs &&
-            previous.endMs == segment.endMs &&
-            previous.text.isNotBlank() &&
-            isVirtualTimelineSegment(previous, rawWhisperSegments)
+): List<WhisperSegment> {
+    val previousNumbers = transcriptNumbers(previouslyDisplayed, rawWhisperSegments)
+    val manualTextByRange = previouslyDisplayed.mapIndexedNotNull { index, previous ->
+        if (previousNumbers[index] == null && previous.text.isNotBlank()) {
+            (previous.startMs to previous.endMs) to previous.text
+        } else {
+            null
+        }
+    }.toMap()
+    val timelineNumbers = transcriptNumbers(timeline, rawWhisperSegments)
+    return timeline.mapIndexed { index, segment ->
+        if (timelineNumbers[index] != null) segment else {
+            manualTextByRange[segment.startMs to segment.endMs]
+                ?.let { segment.copy(text = it) }
+                ?: segment
+        }
     }
-    manual?.let { segment.copy(text = it.text) } ?: segment
 }
