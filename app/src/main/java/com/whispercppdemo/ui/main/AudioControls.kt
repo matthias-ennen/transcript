@@ -84,7 +84,7 @@ fun AudioControls(
 
             FilledIconButton(
                 onClick = onRecordClick,
-                enabled = !state.isBusy,
+                enabled = !state.isBusy && !state.isRecordingStopping,
                 modifier = Modifier.size(52.dp)
             ) {
                 Icon(
@@ -112,14 +112,18 @@ fun AudioControls(
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    if (state.isRecording) "Aufnahme läuft" else formatClock(state.playbackPositionMs / 1_000L),
+                    when {
+                        state.isRecordingStopping -> "Aufnahme wird beendet …"
+                        state.isRecording -> "Aufnahme läuft"
+                        else -> formatClock(state.playbackPositionMs / 1_000L)
+                    },
                     style = MaterialTheme.typography.labelSmall
                 )
                 Text(
-                    if (state.isRecording) {
-                        "Stopp über Mikrofon-Taste"
-                    } else {
-                        formatClock(state.audioDurationMs / 1_000L)
+                    when {
+                        state.isRecordingStopping -> "Datei wird gespeichert"
+                        state.isRecording -> "Stopp über Mikrofon-Taste"
+                        else -> formatClock(state.audioDurationMs / 1_000L)
                     },
                     style = MaterialTheme.typography.labelSmall
                 )
