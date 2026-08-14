@@ -357,8 +357,21 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private fun selectAudioInternal(
         uri: Uri,
         fileName: String,
+        status: String
+    ) = loadAudioState(uri, fileName, status, restoredTranscript = null)
+
+    private fun restoreAudioInternal(
+        uri: Uri,
+        fileName: String,
         status: String,
-        restoredTranscript: StoredTranscriptResult? = null
+        restoredTranscript: StoredTranscriptResult
+    ) = loadAudioState(uri, fileName, status, restoredTranscript)
+
+    private fun loadAudioState(
+        uri: Uri,
+        fileName: String,
+        status: String,
+        restoredTranscript: StoredTranscriptResult?
     ) {
         stopPlayback(release = true)
         if (restoredTranscript == null) transcriptResultPersistence.clear()
@@ -1834,7 +1847,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
         val sourceUri = stored.sourceUri.takeIf(String::isNotBlank)?.let(Uri::parse)
         if (sourceUri != null) {
-            selectAudioInternal(
+            restoreAudioInternal(
                 uri = sourceUri,
                 fileName = stored.fileName,
                 status = "Gespeichertes Transkript wiederhergestellt: " +

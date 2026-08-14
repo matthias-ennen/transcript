@@ -33,7 +33,7 @@ class TranscriptionControlReceiver : BroadcastReceiver() {
                 }
                 appContext.stopService(Intent(appContext, TranscriptionService::class.java))
                 Thread.sleep(CANCEL_GRACE_PERIOD_MS)
-                killWorkerIfStillRunning(appContext)
+                killWorkerIfStillRunning(appContext, checkpoint?.request?.jobId.orEmpty())
                 if (watchdogRecovery && checkpoint != null && !cpuRetryAlreadyUsed) {
                     cpuRetryFile(appContext).writeText(checkpoint.request.jobId)
                     TranscriptionService.resumeCheckpoint(appContext, forceCpu = true)
@@ -64,12 +64,22 @@ class TranscriptionControlReceiver : BroadcastReceiver() {
         }.start()
     }
 
-    private fun killWorkerIfStillRunning(context: Context) {
+    private fun killWorkerIfStillRunning(context: Context, jobId: String) {
         val workerName = "${context.packageName}:transcription"
-        context.getSystemService(ActivityManager::class.java).runningAppProcesses
-            .orEmpty()
-            .filter { it.processName == workerName && it.uid == Process.myUid() }
-            .forEach { Process.killProcess(it.pid) }
+        val heartbeat = workerHeartbeatStore(context.filesDir).read()
+            ?.takeIf { it.jobId == jobId && it.pid > 0 }
+            ?: return
+        val manager = context.getSystemService(ActivityManager::class.java)
+        val verified = manager.runningAppProcesses.orEmpty().any {
+            it.pid == heartbeat.pid && it.processName == workerName && it.uid == Process.myUid()
+        }
+        if (!verified) return
+        Process.killProcess(heartbeat.pid)
+        repeat(4) {
+            Thread.sleep(250L)
+            val stillRunning = manager.runningAppProcesses.orEmpty().any { it.pid == heartbeat.pid }
+            if (!stillRunning) return
+        }
     }
 
     companion object {
