@@ -245,8 +245,10 @@ bewusst den allgemeinen Text **Audio wird wiedergegeben …**.
 ## Lange Aufnahmen und Hintergrundbetrieb
 
 Die Transkription lädt nicht mehr die vollständige Aufnahme als PCM in den
-Arbeitsspeicher. `TranscriptionService` verarbeitet nacheinander
-Fünf-Minuten-Hauptabschnitte. Jeder Abschnitt enthält an den Grenzen zwei
+Arbeitsspeicher. `TranscriptionService` läuft in einem privaten Android-
+Nebenprozess und verarbeitet nacheinander Fünf-Minuten-Hauptabschnitte. Dadurch
+bleibt die Oberfläche auch bei einem nativen Fehler des Transkriptions-Workers
+geöffnet. Jeder Abschnitt enthält an den Grenzen zwei
 Sekunden zusätzlichen Audiokontext, damit Wörter und Sätze nicht abgeschnitten
 werden. Die Überlappung wird anschließend anhand der zeitlichen Mitte jedes
 Whisper-Segments genau einem Hauptabschnitt zugeordnet. Auf die lokalen
@@ -255,6 +257,11 @@ addiert; dadurch bleiben auch Zeitstempel über einer Stunde korrekt.
 
 Der Decoder toleriert einen kleinen, fest begrenzten Codec-Überhang und schneidet
 das Ergebnis vor Whisper wieder auf die angeforderte Abschnittslänge zu.
+Decoder und Whisper-Modell sind dabei niemals gleichzeitig aktiv: Erst wird der
+Audioabschnitt vollständig dekodiert und der Codec freigegeben, danach wird das
+gewählte Whisper-Modell für genau diesen Abschnitt geladen und anschließend
+wieder freigegeben. Das zusätzliche Laden pro Abschnitt ist bewusst zugunsten
+geringerer Spitzenlast und klarer Ressourcengrenzen gewählt.
 Scheitert ein Fünf-Minuten-Abschnitt aus einem anderen Grund, wird dieser einmal
 in zwei 2,5-Minuten-Sicherheitsabschnitte geteilt. Nach jedem fertigen Abschnitt
 werden Textsegmente, erkannte Sprache und nächste Audioposition atomar im

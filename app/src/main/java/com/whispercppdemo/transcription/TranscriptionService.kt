@@ -59,9 +59,11 @@ class TranscriptionService : Service() {
     private var startedAtEpochMs = 0L
     private val uiUpdateThrottle = ProgressUpdateThrottle(500L)
     private val notificationUpdateThrottle = ProgressUpdateThrottle(2_000L)
+    private var processStartedAtEpochMs = 0L
 
     override fun onCreate() {
         super.onCreate()
+        processStartedAtEpochMs = System.currentTimeMillis()
         checkpointStore = TranscriptionCheckpointStore(File(filesDir, CHECKPOINT_FILE_NAME))
         createNotificationChannel()
     }
@@ -81,7 +83,7 @@ class TranscriptionService : Service() {
 
         stopRequested.set(false)
         userCancellationRequested.set(false)
-        TranscriptionCoordinator.update(TranscriptionState.Starting(request.fileName))
+        publishState(TranscriptionState.Starting(request.fileName))
         startForeground(
             NOTIFICATION_ID,
             buildNotification("Transkription wird vorbereitet …", 0, indeterminate = true)
@@ -167,16 +169,6 @@ class TranscriptionService : Service() {
                 settings = whisperSettings,
                 installedModelPath = installedVadModelPath
             )
-            activeWhisperContext = WhisperContext.createContextFromFile(
-                modelFile.absolutePath,
-                useGpu = whisperSettings.toNativeConfiguration().useGpu
-            )
-            val runtimeBackend = checkNotNull(activeWhisperContext).runtimeBackend
-            addDiagnostic(
-                "${model.modelLabel} wurde mit Backend ${runtimeBackend.name} geladen." +
-                    if (runtimeBackend.fellBackToCpu) " Vulkan war nicht nutzbar; CPU-Rückfall aktiv." else ""
-            )
-
             while (sectionIndex < sections.size) {
                 ensureContinues()
                 val section = sections[sectionIndex]
@@ -190,7 +182,8 @@ class TranscriptionService : Service() {
                         sectionNumber = absoluteSectionNumber.coerceAtMost(sectionCount),
                         sectionCount = sectionCount,
                         checkpoint = checkpoint,
-                        whisperSettings = whisperSettings
+                        whisperSettings = whisperSettings,
+                        modelFile = modelFile
                     )
                     latestCheckpoint = checkpoint
                     sectionIndex++
@@ -241,7 +234,7 @@ class TranscriptionService : Service() {
             activeWhisperContext = null
             completedWhisperContext?.release()
             System.gc()
-            TranscriptionCoordinator.update(completed)
+            publishState(completed)
             finishWithNotification(
                 title = "Transkription abgeschlossen",
                 text = "${checkpoint.segments.size} Textabschnitte erkannt."
@@ -250,13 +243,13 @@ class TranscriptionService : Service() {
             val checkpoint = latestCheckpoint ?: checkpointStore.read()
             if (userCancellationRequested.get()) {
                 checkpointStore.clear()
-                TranscriptionCoordinator.update(TranscriptionState.Cancelled(request.fileName))
+                publishState(TranscriptionState.Cancelled(request.fileName))
                 finishWithNotification("Transkription abgebrochen", request.fileName)
             } else if (!stopRequested.get()) {
                 val canResume = checkpoint?.hasMeaningfulProgress() == true
                 if (!canResume) checkpointStore.clear()
                 val message = userFacingError(throwable, canResume)
-                TranscriptionCoordinator.update(
+                publishState(
                     TranscriptionState.Failed(
                         fileName = request.fileName,
                         message = message,
@@ -282,8 +275,10 @@ class TranscriptionService : Service() {
         sectionNumber: Int,
         sectionCount: Int,
         checkpoint: TranscriptionCheckpoint,
-        whisperSettings: WhisperSettings
+        whisperSettings: WhisperSettings,
+        modelFile: File
     ): TranscriptionCheckpoint {
+        val resourceGuard = SequentialTranscriptionResourceGuard()
         val fallbackLabel = if (section.usedFallbackSize) " · Sicherheitsgröße 2,5 min" else ""
         publishRunning(
             request,
@@ -297,36 +292,36 @@ class TranscriptionService : Service() {
             detail = "Position ${formatClock(section.mainStartMs / 1_000L)} der Audiodatei."
         )
 
-        val chunk = decodeAudioChunk(
-            context = this,
-            uri = uri,
-            startMs = section.decodeStartMs,
-            endMs = section.decodeEndMs,
-            shouldCancel = stopRequested::get,
-            onDecoderRestart = { stall ->
-                addDiagnostic(
-                    "Decoder-Stillstand in Abschnitt $sectionNumber erkannt; " +
-                        "Decoder wird genau einmal vollständig neu gestartet. ${stall.message}"
-                )
+        resourceGuard.beginDecoding()
+        val chunk = try {
+            decodeAudioChunk(
+                context = this,
+                uri = uri,
+                startMs = section.decodeStartMs,
+                endMs = section.decodeEndMs,
+                shouldCancel = stopRequested::get,
+                onDecoderRestart = { stall ->
+                    addDiagnostic(
+                        "Decoder-Stillstand in Abschnitt $sectionNumber erkannt; " +
+                            "Decoder wird genau einmal vollständig neu gestartet. ${stall.message}"
+                    )
+                    publishRunning(
+                        request, model, section, sectionNumber, sectionCount, checkpoint,
+                        progressWithinSection = 0f,
+                        status = "Decoder-Neustart · Abschnitt $sectionNumber von $sectionCount",
+                        detail = "Die Audioaufbereitung war ohne Fortschritt und wird einmal sauber neu gestartet."
+                    )
+                }
+            ) { decoderProgress ->
                 publishRunning(
                     request, model, section, sectionNumber, sectionCount, checkpoint,
-                    progressWithinSection = 0f,
-                    status = "Decoder-Neustart · Abschnitt $sectionNumber von $sectionCount",
-                    detail = "Die Audioaufbereitung war ohne Fortschritt und wird einmal sauber neu gestartet."
+                    progressWithinSection = decoderProgress * 0.15f,
+                    status = "Abschnitt $sectionNumber von $sectionCount wird dekodiert",
+                    detail = "Audio wird speicherschonend auf 16 kHz vorbereitet."
                 )
             }
-        ) { decoderProgress ->
-            publishRunning(
-                request,
-                model,
-                section,
-                sectionNumber,
-                sectionCount,
-                checkpoint,
-                progressWithinSection = decoderProgress * 0.15f,
-                status = "Abschnitt $sectionNumber von $sectionCount wird dekodiert",
-                detail = "Audio wird speicherschonend auf 16 kHz vorbereitet."
-            )
+        } finally {
+            resourceGuard.endDecoding()
         }
         ensureContinues()
         addDiagnostic(
@@ -341,26 +336,42 @@ class TranscriptionService : Service() {
             )
         }
 
-        val language = if (request.language == "auto") {
-            checkpoint.detectedLanguage?.takeIf(String::isNotBlank) ?: "auto"
-        } else {
-            request.language
+        resourceGuard.beginInference()
+        val result = try {
+            activeWhisperContext = WhisperContext.createContextFromFile(
+                modelFile.absolutePath,
+                useGpu = whisperSettings.toNativeConfiguration().useGpu
+            )
+            val runtimeBackend = checkNotNull(activeWhisperContext).runtimeBackend
+            addDiagnostic(
+                "Abschnitt $sectionNumber: ${model.modelLabel} mit Backend ${runtimeBackend.name} geladen." +
+                    if (runtimeBackend.fellBackToCpu) " Vulkan war nicht nutzbar; CPU-Rückfall aktiv." else ""
+            )
+            val language = if (request.language == "auto") {
+                checkpoint.detectedLanguage?.takeIf(String::isNotBlank) ?: "auto"
+            } else request.language
+            val vadModelPath = activeVadModelPath
+            if (vadModelPath != null) addDiagnostic("Abschnitt $sectionNumber wird mit Silero VAD verarbeitet.")
+            runCatching {
+                transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
+                    language, whisperSettings, vadModelPath)
+            }.recoverCatching { throwable ->
+                if (vadModelPath == null || throwable is CancellationException || stopRequested.get()) throw throwable
+                activeVadModelPath = null
+                addDiagnostic("VAD-Fehler: Abschnitt $sectionNumber wird automatisch ohne VAD wiederholt.")
+                publishRunning(request, model, section, sectionNumber, sectionCount, checkpoint, 0.15f,
+                    "VAD-Fehler · Abschnitt $sectionNumber wird ohne VAD fortgesetzt",
+                    "Whisper erhält den vollständig dekodierten Audioabschnitt.")
+                transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
+                    language, whisperSettings, null)
+            }.getOrThrow()
+        } finally {
+            val context = activeWhisperContext
+            activeWhisperContext = null
+            runCatching { context?.release() }
+            resourceGuard.endInference()
+            System.gc()
         }
-        val vadModelPath = activeVadModelPath
-        if (vadModelPath != null) addDiagnostic("Abschnitt $sectionNumber wird mit Silero VAD verarbeitet.")
-        val result = runCatching {
-            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
-                language, whisperSettings, vadModelPath)
-        }.recoverCatching { throwable ->
-            if (vadModelPath == null || throwable is CancellationException || stopRequested.get()) throw throwable
-            activeVadModelPath = null
-            addDiagnostic("VAD-Fehler: Abschnitt $sectionNumber wird automatisch ohne VAD wiederholt.")
-            publishRunning(request, model, section, sectionNumber, sectionCount, checkpoint, 0.15f,
-                "VAD-Fehler · Abschnitt $sectionNumber wird ohne VAD fortgesetzt",
-                "Whisper erhält den vollständig dekodierten Audioabschnitt.")
-            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
-                language, whisperSettings, null)
-        }.getOrThrow()
         ensureContinues()
 
         val absoluteSegments = selectAbsoluteSegments(
@@ -550,7 +561,7 @@ class TranscriptionService : Service() {
         val completedMs = section.mainStartMs +
             (section.mainDurationMs * progressWithinSection.coerceIn(0f, 1f)).toLong()
         val progress = (completedMs.toFloat() / checkpoint.durationMs.toFloat()).coerceIn(0f, 1f)
-        TranscriptionCoordinator.update(
+        publishState(
             TranscriptionState.Running(
                 fileName = request.fileName,
                 model = model,
@@ -580,6 +591,10 @@ class TranscriptionService : Service() {
         stopRequested.set(true)
         activeWhisperContext?.requestAbort()
         updateNotification("Transkription wird abgebrochen …", 0, indeterminate = true)
+    }
+
+    private fun publishState(state: TranscriptionState) {
+        TranscriptionCoordinator.publish(this, state, processStartedAtEpochMs)
     }
 
     private fun ensureContinues() {

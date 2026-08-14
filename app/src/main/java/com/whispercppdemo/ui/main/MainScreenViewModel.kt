@@ -150,6 +150,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
         refreshAiModelInstallations(aiSettings.selectedModel)
         restoreStoredTranscript()
+        TranscriptionCoordinator.initialize(application)
         viewModelScope.launch {
             ModelDownloadCoordinator.state.collect(::handleModelDownloadState)
         }
@@ -1747,6 +1748,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     }
                     cue(CannaBotCue.SUCCESS)
                 }
+                TranscriptionCoordinator.acknowledgeTerminal(application)
             }
             is TranscriptionState.Cancelled -> {
                 stopTranscriptionElapsedTimer()
@@ -1768,6 +1770,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     status = "Transkription abgebrochen.",
                     cannaBotMode = CannaBotMode.IDLE
                 )
+                TranscriptionCoordinator.acknowledgeTerminal(application)
             }
             is TranscriptionState.Failed -> {
                 stopTranscriptionElapsedTimer()
@@ -1791,6 +1794,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.FAILED)
+                TranscriptionCoordinator.acknowledgeTerminal(application)
             }
         }
     }

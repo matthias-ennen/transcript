@@ -26,8 +26,9 @@ Internetverbindung.
    gelesenen Puffer unmittelbar auf 180 Spitzenwerte. Die vollständigen PCM-
    Daten werden dabei nie im Speicher gehalten. Nach 60 Sekunden wird nur die
    optionale Wellenform abgebrochen; die Datei bleibt nutzbar.
-3. `TranscriptionService` plant Fünf-Minuten-Hauptabschnitte mit je zwei
-   Sekunden Kontextüberlappung und arbeitet unabhängig von der Activity.
+3. `TranscriptionService` läuft im privaten Android-Prozess `:transcription`,
+   plant Fünf-Minuten-Hauptabschnitte mit je zwei Sekunden Kontextüberlappung
+   und arbeitet unabhängig von Activity und UI-HWUI.
 4. `AndroidAudioDecoder` dekodiert ausschließlich den aktuellen Bereich und
    resampelt MediaCodec-Ausgabepuffer unmittelbar auf 16-kHz-Mono-PCM. PCM in
    der ursprünglichen Abtastrate wird nicht gesammelt. Ein fester
@@ -37,9 +38,12 @@ Internetverbindung.
    Leerlaufzeit als auch Leerlaufzyklen. Bei Stillstand werden Codec und
    Extractor vollständig freigegeben und genau einmal neu erzeugt; danach kann
    höchstens noch die bereits begrenzte 2,5-Minuten-Sicherheitsaufteilung greifen.
-5. `WhisperContext` verarbeitet den aktuellen Abschnitt. Bei automatischer
-   Auswahl wird eine anhand eines brauchbaren Textabschnitts erkannte Sprache
-   für die folgenden Abschnitte festgehalten.
+5. Decoder und Whisper-Modell werden strikt sequenziell verwendet: Der Decoder
+   wird nach dem aktuellen Abschnitt vollständig freigegeben, erst danach wird
+   `WhisperContext` geladen. Nach der Inferenz wird auch dieses Modell vor dem
+   nächsten Decoderlauf freigegeben. Bei automatischer Auswahl wird eine anhand
+   eines brauchbaren Textabschnitts erkannte Sprache für die folgenden
+   Abschnitte festgehalten.
 6. `TranscriptionChunking` verschiebt lokale Segmentzeiten auf die absolute
    Audioposition und ordnet Überlappungssegmente über ihren Mittelpunkt genau
    einem Hauptbereich zu. Ein fehlgeschlagener Hauptabschnitt wird einmal in
@@ -51,7 +55,11 @@ Internetverbindung.
    ersetzten Datei. `TranscriptResultPersistence` serialisiert Schreibvorgänge
    außerhalb des Compose-Hauptthreads.
 9. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
-   an jedes aktive `MainScreenViewModel`.
+   prozessübergreifend über eine atomare Statusdatei und ein paketinternes
+   Wecksignal an jedes aktive `MainScreenViewModel`. Große Audio- oder
+   Modellobjekte werden nie über Binder oder Intent transportiert. Ab Android 11
+   erkennt die UI einen nativen Worker-Absturz über `ApplicationExitInfo`, bleibt
+   selbst geöffnet und bietet einen gesicherten Zwischenstand zur Fortsetzung an.
 10. `TranscriptTimeline` ergänzt aus Whisper-Original und Audiodauer einmalig
    Anfangs-, Zwischen- und Endpausen. Lücken ab einer Sekunde erhalten leere,
    editierbare Pausensegmente; kürzere technische Abstände werden nur für die
