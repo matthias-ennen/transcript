@@ -264,7 +264,9 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     }
                 },
                 requestRecording = {
-                    if (state.isRecording) {
+                    if (state.isRecordingStopping) {
+                        Unit
+                    } else if (state.isRecording) {
                         viewModel.stopRecording()
                     } else if (
                         ContextCompat.checkSelfPermission(

@@ -21,6 +21,7 @@ data class TranscriptUiState(
     val selectedAudio: Uri? = null,
     val selectedFileName: String? = null,
     val isRecording: Boolean = false,
+    val isRecordingStopping: Boolean = false,
     val isPlaying: Boolean = false,
     val playbackPositionMs: Long = 0L,
     val audioDurationMs: Long = 0L,
