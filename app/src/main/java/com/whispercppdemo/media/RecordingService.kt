@@ -22,6 +22,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val RECORDING_CHANNEL_ID = "audio_recording"
 private const val RECORDING_NOTIFICATION_ID = 2110
@@ -34,6 +35,7 @@ class RecordingService : Service() {
     private var meterJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var startedAtEpochMs = 0L
+    private val stopStarted = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -52,6 +54,7 @@ class RecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startRecording(startId: Int) {
+        stopStarted.set(false)
         RecordingCoordinator.update(RecordingState.Starting)
         startForeground(RECORDING_NOTIFICATION_ID, buildNotification("Aufnahme wird gestartet …"))
         runCatching { recorder.start() }
@@ -62,7 +65,7 @@ class RecordingService : Service() {
                     while (isActive) {
                         val elapsed = ((System.currentTimeMillis() - startedAtEpochMs) / 1_000L)
                             .coerceAtLeast(0L)
-                        RecordingCoordinator.update(
+                        val accepted = RecordingCoordinator.updateRunning(
                             RecordingState.Running(
                                 file = file,
                                 startedAtEpochMs = startedAtEpochMs,
@@ -70,6 +73,7 @@ class RecordingService : Service() {
                                 amplitude = recorder.currentAmplitude()
                             )
                         )
+                        if (!accepted) break
                         delay(250L)
                     }
                 }
@@ -90,6 +94,12 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
+        if (!stopStarted.compareAndSet(false, true)) return
+        if (!RecordingCoordinator.beginStopping()) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
         meterJob?.cancel()
         meterJob = null
         val file = recorder.stop()
@@ -106,7 +116,7 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
-        val wasRecording = meterJob?.isActive == true
+        val wasRecording = meterJob?.isActive == true && !stopStarted.get()
         meterJob?.cancel()
         meterJob = null
         recorder.release()
