@@ -703,6 +703,7 @@ private fun MainContent(
                             } else {
                                 state.segments
                             },
+                            rawWhisperSegments = state.rawWhisperSegments,
                             onTextChanged = viewModel::updateTranscriptText,
                             onAiEditGroup = { groupStartMs ->
                                 if (state.selectedAiModelInstalled) {
@@ -930,7 +931,8 @@ private fun rememberExporter(
                 exportTranscript(
                     segments = state.segments,
                     format = format,
-                    metadata = state.exportMetadata()
+                    metadata = state.exportMetadata(),
+                    rawWhisperSegments = state.rawWhisperSegments
                 )
             )
         }

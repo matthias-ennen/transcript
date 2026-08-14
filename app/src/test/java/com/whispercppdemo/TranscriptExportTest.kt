@@ -58,6 +58,28 @@ class TranscriptExportTest {
         assertTrue(json.contains("\"created_at\": \"2026-08-07T21:15:30+02:00\""))
         assertTrue(json.contains("\"segments\": ["))
         assertTrue(json.contains("\"start_ms\": 1250"))
+        assertTrue(json.contains("\"origin\": \"whisper\""))
+    }
+
+    @Test
+    fun exportsEmptyTimelineGapsOnlyToJsonAndMarksManualGapText() {
+        val raw = listOf(WhisperSegment(2_000L, 4_000L, "Hallo"))
+        val timeline = listOf(
+            WhisperSegment(0L, 2_000L, ""),
+            raw.single(),
+            WhisperSegment(4_000L, 6_000L, "manuell ergänzt")
+        )
+
+        val json = exportTranscript(timeline, ExportFormat.JSON, metadata, raw)
+        val text = exportTranscript(timeline, ExportFormat.TEXT, metadata, raw)
+        val srt = exportTranscript(timeline, ExportFormat.SUBRIP, metadata, raw)
+
+        assertTrue(json.contains("\"origin\": \"virtual_pause\""))
+        assertTrue(json.contains("\"origin\": \"manual\""))
+        assertTrue(json.contains("\"text\": \"\""))
+        assertTrue(text.endsWith("Hallo\nmanuell ergänzt"))
+        assertTrue(!srt.contains("00:00:00,000 --> 00:00:02,000"))
+        assertTrue(srt.contains("manuell ergänzt"))
     }
 
     @Test

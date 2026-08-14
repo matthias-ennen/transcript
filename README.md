@@ -93,6 +93,11 @@ Die fertige AAC-/M4A-Datei wird unter `files/recordings` im privaten
 App-Speicher abgelegt und sofort als aktuelle Audiodatei ausgewählt. Ihr Name
 enthält Datum und Uhrzeit.
 
+Die Aufnahme selbst läuft in einem Mikrofon-Foreground-Service mit sichtbarer
+Android-Systemmeldung und Beenden-Aktion. Dadurch bleibt sie bei ausgeschaltetem
+Bildschirm, Gerätesperre und einem Wechsel zu einer anderen App aktiv. Nach der
+Rückkehr übernimmt die Oberfläche Laufzeit und Aufnahmezustand wieder.
+
 Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
 abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
 durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
@@ -120,6 +125,13 @@ Whisper-Original und übernommener Bearbeitungsstand werden getrennt und atomar
 im privaten App-Speicher gehalten. Nach einem Prozessneustart stellt die App das
 zuletzt fertige Ergebnis wieder her; eine neue Datei, Aufnahme oder Transkription
 ersetzt diesen Stand bewusst.
+
+Beim Wiederherstellen wird auch die zugehörige Audiodatei vorbereitet und ihre
+Wellenform aus dem geprüften Cache geladen oder erneut erzeugt. Die sichtbare
+Zeitleiste reicht von Dateibeginn bis Dateiende: größere Lücken erscheinen als
+leere, bearbeitbare Pausenboxen ohne Whisper-Nummer. Leere Pausen werden nur im
+JSON mit `origin: "virtual_pause"` exportiert. Manuell befüllte Pausen erhalten
+`origin: "manual"` und erscheinen zusätzlich in TXT und SRT.
 
 Die vollständige Fünf-Minuten-Gruppe wird einmal als gemeinsamer, schreibgeschützter
 Whisper-Rohkontext an das lokale Modell übergeben. Danach prüft die KI jedes

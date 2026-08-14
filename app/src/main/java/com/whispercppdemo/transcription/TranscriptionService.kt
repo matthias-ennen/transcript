@@ -57,7 +57,8 @@ class TranscriptionService : Service() {
     private lateinit var checkpointStore: TranscriptionCheckpointStore
     private val diagnostics = ArrayDeque<String>()
     private var startedAtEpochMs = 0L
-    private var lastUiPublishAtMs = 0L
+    private val uiUpdateThrottle = ProgressUpdateThrottle(500L)
+    private val notificationUpdateThrottle = ProgressUpdateThrottle(2_000L)
 
     override fun onCreate() {
         super.onCreate()
@@ -135,7 +136,6 @@ class TranscriptionService : Service() {
             ).also(checkpointStore::write)
             latestCheckpoint = checkpoint
             startedAtEpochMs = checkpoint.startedAtEpochMs
-            lastUiPublishAtMs = 0L
 
             val resumed = checkpoint.nextStartMs > 0L
             addDiagnostic(
@@ -544,10 +544,9 @@ class TranscriptionService : Service() {
         detail: String
     ) {
         val now = SystemClock.elapsedRealtime()
-        val mustPublish = progressWithinSection <= 0f || progressWithinSection >= 1f ||
-            now - lastUiPublishAtMs >= 250L
-        if (!mustPublish) return
-        lastUiPublishAtMs = now
+        val boundary = progressWithinSection <= 0f || progressWithinSection >= 1f
+        val uiSignature = "$sectionNumber|${(progressWithinSection * 200f).toInt()}|$status"
+        if (!uiUpdateThrottle.shouldPublish(now, uiSignature, force = boundary)) return
         val completedMs = section.mainStartMs +
             (section.mainDurationMs * progressWithinSection.coerceIn(0f, 1f)).toLong()
         val progress = (completedMs.toFloat() / checkpoint.durationMs.toFloat()).coerceIn(0f, 1f)
@@ -568,7 +567,12 @@ class TranscriptionService : Service() {
                 detectedLanguage = checkpoint.detectedLanguage
             )
         )
-        updateNotification(status, (progress * 100).toInt(), indeterminate = false)
+        updateNotification(
+            text = status,
+            percent = (progress * 100).toInt(),
+            indeterminate = false,
+            force = boundary
+        )
     }
 
     private fun requestUserCancellation() {
@@ -590,7 +594,19 @@ class TranscriptionService : Service() {
         diagnostics.addLast("${formatClock(elapsed)} · $message")
     }
 
-    private fun updateNotification(text: String, percent: Int, indeterminate: Boolean) {
+    private fun updateNotification(
+        text: String,
+        percent: Int,
+        indeterminate: Boolean,
+        force: Boolean = true
+    ) {
+        val signature = "${percent.coerceIn(0, 100)}|$indeterminate|$text"
+        if (!notificationUpdateThrottle.shouldPublish(
+                SystemClock.elapsedRealtime(),
+                signature,
+                force
+            )
+        ) return
         getSystemService(NotificationManager::class.java).notify(
             NOTIFICATION_ID,
             buildNotification(text, percent, indeterminate)

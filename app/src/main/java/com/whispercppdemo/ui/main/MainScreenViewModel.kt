@@ -42,8 +42,10 @@ import de.matthiasennen.transcript.download.VadModelDownloadService
 import de.matthiasennen.transcript.download.VadModelDownloadState
 import de.matthiasennen.transcript.download.VadModelInstallation
 import de.matthiasennen.transcript.media.AudioPlayerController
-import de.matthiasennen.transcript.media.AudioRecorder
 import de.matthiasennen.transcript.media.CachedWaveform
+import de.matthiasennen.transcript.media.RecordingCoordinator
+import de.matthiasennen.transcript.media.RecordingService
+import de.matthiasennen.transcript.media.RecordingState
 import de.matthiasennen.transcript.media.WaveformCache
 import de.matthiasennen.transcript.media.generateWaveform
 import de.matthiasennen.transcript.media.inspectAudioTrack
@@ -85,7 +87,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val transcriptResultPersistence = TranscriptResultPersistence(transcriptResultStore)
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
-    private val audioRecorder = AudioRecorder(application)
     private val audioPlayer = AudioPlayerController(
         context = application,
         onPrepared = { durationMs ->
@@ -115,7 +116,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             cue(CannaBotCue.FAILED)
         }
     )
-    private var recordingMeter: Job? = null
     private var playbackTimer: Job? = null
     private var waveformJob: Job? = null
     private var aiBenchmarkJob: Job? = null
@@ -165,6 +165,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         viewModelScope.launch {
             AiPostProcessingCoordinator.state.collect(::handleAiPostProcessingState)
         }
+        viewModelScope.launch {
+            RecordingCoordinator.state.collect(::handleRecordingState)
+        }
     }
 
     fun selectAudio(uri: Uri) {
@@ -185,38 +188,26 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (uiState.isBusy || uiState.isRecording) return
         stopPlayback(release = true)
         transcriptResultPersistence.clear()
-        runCatching { audioRecorder.start() }
-            .onSuccess {
-                uiState = uiState.copy(
-                    isRecording = true,
-                    liveWaveform = emptyList(),
-                    rawWhisperSegments = emptyList(),
-                    segments = emptyList(),
-                    isEditingTranscript = false,
-                    editingTranscriptGroupStartMs = null,
-                    draftSegments = emptyList(),
-                    error = null,
-                    status = "Aufnahme läuft … Zum Beenden erneut tippen.",
-                    cannaBotMode = CannaBotMode.RUNNING
+        uiState = uiState.copy(
+            isRecording = true,
+            liveWaveform = emptyList(),
+            rawWhisperSegments = emptyList(),
+            segments = emptyList(),
+            isEditingTranscript = false,
+            editingTranscriptGroupStartMs = null,
+            draftSegments = emptyList(),
+            error = null,
+            elapsedSeconds = 0L,
+            status = "Aufnahme wird gestartet …",
+            cannaBotMode = CannaBotMode.WAITING
+        )
+        runCatching { RecordingService.start(application) }
+            .onFailure { failure ->
+                handleRecordingState(
+                    RecordingState.Failed(
+                        failure.localizedMessage ?: "Die Aufnahme konnte nicht gestartet werden."
+                    )
                 )
-                recordingMeter?.cancel()
-                recordingMeter = viewModelScope.launch {
-                    while (uiState.isRecording) {
-                        delay(100L)
-                        val amplitude = audioRecorder.currentAmplitude()
-                        uiState = uiState.copy(
-                            liveWaveform = (uiState.liveWaveform + amplitude).takeLast(72)
-                        )
-                    }
-                }
-            }
-            .onFailure { throwable ->
-                uiState = uiState.copy(
-                    error = throwable.localizedMessage ?: "Die Aufnahme konnte nicht gestartet werden.",
-                    status = "Aufnahme fehlgeschlagen.",
-                    cannaBotMode = CannaBotMode.IDLE
-                )
-                cue(CannaBotCue.FAILED)
             }
     }
 
@@ -231,24 +222,66 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun stopRecording() {
         if (!uiState.isRecording) return
-        recordingMeter?.cancel()
-        recordingMeter = null
-        val file = audioRecorder.stop()
-        uiState = uiState.copy(isRecording = false, liveWaveform = emptyList())
-        if (file == null || !file.isFile || file.length() == 0L) {
-            uiState = uiState.copy(
-                error = "Die Aufnahme war zu kurz oder konnte nicht gespeichert werden.",
-                status = "Aufnahme fehlgeschlagen.",
-                cannaBotMode = CannaBotMode.IDLE
-            )
-            cue(CannaBotCue.FAILED)
-            return
+        uiState = uiState.copy(status = "Aufnahme wird beendet …", cannaBotMode = CannaBotMode.WAITING)
+        RecordingService.stop(application)
+    }
+
+    private fun handleRecordingState(state: RecordingState) {
+        when (state) {
+            RecordingState.Idle -> Unit
+            RecordingState.Starting -> {
+                uiState = uiState.copy(
+                    isRecording = true,
+                    status = "Aufnahme wird gestartet …",
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            is RecordingState.Running -> {
+                val joiningActiveRecording = !uiState.isRecording
+                if (joiningActiveRecording) {
+                    waveformJob?.cancel()
+                    waveformJob = null
+                    stopPlayback(release = true)
+                }
+                uiState = uiState.copy(
+                    isRecording = true,
+                    elapsedSeconds = state.elapsedSeconds,
+                    liveWaveform = (uiState.liveWaveform + state.amplitude).takeLast(72),
+                    selectedAudio = if (joiningActiveRecording) null else uiState.selectedAudio,
+                    selectedFileName = if (joiningActiveRecording) state.file.name else uiState.selectedFileName,
+                    waveform = if (joiningActiveRecording) emptyList() else uiState.waveform,
+                    isWaveformLoading = if (joiningActiveRecording) false else uiState.isWaveformLoading,
+                    waveformProgress = if (joiningActiveRecording) null else uiState.waveformProgress,
+                    audioDurationMs = if (joiningActiveRecording) 0L else uiState.audioDurationMs,
+                    rawWhisperSegments = if (joiningActiveRecording) emptyList() else uiState.rawWhisperSegments,
+                    segments = if (joiningActiveRecording) emptyList() else uiState.segments,
+                    draftSegments = if (joiningActiveRecording) emptyList() else uiState.draftSegments,
+                    completedModel = if (joiningActiveRecording) null else uiState.completedModel,
+                    status = "Aufnahme läuft … Zum Beenden erneut tippen.",
+                    cannaBotMode = CannaBotMode.RUNNING,
+                    error = null
+                )
+            }
+            is RecordingState.Completed -> {
+                selectAudioInternal(
+                    uri = Uri.fromFile(state.file),
+                    fileName = state.file.name,
+                    status = "Aufnahme gespeichert und ausgewählt."
+                )
+                RecordingCoordinator.reset()
+            }
+            is RecordingState.Failed -> {
+                uiState = uiState.copy(
+                    isRecording = false,
+                    liveWaveform = emptyList(),
+                    error = state.message,
+                    status = "Aufnahme fehlgeschlagen.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+                RecordingCoordinator.reset()
+            }
         }
-        selectAudioInternal(
-            uri = Uri.fromFile(file),
-            fileName = file.name,
-            status = "Aufnahme gespeichert und ausgewählt."
-        )
     }
 
     fun togglePlayback() {
@@ -310,9 +343,14 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(playbackPositionMs = position)
     }
 
-    private fun selectAudioInternal(uri: Uri, fileName: String, status: String) {
+    private fun selectAudioInternal(
+        uri: Uri,
+        fileName: String,
+        status: String,
+        restoredTranscript: StoredTranscriptResult? = null
+    ) {
         stopPlayback(release = true)
-        transcriptResultPersistence.clear()
+        if (restoredTranscript == null) transcriptResultPersistence.clear()
         waveformJob?.cancel()
         uiState = uiState.copy(
             selectedAudio = uri,
@@ -324,21 +362,25 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             waveform = emptyList(),
             isWaveformLoading = true,
             waveformProgress = 0f,
-            rawWhisperSegments = emptyList(),
-            segments = emptyList(),
+            rawWhisperSegments = restoredTranscript?.rawWhisperSegments.orEmpty(),
+            segments = restoredTranscript?.displayedSegments.orEmpty(),
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
             error = null,
             elapsedSeconds = 0L,
             diagnostics = emptyList(),
-            detectedLanguage = null,
-            completedModel = null,
-            transcriptionDurationSeconds = null,
-            status = "Wellenform wird erstellt …",
+            detectedLanguage = restoredTranscript?.detectedLanguage,
+            completedModel = restoredTranscript?.let { WhisperModel.fromId(it.modelId) },
+            transcriptionDurationSeconds = restoredTranscript?.transcriptionDurationSeconds,
+            status = if (restoredTranscript == null) {
+                "Wellenform wird erstellt …"
+            } else {
+                status
+            },
             runtimeEstimateAnnouncementId = 0L,
-            activityDetail = "Wellenform wird erstellt · 0 %",
-            cannaBotMode = CannaBotMode.WAITING
+            activityDetail = if (restoredTranscript == null) "Wellenform wird erstellt · 0 %" else null,
+            cannaBotMode = if (restoredTranscript == null) CannaBotMode.WAITING else CannaBotMode.IDLE
         ).withRecalculatedTranscriptionEstimate()
         runCatching { audioPlayer.prepare(uri) }
             .onFailure { throwable ->
@@ -419,16 +461,31 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         if (uiState.selectedAudio != uri) return
         val operationOwnsStatus = uiState.isBusy || uiState.isTranscribing || uiState.isRecording ||
             uiState.segments.isNotEmpty() || uiState.error != null
+        val restoredTimeline = if (
+            uiState.completedModel != null && uiState.rawWhisperSegments.isNotEmpty()
+        ) {
+            restoreManualTimelineText(
+                timeline = buildTranscriptTimeline(uiState.rawWhisperSegments, durationMs),
+                previouslyDisplayed = uiState.segments,
+                rawWhisperSegments = uiState.rawWhisperSegments
+            )
+        } else {
+            uiState.segments
+        }
         uiState = uiState.copy(
             waveform = waveform,
             audioDurationMs = uiState.audioDurationMs.takeIf { it > 0L } ?: durationMs,
             isWaveformLoading = false,
             waveformProgress = 1f,
+            segments = restoredTimeline,
             mediaReadyStatus = readyStatus,
             status = if (operationOwnsStatus) uiState.status else readyStatus,
             activityDetail = if (operationOwnsStatus) uiState.activityDetail else null,
             cannaBotMode = if (operationOwnsStatus) uiState.cannaBotMode else CannaBotMode.REVIEW
         ).withRecalculatedTranscriptionEstimate()
+        if (restoredTimeline != uiState.rawWhisperSegments && uiState.completedModel != null) {
+            persistCurrentTranscript(restoredTimeline)
+        }
     }
 
     private fun finishWaveformWithoutPreview(uri: Uri) {
@@ -436,10 +493,24 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val operationOwnsStatus = uiState.isBusy || uiState.isTranscribing || uiState.isRecording ||
             uiState.segments.isNotEmpty() || uiState.error != null
         val readyStatus = "Datei ist bereit · Wellenform konnte nicht erstellt werden."
+        val restoredTimeline = if (
+            uiState.completedModel != null &&
+            uiState.rawWhisperSegments.isNotEmpty() &&
+            uiState.audioDurationMs > 0L
+        ) {
+            restoreManualTimelineText(
+                timeline = buildTranscriptTimeline(uiState.rawWhisperSegments, uiState.audioDurationMs),
+                previouslyDisplayed = uiState.segments,
+                rawWhisperSegments = uiState.rawWhisperSegments
+            )
+        } else {
+            uiState.segments
+        }
         uiState = uiState.copy(
             waveform = emptyList(),
             isWaveformLoading = false,
             waveformProgress = null,
+            segments = restoredTimeline,
             mediaReadyStatus = readyStatus,
             status = if (operationOwnsStatus) uiState.status else readyStatus,
             activityDetail = if (operationOwnsStatus) uiState.activityDetail else null,
@@ -1603,6 +1674,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is TranscriptionState.Completed -> {
                 stopTranscriptionElapsedTimer()
+                val timelineSegments = buildTranscriptTimeline(
+                    whisperSegments = state.segments,
+                    audioDurationMs = uiState.audioDurationMs
+                )
                 val canRunAutomaticAi = state.segments.isNotEmpty() &&
                     uiState.aiPostProcessingEnabled &&
                     uiState.automaticAiPostProcessingEnabled &&
@@ -1618,7 +1693,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     activityDetail = null,
                     rawWhisperSegments = state.segments,
-                    segments = state.segments,
+                    segments = timelineSegments,
                     isEditingTranscript = false,
                     editingTranscriptGroupStartMs = null,
                     draftSegments = emptyList(),
@@ -1637,7 +1712,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     },
                     cannaBotMode = if (canRunAutomaticAi) CannaBotMode.REVIEW else CannaBotMode.IDLE
                 )
-                persistCurrentTranscript(state.segments)
+                persistCurrentTranscript(timelineSegments)
                 if (canRunAutomaticAi) {
                     uiState = uiState.copy(
                         isAiPostProcessing = true,
@@ -1650,7 +1725,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         context = application,
                         model = uiState.selectedAiModel,
                         fileName = uiState.selectedFileName ?: "Transkript",
-                        segments = state.segments
+                        segments = timelineSegments
                     )
                 } else {
                     if (automaticAiMissingModel) {
@@ -1715,6 +1790,16 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private fun restoreStoredTranscript() {
         val stored = transcriptResultStore.read() ?: return
         val sourceUri = stored.sourceUri.takeIf(String::isNotBlank)?.let(Uri::parse)
+        if (sourceUri != null) {
+            selectAudioInternal(
+                uri = sourceUri,
+                fileName = stored.fileName,
+                status = "Gespeichertes Transkript wiederhergestellt: " +
+                    "${stored.displayedSegments.count { it.text.isNotBlank() }} Textabschnitte.",
+                restoredTranscript = stored
+            )
+            return
+        }
         uiState = uiState.copy(
             selectedAudio = sourceUri,
             selectedFileName = stored.fileName,
@@ -1723,7 +1808,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             detectedLanguage = stored.detectedLanguage,
             completedModel = WhisperModel.fromId(stored.modelId),
             transcriptionDurationSeconds = stored.transcriptionDurationSeconds,
-            status = "Gespeichertes Transkript wiederhergestellt: ${stored.displayedSegments.size} Textabschnitte.",
+            status = "Gespeichertes Transkript wiederhergestellt: " +
+                "${stored.displayedSegments.count { it.text.isNotBlank() }} Textabschnitte.",
             cannaBotMode = CannaBotMode.IDLE
         )
     }
@@ -1739,7 +1825,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 detectedLanguage = uiState.detectedLanguage.orEmpty(),
                 transcriptionDurationSeconds = uiState.transcriptionDurationSeconds ?: 0L,
                 savedAtEpochMs = System.currentTimeMillis(),
-                rawWhisperSegments = uiState.rawWhisperSegments.ifEmpty { displayedSegments },
+                rawWhisperSegments = uiState.rawWhisperSegments,
                 displayedSegments = displayedSegments
             )
         )
@@ -1867,13 +1953,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     override fun onCleared() {
-        recordingMeter?.cancel()
         waveformJob?.cancel()
         aiBenchmarkJob?.cancel()
         AiEngineSessionManager.release()
         stopPlaybackTimer()
         stopTranscriptionElapsedTimer()
-        audioRecorder.release()
         audioPlayer.release()
         transcriptResultPersistence.close()
     }

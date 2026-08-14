@@ -155,7 +155,8 @@ internal fun shareTranscript(
             exportTranscript(
                 segments = state.segments,
                 format = format,
-                metadata = metadata
+                metadata = metadata,
+                rawWhisperSegments = state.rawWhisperSegments
             ),
             Charsets.UTF_8
         )

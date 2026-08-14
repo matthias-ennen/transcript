@@ -153,7 +153,7 @@ internal fun TranscriptResultSummary(state: TranscriptUiState) {
                 Text("Erkannte Sprache: ${whisperLanguageDisplayName(it)}")
             }
             state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
-            Text("Textabschnitte: ${state.segments.size}")
+            Text("Textabschnitte: ${state.segments.count { it.text.isNotBlank() }}")
         }
     }
 }

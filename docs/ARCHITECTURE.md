@@ -19,6 +19,9 @@ Internetverbindung.
 ## Datenfluss
 
 1. `MainScreenViewModel` hält den zentralen `TranscriptUiState`.
+   `RecordingService` besitzt die laufende Mikrofonaufnahme unabhängig von der
+   Activity, hält dafür einen begrenzten Partial-Wakelock und veröffentlicht
+   Pegel, Laufzeit, Abschluss oder Fehler über `RecordingCoordinator`.
 2. `WaveformGenerator` dekodiert die Audiospur blockweise und verdichtet die
    gelesenen Puffer unmittelbar auf 180 Spitzenwerte. Die vollständigen PCM-
    Daten werden dabei nie im Speicher gehalten. Nach 60 Sekunden wird nur die
@@ -49,23 +52,31 @@ Internetverbindung.
    außerhalb des Compose-Hauptthreads.
 9. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
    an jedes aktive `MainScreenViewModel`.
-10. Die Ergebnisansicht stellt jedes Segment mit Zeitstempel und GUI-Nummer dar.
+10. `TranscriptTimeline` ergänzt aus Whisper-Original und Audiodauer einmalig
+   Anfangs-, Zwischen- und Endpausen. Lücken ab einer Sekunde erhalten leere,
+   editierbare Pausensegmente; kürzere technische Abstände werden nur für die
+   Anzeige an Nachbarsegmente angelegt. Die separaten Whisper-Rohzeitstempel
+   bleiben unverändert.
+11. Die Ergebnisansicht stellt jedes Whisper-Segment mit Zeitstempel und
+   GUI-Nummer dar. Pausenbereiche besitzen keine Whisper-Nummer.
    Eine 52 × 32 dp große, abgerundete Nummernkapsel hält auch drei- und
    vierstellige Nummern vollständig sichtbar.
-11. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
+12. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
    **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
    Reihenfolge bleiben erhalten.
-12. `AiPostProcessingService` lädt nach vollständiger Freigabe des Whisper-
+13. `AiPostProcessingService` lädt nach vollständiger Freigabe des Whisper-
     Kontexts genau ein ausgewähltes Qwen3.5-GGUF. Stabile Segmentmarker sichern
     Anzahl, Reihenfolge und Zeitstempel. Automatische Läufe übernehmen validierte
     Gruppen direkt; manuelle Läufe schreiben nur in `draftSegments`.
-13. `TranscriptExport` erzeugt TXT, SRT oder JSON aus dem übernommenen Stand.
-14. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
+14. `TranscriptExport` schreibt die vollständige Zeitleiste einschließlich
+    Herkunft in JSON. Leere Pausen werden aus TXT und SRT herausgefiltert;
+    manuell befüllte Pausen erscheinen regulär in allen Formaten.
+15. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
     Cache-Unterordner. Ein nicht exportierter `FileProvider` gibt ausschließlich
     diese Dateien mit zeitlich begrenztem Leserecht an das Android-Teilen-Menü
     weiter. Ein Format verwendet `ACTION_SEND`, mehrere Formate verwenden
     `ACTION_SEND_MULTIPLE`.
-15. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
+16. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
     schwebende Navigationskapsel ein. Sie verwendet denselben Scrollzustand wie
     die gesamte Hauptansicht und führt deshalb bis an den Anfang der App zurück.
 
@@ -144,6 +155,12 @@ Whisper-Fortschrittsmeldungen und wird nach einem erneuten Öffnen anhand der
 Startzeit wieder aufgenommen. Neben der echten Laufzeit bleibt die vor dem Lauf
 berechnete Gesamtschätzung sichtbar.
 
+Native Fortschrittscallbacks werden für Compose auf höchstens zwei Aktualisierungen
+pro Sekunde und für Android-Benachrichtigungen auf höchstens eine Aktualisierung
+in zwei Sekunden verdichtet. Identische Zustände werden nicht erneut publiziert.
+Während Whisper- oder Qwen-Inferenz bleibt das CannaBot-Sprite auf einem ruhenden
+Frame, damit UI-HWUI und Compute-Vulkan nicht fortlaufend um die Mali-GPU konkurrieren.
+
 ## Modelle und Speicherung
 
 Der zentrale `WhisperModel`-Katalog enthält fünf mehrsprachige Qualitätsstufen
@@ -152,7 +169,7 @@ Modelle durchlaufen denselben Auswahl-, Download-, Prüfsummen-, Speicher-,
 Lösch- und Transkriptionspfad; Tiny benötigt keine Sonderbehandlung.
 
 Modelle, Aufnahmen und Transkriptionszwischenstände liegen im privaten
-App-Speicher. Modelldownload und Transkription besitzen getrennte
+App-Speicher. Modelldownload, Mikrofonaufnahme und Transkription besitzen getrennte
 Foreground-Services, getrennte Zustandskoordinatoren und getrennte
 Fehlerbehandlung. Downloads können über `.part`-Dateien fortgesetzt werden und
 werden vor der Aktivierung per SHA-256 geprüft. Modelle werden nicht in die APK
