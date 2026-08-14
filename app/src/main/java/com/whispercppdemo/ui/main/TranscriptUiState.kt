@@ -10,6 +10,7 @@ import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.ai.AiSelfTestMetrics
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.download.VadModelInstallation
+import de.matthiasennen.transcript.transcription.VadProcessingSummary
 
 enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
 
@@ -68,6 +69,8 @@ data class TranscriptUiState(
     val isCancellationRequested: Boolean = false,
     val progress: Float? = null,
     val status: String = "Bitte zuerst das Whisper-Modell herunterladen.",
+    val statusKind: StatusMessageKind = StatusMessageKind.IMPORTANT,
+    val statusEventId: Long = 0L,
     val runtimeEstimateAnnouncementId: Long = 0L,
     val transcriptionEstimateSeconds: Long? = null,
     val elapsedSeconds: Long = 0L,
@@ -81,6 +84,7 @@ data class TranscriptUiState(
     val detectedLanguage: String? = null,
     val completedModel: WhisperModel? = null,
     val transcriptionDurationSeconds: Long? = null,
+    val vadProcessingSummary: VadProcessingSummary? = null,
     val error: String? = null,
     val cannaBotMode: CannaBotMode = CannaBotMode.IDLE,
     val cannaBotCue: CannaBotCue = CannaBotCue.NONE,

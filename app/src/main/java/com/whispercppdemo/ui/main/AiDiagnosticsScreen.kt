@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import android.os.SystemClock
 import kotlinx.coroutines.delay
 
 @Composable
@@ -105,20 +106,53 @@ internal fun LiveStatusLine(
     val activityStatus = state.activityDetail
         ?.trim()
         ?.takeIf { it.isNotEmpty() && it != primaryStatus }
+    val runtimeStatus = state.runtimeStatus()
     val alternateStatus = when {
         !supplementalStatus.isNullOrBlank() && supplementalStatus != primaryStatus -> supplementalStatus
+        state.isTranscribing && runtimeStatus != null -> runtimeStatus
         announcesChangedModelEstimate -> estimateStatus
         alternatesReadyStatus -> estimateStatus
+        !state.isBusy && runtimeStatus != null && runtimeStatus != primaryStatus -> runtimeStatus
         isActiveOperation -> activityStatus
         else -> null
     }
+    val alternateCycleKey = when {
+        !supplementalStatus.isNullOrBlank() -> "supplemental"
+        state.isTranscribing -> "transcription-runtime"
+        announcesChangedModelEstimate -> "model-estimate"
+        alternatesReadyStatus -> "ready-estimate"
+        !state.isBusy && runtimeStatus != null -> "completed-runtime"
+        isActiveOperation && activityStatus != null -> "activity-detail"
+        else -> "none"
+    }
+    var visiblePrimary by remember { mutableStateOf(primaryStatus) }
+    var visibleKind by remember { mutableStateOf(state.statusKind) }
+    var visibleUntilMs by remember { mutableStateOf(0L) }
     var showAlternate by remember { mutableStateOf(false) }
     var handledEstimateAnnouncementId by remember { mutableStateOf(0L) }
+    LaunchedEffect(primaryStatus, state.statusKind, state.statusEventId) {
+        val now = SystemClock.elapsedRealtime()
+        if (
+            shouldReplaceVisibleStatus(
+                visibleKind = visibleKind,
+                incomingKind = state.statusKind,
+                visibleUntilMs = visibleUntilMs,
+                nowMs = now
+            )
+        ) {
+            visiblePrimary = primaryStatus
+            visibleKind = state.statusKind
+            visibleUntilMs = now + statusMinimumVisibleMs(state.statusKind)
+        } else {
+            delay((visibleUntilMs - now).coerceAtLeast(0L))
+            visiblePrimary = primaryStatus
+            visibleKind = state.statusKind
+            visibleUntilMs = SystemClock.elapsedRealtime() +
+                statusMinimumVisibleMs(state.statusKind)
+        }
+    }
     LaunchedEffect(
-        primaryStatus,
-        alternateStatus,
-        supplementalStatus,
-        announcesChangedModelEstimate,
+        alternateCycleKey,
         state.runtimeEstimateAnnouncementId
     ) {
         if (alternateStatus == null) {
@@ -163,7 +197,7 @@ internal fun LiveStatusLine(
     ) {
         CannaBotStatusAnimation(state)
         Text(
-            text = if (showAlternate) alternateStatus.orEmpty() else primaryStatus,
+            text = if (showAlternate) alternateStatus.orEmpty() else visiblePrimary,
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)

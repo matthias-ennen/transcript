@@ -13,7 +13,7 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
 
 private const val RESULT_MAGIC = 0x54525253
-private const val RESULT_VERSION = 1
+private const val RESULT_VERSION = 2
 private const val MAX_RESULT_STRING_BYTES = 4 * 1024 * 1024
 private const val MAX_RESULT_FILE_BYTES = 64L * 1024L * 1024L
 private const val MAX_RESULT_SEGMENTS = 100_000
@@ -26,7 +26,8 @@ data class StoredTranscriptResult(
     val transcriptionDurationSeconds: Long,
     val savedAtEpochMs: Long,
     val rawWhisperSegments: List<WhisperSegment>,
-    val displayedSegments: List<WhisperSegment>
+    val displayedSegments: List<WhisperSegment>,
+    val vadSummary: VadProcessingSummary? = null
 )
 
 /** Atomically stores the one transcript currently shown on the main screen. */
@@ -42,16 +43,26 @@ class TranscriptResultStore(private val resultFile: File) {
         check(resultFile.length() in 1..MAX_RESULT_FILE_BYTES) { "Ungültige Transkriptdateigröße." }
         DataInputStream(BufferedInputStream(resultFile.inputStream())).use { input ->
             check(input.readInt() == RESULT_MAGIC) { "Unbekannte Transkriptdatei." }
-            check(input.readInt() == RESULT_VERSION) { "Veraltete Transkriptdatei." }
+            val version = input.readInt()
+            check(version in 1..RESULT_VERSION) { "Veraltete Transkriptdatei." }
+            val sourceUri = input.readResultString()
+            val fileName = input.readResultString()
+            val modelId = input.readResultString()
+            val detectedLanguage = input.readResultString()
+            val transcriptionDurationSeconds = input.readLong().coerceAtLeast(0L)
+            val savedAtEpochMs = input.readLong().coerceAtLeast(0L)
+            val rawWhisperSegments = input.readSegments()
+            val displayedSegments = input.readSegments()
             StoredTranscriptResult(
-                sourceUri = input.readResultString(),
-                fileName = input.readResultString(),
-                modelId = input.readResultString(),
-                detectedLanguage = input.readResultString(),
-                transcriptionDurationSeconds = input.readLong().coerceAtLeast(0L),
-                savedAtEpochMs = input.readLong().coerceAtLeast(0L),
-                rawWhisperSegments = input.readSegments(),
-                displayedSegments = input.readSegments()
+                sourceUri = sourceUri,
+                fileName = fileName,
+                modelId = modelId,
+                detectedLanguage = detectedLanguage,
+                transcriptionDurationSeconds = transcriptionDurationSeconds,
+                savedAtEpochMs = savedAtEpochMs,
+                rawWhisperSegments = rawWhisperSegments,
+                displayedSegments = displayedSegments,
+                vadSummary = if (version >= 2) input.readVadSummary() else null
             )
         }
     }.getOrElse {
@@ -73,6 +84,7 @@ class TranscriptResultStore(private val resultFile: File) {
             output.writeLong(result.savedAtEpochMs.coerceAtLeast(0L))
             output.writeSegments(result.rawWhisperSegments)
             output.writeSegments(result.displayedSegments)
+            output.writeVadSummary(result.vadSummary)
         }
         try {
             Files.move(
@@ -149,4 +161,33 @@ private fun DataInputStream.readResultString(): String {
     val size = readInt()
     check(size in 0..MAX_RESULT_STRING_BYTES) { "Ungültige Textlänge." }
     return ByteArray(size).also(::readFully).toString(StandardCharsets.UTF_8)
+}
+
+private fun DataOutputStream.writeVadSummary(summary: VadProcessingSummary?) {
+    writeBoolean(summary != null)
+    if (summary == null) return
+    writeResultString(summary.requestedMode.name)
+    writeBoolean(summary.usedVad)
+    writeLong(summary.originalDurationMs)
+    writeLong(summary.processedDurationMs)
+    writeLong(summary.skippedDurationMs)
+    writeInt(summary.speechRegionCount)
+    writeResultString(summary.reason)
+    writeBoolean(summary.measurementsAvailable)
+}
+
+private fun DataInputStream.readVadSummary(): VadProcessingSummary? {
+    if (!readBoolean()) return null
+    return VadProcessingSummary(
+        requestedMode = runCatching {
+            de.matthiasennen.transcript.ui.main.WhisperVadMode.valueOf(readResultString())
+        }.getOrDefault(de.matthiasennen.transcript.ui.main.WhisperVadMode.OFF),
+        usedVad = readBoolean(),
+        originalDurationMs = readLong().coerceAtLeast(0L),
+        processedDurationMs = readLong().coerceAtLeast(0L),
+        skippedDurationMs = readLong().coerceAtLeast(0L),
+        speechRegionCount = readInt().coerceAtLeast(0),
+        reason = readResultString(),
+        measurementsAvailable = readBoolean()
+    )
 }

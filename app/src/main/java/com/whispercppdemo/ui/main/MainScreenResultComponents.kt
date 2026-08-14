@@ -153,6 +153,31 @@ internal fun TranscriptResultSummary(state: TranscriptUiState) {
                 Text("Erkannte Sprache: ${whisperLanguageDisplayName(it)}")
             }
             state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
+            state.vadProcessingSummary?.let { summary ->
+                val mode = when (summary.requestedMode) {
+                    WhisperVadMode.OFF -> "Aus"
+                    WhisperVadMode.AUTOMATIC -> "Automatisch"
+                    WhisperVadMode.ON -> "Ein"
+                }
+                Text("VAD: $mode · ${if (summary.usedVad) "verwendet" else "vollständiges Audio"}")
+                if (summary.measurementsAvailable) {
+                    Text(
+                        "Audio: ${formatClock(summary.originalDurationMs / 1_000L)} original · " +
+                            "${formatClock(summary.processedDurationMs / 1_000L)} verarbeitet · " +
+                            "${formatClock(summary.skippedDurationMs / 1_000L)} übersprungen"
+                    )
+                    val skippedPercent = if (summary.originalDurationMs > 0L) {
+                        (summary.skippedDurationMs * 100L / summary.originalDurationMs)
+                            .coerceIn(0L, 100L)
+                    } else {
+                        0L
+                    }
+                    Text("Pauseneinsparung: $skippedPercent % · ${summary.speechRegionCount} Sprachbereiche")
+                } else {
+                    Text("Audioeinsparung: In diesem Modus nicht separat vorgemessen.")
+                }
+                Text("VAD-Entscheidung: ${summary.reason}", style = MaterialTheme.typography.bodySmall)
+            }
             Text("Textabschnitte: ${state.segments.count { it.text.isNotBlank() }}")
         }
     }

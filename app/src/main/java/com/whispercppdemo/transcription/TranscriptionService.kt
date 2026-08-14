@@ -24,6 +24,7 @@ import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.media.CachedWaveform
 import de.matthiasennen.transcript.media.WaveformCache
 import de.matthiasennen.transcript.ui.main.WhisperModel
+import de.matthiasennen.transcript.ui.main.StatusMessageKind
 import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperSettings
 import de.matthiasennen.transcript.ui.main.WhisperSettingsPreferences
@@ -43,8 +44,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
-private const val CHANNEL_ID = "offline_transcription"
+private const val RUNNING_CHANNEL_ID = "offline_transcription"
+private const val COMPLETION_CHANNEL_ID = "transcription_results_v1"
+private const val NOTIFICATION_PREFERENCES = "transcription_notifications"
+private const val LAST_COMPLETED_JOB_ID = "last_completed_job_id"
 internal const val TRANSCRIPTION_NOTIFICATION_ID = 2108
+internal const val TRANSCRIPTION_COMPLETION_NOTIFICATION_ID = 2109
 private const val ACTION_START = "de.matthiasennen.transcript.START_TRANSCRIPTION"
 internal const val ACTION_CANCEL_TRANSCRIPTION = "de.matthiasennen.transcript.CANCEL_TRANSCRIPTION"
 private const val EXTRA_URI = "uri"
@@ -64,6 +69,7 @@ class TranscriptionService : Service() {
     private var transcriptionJob: Job? = null
     private var activeWhisperContext: WhisperContext? = null
     private var activeVadModelPath: String? = null
+    private var activeVadSummary: VadProcessingSummary? = null
     private lateinit var checkpointStore: TranscriptionCheckpointStore
     private lateinit var preparedAudioStore: PreparedAudioStore
     private val diagnostics = ArrayDeque<String>()
@@ -297,7 +303,8 @@ class TranscriptionService : Service() {
                 model = model,
                 segments = checkpoint.segments,
                 detectedLanguage = checkpoint.detectedLanguage.orEmpty(),
-                transcriptionDurationSeconds = elapsedSeconds
+                transcriptionDurationSeconds = elapsedSeconds,
+                vadSummary = activeVadSummary
             )
             // The local correction model can require several additional GB.
             // Release Whisper before announcing completion so the ViewModel can
@@ -310,8 +317,9 @@ class TranscriptionService : Service() {
             System.gc()
             publishState(completed)
             finishWithNotification(
-                title = "Transkription abgeschlossen",
-                text = "${checkpoint.segments.size} Textabschnitte erkannt."
+                title = TRANSCRIPTION_COMPLETE_TITLE,
+                text = TRANSCRIPTION_COMPLETE_TEXT,
+                completionJobId = effectiveRequest.jobId
             )
         } catch (throwable: Throwable) {
             val checkpoint = latestCheckpoint ?: checkpointStore.read()
@@ -335,6 +343,7 @@ class TranscriptionService : Service() {
             }
         } finally {
             activeVadModelPath = null
+            activeVadSummary = null
             val context = activeWhisperContext
             activeWhisperContext = null
             runCatching { context?.release() }
@@ -506,14 +515,34 @@ class TranscriptionService : Service() {
     ): String? {
         if (settings.vadMode == WhisperVadMode.OFF) {
             addDiagnostic("Silero VAD ist ausgeschaltet.")
+            activeVadSummary = fullAudioVadSummary(
+                settings.vadMode,
+                checkpoint.durationMs,
+                "VAD ist ausgeschaltet; Whisper verarbeitet das vollständige Audio."
+            )
             return null
         }
         if (installedModelPath == null) {
             addDiagnostic("Silero VAD ist nicht installiert; Whisper arbeitet ohne VAD.")
+            activeVadSummary = fullAudioVadSummary(
+                settings.vadMode,
+                checkpoint.durationMs,
+                "Silero VAD ist nicht installiert; Whisper verarbeitet das vollständige Audio."
+            )
             return null
         }
         if (settings.vadMode == WhisperVadMode.ON) {
             addDiagnostic("Silero VAD ist eingeschaltet und wird verwendet.")
+            activeVadSummary = VadProcessingSummary(
+                requestedMode = settings.vadMode,
+                usedVad = true,
+                originalDurationMs = checkpoint.durationMs,
+                processedDurationMs = checkpoint.durationMs,
+                skippedDurationMs = 0L,
+                speechRegionCount = 0,
+                reason = "VAD ist eingeschaltet; die Einsparung wird in diesem Modus nicht vorgemessen.",
+                measurementsAvailable = false
+            )
             return installedModelPath
         }
 
@@ -559,10 +588,17 @@ class TranscriptionService : Service() {
                 "VAD-Automatik fehlgeschlagen; Whisper arbeitet sicher ohne VAD: " +
                     (failure.localizedMessage ?: failure.javaClass.simpleName)
             )
+            activeVadSummary = fullAudioVadSummary(
+                settings.vadMode,
+                checkpoint.durationMs,
+                "Silero-Analyse ist fehlgeschlagen; Whisper verarbeitet das vollständige Audio."
+            )
             preparedSections.lastOrNull()?.section?.let { finalSection ->
                 publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
-                    checkpoint, 1f, "VAD-Automatik: Whisper arbeitet ohne VAD",
-                    "Silero-Analyse war nicht zuverlässig; der vollständige Ton bleibt erhalten.")
+                    checkpoint, 1f,
+                    "VAD-Automatik: Whisper arbeitet ohne VAD",
+                    "Silero-Analyse war nicht zuverlässig; der vollständige Ton bleibt erhalten.",
+                    StatusMessageKind.IMPORTANT)
             }
             return null
         } finally {
@@ -571,19 +607,29 @@ class TranscriptionService : Service() {
         val summary = "${decision.silencePercent} % Pause, ${decision.speechPercent} % Sprache, " +
             "${decision.speechSegmentCount} Sprachbereiche, längste Pause ${decision.longestSilenceMs / 1_000.0} s, " +
             "${decision.detectedSpeechSampleCount} von ${decision.analyzedSampleCount} Samples in Sprachbereichen"
-        if (decision.useVad) {
+        val useVad = decision.useVad
+        activeVadSummary = analyzedVadSummary(
+            mode = settings.vadMode,
+            useVad = useVad,
+            durationMs = checkpoint.durationMs,
+            decision = decision
+        )
+        if (useVad) {
+            val status = "VAD-Automatik aktiviert · ${decision.silencePercent} % Pause erkannt"
             addDiagnostic("VAD-Automatik: VAD wird verwendet ($summary; ${decision.reason}).")
             preparedSections.lastOrNull()?.section?.let { finalSection ->
                 publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
-                    checkpoint, 1f, "VAD-Automatik: VAD wird verwendet", "$summary · ${decision.reason}.")
+                    checkpoint, 1f, status,
+                    "$summary · ${decision.reason}.", StatusMessageKind.IMPORTANT)
             }
-            updateNotification("VAD-Automatik: VAD wird verwendet", 0, true)
+            updateNotification(status, 0, true)
             return installedModelPath
         }
         addDiagnostic("VAD-Automatik: ohne VAD ($summary; ${decision.reason}).")
         preparedSections.lastOrNull()?.section?.let { finalSection ->
             publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
-                checkpoint, 1f, "VAD-Automatik: Whisper arbeitet ohne VAD", "$summary · ${decision.reason}.")
+                checkpoint, 1f, "VAD-Automatik: Whisper verarbeitet das vollständige Audio",
+                "$summary · ${decision.reason}.", StatusMessageKind.IMPORTANT)
         }
         updateNotification("VAD-Automatik: Whisper arbeitet ohne VAD", 0, true)
         return null
@@ -598,7 +644,8 @@ class TranscriptionService : Service() {
         checkpoint: TranscriptionCheckpoint,
         progressWithinSection: Float,
         status: String,
-        detail: String
+        detail: String,
+        statusKind: StatusMessageKind = StatusMessageKind.PROGRESS
     ) {
         recordWorkerProgress()
         val now = SystemClock.elapsedRealtime()
@@ -622,7 +669,8 @@ class TranscriptionService : Service() {
                 activityDetail = detail,
                 diagnostics = diagnostics.toList(),
                 committedSegments = checkpoint.segments,
-                detectedLanguage = checkpoint.detectedLanguage
+                detectedLanguage = checkpoint.detectedLanguage,
+                statusKind = statusKind
             )
         )
         updateNotification(
@@ -714,10 +762,12 @@ class TranscriptionService : Service() {
                 force
             )
         ) return
-        getSystemService(NotificationManager::class.java).notify(
-            TRANSCRIPTION_NOTIFICATION_ID,
-            buildNotification(text, percent, indeterminate)
-        )
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(
+                TRANSCRIPTION_NOTIFICATION_ID,
+                buildNotification(text, percent, indeterminate)
+            )
+        }
     }
 
     private fun buildNotification(text: String, percent: Int, indeterminate: Boolean): Notification {
@@ -737,41 +787,94 @@ class TranscriptionService : Service() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_mic)
+        return NotificationCompat.Builder(this, RUNNING_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_transcript_notification)
             .setContentTitle("Simple Transcript")
             .setContentText(text)
             .setContentIntent(openApp)
             .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setOngoing(true)
             .setProgress(100, percent.coerceIn(0, 100), indeterminate)
             .addAction(0, "Abbrechen", cancel)
             .build()
     }
 
-    private fun finishWithNotification(title: String, text: String) {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_mic)
+    private fun finishWithNotification(
+        title: String,
+        text: String,
+        completionJobId: String? = null
+    ) {
+        val isCompletion = completionJobId != null
+        val preferences = getSharedPreferences(NOTIFICATION_PREFERENCES, Context.MODE_PRIVATE)
+        val mayPublish = !isCompletion || shouldPublishCompletionNotification(
+            lastCompletedJobId = preferences.getString(LAST_COMPLETED_JOB_ID, null),
+            completedJobId = completionJobId.orEmpty()
+        )
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(
+            this,
+            if (isCompletion) COMPLETION_CHANNEL_ID else RUNNING_CHANNEL_ID
+        )
+            .setSmallIcon(R.drawable.ic_transcript_notification)
             .setContentTitle(title)
             .setContentText(text)
+            .setContentIntent(openApp)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setOnlyAlertOnce(!isCompletion)
             .setAutoCancel(true)
             .build()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        getSystemService(NotificationManager::class.java)
-            .notify(TRANSCRIPTION_NOTIFICATION_ID, notification)
+        if (mayPublish) {
+            runCatching {
+                getSystemService(NotificationManager::class.java).notify(
+                    if (isCompletion) {
+                        TRANSCRIPTION_COMPLETION_NOTIFICATION_ID
+                    } else {
+                        TRANSCRIPTION_NOTIFICATION_ID
+                    },
+                    notification
+                )
+            }.onSuccess {
+                if (isCompletion) {
+                    preferences.edit()
+                        .putString(LAST_COMPLETED_JOB_ID, completionJobId)
+                        .apply()
+                }
+            }
+        }
         stopSelf()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID,
+                RUNNING_CHANNEL_ID,
                 "Offline-Transkription",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Zeigt Fortschritt und Abbruchmöglichkeit langer Transkriptionen."
             }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            val completionChannel = NotificationChannel(
+                COMPLETION_CHANNEL_ID,
+                "Fertige Transkripte",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Meldet neutral, wenn ein lokales Transkript fertiggestellt wurde."
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            }
+            getSystemService(NotificationManager::class.java).apply {
+                createNotificationChannel(channel)
+                createNotificationChannel(completionChannel)
+            }
         }
     }
 

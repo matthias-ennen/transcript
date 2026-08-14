@@ -100,6 +100,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
     var pendingVadModelDownload by remember { mutableStateOf(false) }
     var pendingRecording by remember { mutableStateOf(false) }
+    var pendingTranscription by remember { mutableStateOf(false) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -110,10 +111,12 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             if (granted) viewModel.startRecording()
             else viewModel.reportRecordingNotificationPermissionDenied()
         }
+        if (pendingTranscription) viewModel.transcribe()
         pendingModelDownload = null
         pendingAiModelDownload = null
         pendingVadModelDownload = false
         pendingRecording = false
+        pendingTranscription = false
     }
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -215,15 +218,28 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             )
             AppPage.WHISPER_SETTINGS -> WhisperSettingsScreen(
                 state = state,
-                onLanguageChanged = viewModel::setLanguage,
-                onSettingsChanged = viewModel::updateWhisperSettings,
-                onResetGroup = viewModel::resetWhisperSettings,
+                onLanguageChanged = {
+                    viewModel.setLanguage(it, WhisperSettingsPage.WHISPER)
+                },
+                onSettingsChanged = {
+                    viewModel.updateWhisperSettings(it, WhisperSettingsPage.WHISPER)
+                },
+                onResetGroup = {
+                    viewModel.resetWhisperSettings(it, WhisperSettingsPage.WHISPER)
+                },
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.VAD_SETTINGS -> VadSettingsScreen(
                 state = state,
-                onSettingsChanged = viewModel::updateWhisperSettings,
-                onReset = { viewModel.resetWhisperSettings(WhisperSettingsGroup.VAD) },
+                onSettingsChanged = {
+                    viewModel.updateWhisperSettings(it, WhisperSettingsPage.VAD)
+                },
+                onReset = {
+                    viewModel.resetWhisperSettings(
+                        WhisperSettingsGroup.VAD,
+                        WhisperSettingsPage.VAD
+                    )
+                },
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.MAIN -> MainContent(
@@ -270,6 +286,20 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                         }
                     } else {
                         microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                requestTranscription = {
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingTranscription = true
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.transcribe()
                     }
                 },
                 textExporter = {
@@ -458,6 +488,7 @@ private fun MainContent(
     audioPicker: () -> Unit,
     requestModelDownload: () -> Unit,
     requestRecording: () -> Unit,
+    requestTranscription: () -> Unit,
     textExporter: () -> Unit,
     srtExporter: () -> Unit,
     jsonExporter: () -> Unit
@@ -561,7 +592,7 @@ private fun MainContent(
                             when (pendingAction) {
                                 PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
                                 PendingTranscriptAction.START_RECORDING -> requestRecording()
-                                PendingTranscriptAction.TRANSCRIBE -> viewModel.transcribe()
+                                PendingTranscriptAction.TRANSCRIBE -> requestTranscription()
                             }
                         }
                     ) {
@@ -651,7 +682,7 @@ private fun MainContent(
             LanguageSelector(
                 selected = state.language,
                 enabled = !state.isBusy && !state.isRecording,
-                onSelected = viewModel::setLanguage
+                onSelected = { viewModel.setLanguage(it) }
             )
 
             Button(
@@ -665,7 +696,7 @@ private fun MainContent(
                     } else if (state.hasUnsavedTranscriptChanges) {
                         pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
                     } else {
-                        viewModel.transcribe()
+                        requestTranscription()
                     }
                 },
                 enabled = if (state.isTranscribing) {
@@ -693,15 +724,6 @@ private fun MainContent(
 
             LiveStatusLine(state)
             state.latestAiCorrectionTrace?.let { AiCorrectionTraceCard(it) }
-            if (state.isTranscribing) {
-                Text(
-                    transcriptionRuntimeDisplay(
-                        elapsedSeconds = state.elapsedSeconds,
-                        estimateSeconds = state.transcriptionEstimateSeconds
-                    ),
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
             if (state.segments.isNotEmpty()) {
