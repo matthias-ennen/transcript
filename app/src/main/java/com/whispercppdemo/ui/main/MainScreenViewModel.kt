@@ -186,11 +186,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun startRecording() {
-        if (uiState.isBusy || uiState.isRecording) return
+        if (uiState.isBusy || uiState.isRecording || uiState.isRecordingStopping) return
         stopPlayback(release = true)
         transcriptResultPersistence.clear()
         uiState = uiState.copy(
             isRecording = true,
+            isRecordingStopping = false,
             liveWaveform = emptyList(),
             rawWhisperSegments = emptyList(),
             segments = emptyList(),
@@ -224,6 +225,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     fun reportRecordingNotificationPermissionDenied() {
         uiState = uiState.copy(
             isRecording = false,
+            isRecordingStopping = false,
             error = "Für eine sichere Hintergrundaufnahme benötigt Transcript die Benachrichtigungsberechtigung.",
             status = "Benachrichtigungsberechtigung fehlt.",
             cannaBotMode = CannaBotMode.IDLE
@@ -232,8 +234,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun stopRecording() {
-        if (!uiState.isRecording) return
-        uiState = uiState.copy(status = "Aufnahme wird beendet …", cannaBotMode = CannaBotMode.WAITING)
+        if (!uiState.isRecording || uiState.isRecordingStopping) return
+        uiState = uiState.copy(
+            isRecordingStopping = true,
+            status = "Aufnahme wird beendet …",
+            cannaBotMode = CannaBotMode.WAITING
+        )
         RecordingService.stop(application)
     }
 
@@ -243,11 +249,21 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             RecordingState.Starting -> {
                 uiState = uiState.copy(
                     isRecording = true,
+                    isRecordingStopping = false,
                     status = "Aufnahme wird gestartet …",
                     cannaBotMode = CannaBotMode.WAITING
                 )
             }
+            RecordingState.Stopping -> {
+                uiState = uiState.copy(
+                    isRecording = true,
+                    isRecordingStopping = true,
+                    status = "Aufnahme wird beendet …",
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
             is RecordingState.Running -> {
+                if (uiState.isRecordingStopping) return
                 val joiningActiveRecording = !uiState.isRecording
                 if (joiningActiveRecording) {
                     waveformJob?.cancel()
@@ -256,6 +272,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 }
                 uiState = uiState.copy(
                     isRecording = true,
+                    isRecordingStopping = false,
                     elapsedSeconds = state.elapsedSeconds,
                     liveWaveform = (uiState.liveWaveform + state.amplitude).takeLast(72),
                     selectedAudio = if (joiningActiveRecording) null else uiState.selectedAudio,
@@ -284,6 +301,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             is RecordingState.Failed -> {
                 uiState = uiState.copy(
                     isRecording = false,
+                    isRecordingStopping = false,
                     liveWaveform = emptyList(),
                     error = state.message,
                     status = "Aufnahme fehlgeschlagen.",
@@ -379,11 +397,14 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             selectedAudio = uri,
             selectedFileName = fileName,
+            isRecording = false,
+            isRecordingStopping = false,
             isPlaying = false,
             playbackPositionMs = 0L,
             audioDurationMs = 0L,
             mediaReadyStatus = null,
             waveform = emptyList(),
+            liveWaveform = emptyList(),
             isWaveformLoading = true,
             waveformProgress = 0f,
             rawWhisperSegments = restoredTranscript?.rawWhisperSegments.orEmpty(),
