@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ui.main.WhisperModel
@@ -18,9 +19,11 @@ import java.io.File
 
 private const val STATE_FILE_NAME = "active-transcription-state.bin"
 private const val STATE_CHANGED_ACTION = "de.matthiasennen.transcript.TRANSCRIPTION_STATE_CHANGED"
+private const val WATCHDOG_LOG_TAG = "TranscriptionWatchdog"
 private const val EXIT_CHECK_INTERVAL_MS = 3_000L
-private const val WORKER_STALL_TIMEOUT_MS = 3 * 60_000L
+private const val WORKER_START_TIMEOUT_MS = 3 * 60_000L
 private const val HEARTBEAT_MISSING_TIMEOUT_MS = 15_000L
+private const val LONG_RUNNING_PROGRESS_NOTICE_MS = 3 * 60_000L
 
 sealed interface TranscriptionState {
     data object Idle : TranscriptionState
@@ -55,6 +58,52 @@ sealed interface TranscriptionState {
     ) : TranscriptionState
 }
 
+internal enum class WorkerWatchdogState {
+    HEALTHY,
+    AWAITING_FIRST_HEARTBEAT,
+    HEARTBEAT_MISSING
+}
+
+/**
+ * Liveness deliberately depends only on the independent worker heartbeat.
+ * Native Whisper progress can remain unchanged for a long time on large models
+ * and must never be used as a hard-kill criterion.
+ */
+internal fun evaluateWorkerWatchdog(
+    heartbeat: WorkerHeartbeat?,
+    expectedWorkerStartedAtEpochMs: Long,
+    envelopeUpdatedAtEpochMs: Long,
+    nowEpochMs: Long,
+    heartbeatMissingTimeoutMs: Long = HEARTBEAT_MISSING_TIMEOUT_MS,
+    workerStartTimeoutMs: Long = WORKER_START_TIMEOUT_MS
+): WorkerWatchdogState {
+    if (heartbeat == null ||
+        heartbeat.workerStartedAtEpochMs != expectedWorkerStartedAtEpochMs
+    ) {
+        return if (nowEpochMs - envelopeUpdatedAtEpochMs > workerStartTimeoutMs) {
+            WorkerWatchdogState.HEARTBEAT_MISSING
+        } else {
+            WorkerWatchdogState.AWAITING_FIRST_HEARTBEAT
+        }
+    }
+    return if (nowEpochMs - heartbeat.heartbeatAtEpochMs > heartbeatMissingTimeoutMs) {
+        WorkerWatchdogState.HEARTBEAT_MISSING
+    } else {
+        WorkerWatchdogState.HEALTHY
+    }
+}
+
+internal fun isLongRunningInferenceWithoutNativeProgress(
+    heartbeat: WorkerHeartbeat?,
+    expectedWorkerStartedAtEpochMs: Long,
+    nowEpochMs: Long,
+    noticeAfterMs: Long = LONG_RUNNING_PROGRESS_NOTICE_MS
+): Boolean = heartbeat != null &&
+    heartbeat.workerStartedAtEpochMs == expectedWorkerStartedAtEpochMs &&
+    heartbeat.phase == "inference" &&
+    nowEpochMs - heartbeat.heartbeatAtEpochMs <= HEARTBEAT_MISSING_TIMEOUT_MS &&
+    nowEpochMs - heartbeat.lastProgressAtEpochMs > noticeAfterMs
+
 /** Process-safe bridge between the isolated native worker and the UI process. */
 object TranscriptionCoordinator {
     private val mutableState = MutableStateFlow<TranscriptionState>(TranscriptionState.Idle)
@@ -65,6 +114,7 @@ object TranscriptionCoordinator {
     private var receiverRegistered = false
     private var observedEnvelope: PersistedTranscriptionState? = null
     private var watchdogRecoveryRequestedForStart = 0L
+    private var longRunningNoticeKey = ""
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -78,6 +128,7 @@ object TranscriptionCoordinator {
             val envelope = observedEnvelope
             if (envelope != null && envelope.state.isActive()) {
                 val now = System.currentTimeMillis()
+                val heartbeat = workerHeartbeatStore(context.filesDir).read()
                 val exit = findWorkerExit(context, envelope.workerStartedAtEpochMs)
                 if (exit != null) {
                     val running = envelope.state as? TranscriptionState.Running
@@ -94,16 +145,44 @@ object TranscriptionCoordinator {
                     stateStore(context).write(failedEnvelope)
                     observedEnvelope = failedEnvelope
                     mutableState.value = failure
-                } else if (
-                    workerIsStalled(context, envelope, now) &&
-                    watchdogRecoveryRequestedForStart != envelope.workerStartedAtEpochMs
-                ) {
-                    watchdogRecoveryRequestedForStart = envelope.workerStartedAtEpochMs
-                    context.sendBroadcast(
-                        Intent(context, TranscriptionControlReceiver::class.java).apply {
-                            action = ACTION_RECOVER_TRANSCRIPTION_ON_CPU
+                } else {
+                    when (
+                        evaluateWorkerWatchdog(
+                            heartbeat = heartbeat,
+                            expectedWorkerStartedAtEpochMs = envelope.workerStartedAtEpochMs,
+                            envelopeUpdatedAtEpochMs = envelope.updatedAtEpochMs,
+                            nowEpochMs = now
+                        )
+                    ) {
+                        WorkerWatchdogState.HEARTBEAT_MISSING -> {
+                            if (watchdogRecoveryRequestedForStart != envelope.workerStartedAtEpochMs) {
+                                watchdogRecoveryRequestedForStart = envelope.workerStartedAtEpochMs
+                                Log.w(
+                                    WATCHDOG_LOG_TAG,
+                                    "CPU recovery requested: reason=heartbeat_missing " +
+                                        "workerStart=${envelope.workerStartedAtEpochMs} " +
+                                        "heartbeatAgeMs=${heartbeat?.let { now - it.heartbeatAtEpochMs }}"
+                                )
+                                context.sendBroadcast(
+                                    Intent(context, TranscriptionControlReceiver::class.java).apply {
+                                        action = ACTION_RECOVER_TRANSCRIPTION_ON_CPU
+                                    }
+                                )
+                            }
                         }
-                    )
+                        WorkerWatchdogState.HEALTHY -> {
+                            if (
+                                isLongRunningInferenceWithoutNativeProgress(
+                                    heartbeat = heartbeat,
+                                    expectedWorkerStartedAtEpochMs = envelope.workerStartedAtEpochMs,
+                                    nowEpochMs = now
+                                )
+                            ) {
+                                publishLongRunningInferenceNotice(envelope, checkNotNull(heartbeat), now)
+                            }
+                        }
+                        WorkerWatchdogState.AWAITING_FIRST_HEARTBEAT -> Unit
+                    }
                 }
             }
             if (observedEnvelope?.state?.isActive() == true) {
@@ -145,34 +224,61 @@ object TranscriptionCoordinator {
         if (current.isActive() || current == TranscriptionState.Idle) return
         stateStore(context).clear()
         observedEnvelope = null
+        longRunningNoticeKey = ""
         mutableState.value = TranscriptionState.Idle
         mainHandler.removeCallbacks(exitMonitor)
     }
 
     @Synchronized
     private fun refreshFromDisk(context: Context) {
+        val previousWorkerStart = observedEnvelope?.workerStartedAtEpochMs
         val envelope = stateStore(context).read()
+        if (previousWorkerStart != envelope?.workerStartedAtEpochMs) {
+            longRunningNoticeKey = ""
+        }
         observedEnvelope = envelope
         mutableState.value = envelope?.state ?: TranscriptionState.Idle
         mainHandler.removeCallbacks(exitMonitor)
         if (envelope?.state?.isActive() == true) mainHandler.post(exitMonitor)
     }
 
+    private fun publishLongRunningInferenceNotice(
+        envelope: PersistedTranscriptionState,
+        heartbeat: WorkerHeartbeat,
+        nowEpochMs: Long
+    ) {
+        val running = envelope.state as? TranscriptionState.Running ?: return
+        val noticeKey = "${heartbeat.workerStartedAtEpochMs}|${heartbeat.sectionNumber}|" +
+            heartbeat.lastProgressAtEpochMs
+        if (longRunningNoticeKey == noticeKey) return
+        longRunningNoticeKey = noticeKey
+
+        val progressAgeSeconds =
+            (nowEpochMs - heartbeat.lastProgressAtEpochMs).coerceAtLeast(0L) / 1_000L
+        val progressAgeMinutes = (progressAgeSeconds / 60L).coerceAtLeast(1L)
+        val diagnostic =
+            "Whisper rechnet weiterhin: Backend ${heartbeat.backend}, " +
+                "Abschnitt ${heartbeat.sectionNumber}, seit ${progressAgeMinutes} Min. " +
+                "kein neuer Prozentwert; Lebenszeichen aktuell."
+        Log.i(
+            WATCHDOG_LOG_TAG,
+            "Long-running inference remains healthy: workerStart=" +
+                "${heartbeat.workerStartedAtEpochMs} backend=${heartbeat.backend} " +
+                "section=${heartbeat.sectionNumber} heartbeatAgeMs=" +
+                "${nowEpochMs - heartbeat.heartbeatAtEpochMs} progressAgeMs=" +
+                "${nowEpochMs - heartbeat.lastProgressAtEpochMs}"
+        )
+        mutableState.value = running.copy(
+            status = "Whisper rechnet weiterhin · seit $progressAgeMinutes Min. " +
+                "kein neuer Prozentwert",
+            activityDetail = "${running.model.modelLabel} · Backend ${heartbeat.backend} · " +
+                "Abschnitt ${heartbeat.sectionNumber} von ${running.sectionCount}",
+            diagnostics = (running.diagnostics + diagnostic).takeLast(12)
+        )
+    }
+
     private fun stateStore(context: Context) =
         TranscriptionStateStore(File(context.filesDir, STATE_FILE_NAME))
-
-    private fun workerIsStalled(
-        context: Context,
-        envelope: PersistedTranscriptionState,
-        now: Long
-    ): Boolean {
-        val heartbeat = workerHeartbeatStore(context.filesDir).read()
-        if (heartbeat == null || heartbeat.workerStartedAtEpochMs != envelope.workerStartedAtEpochMs) {
-            return now - envelope.updatedAtEpochMs > WORKER_STALL_TIMEOUT_MS
-        }
-        return now - heartbeat.heartbeatAtEpochMs > HEARTBEAT_MISSING_TIMEOUT_MS ||
-            now - heartbeat.lastProgressAtEpochMs > WORKER_STALL_TIMEOUT_MS
-    }
 
     private fun findWorkerExit(context: Context, workerStartedAtEpochMs: Long): WorkerExit? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
