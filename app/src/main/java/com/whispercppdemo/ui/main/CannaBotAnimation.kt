@@ -72,7 +72,13 @@ fun CannaBotStatusAnimation(
         eventAnimation = null
     }
 
-    CannaBotSprite(animation = animation, modifier = modifier)
+    val nativeComputeIsActive = state.isTranscribing || state.isAiPostProcessing ||
+        state.isAiSelfTest || state.isAiBenchmarkRunning
+    CannaBotSprite(
+        animation = animation,
+        animate = !nativeComputeIsActive,
+        modifier = modifier
+    )
 }
 
 /**
@@ -112,13 +118,15 @@ private val CannaBotAnimation.playbackDurationMs: Long
 @Composable
 private fun CannaBotSprite(
     animation: CannaBotAnimation,
+    animate: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val spriteSheet = ImageBitmap.imageResource(R.drawable.cannabot_spritesheet)
     var frame by remember(animation) { mutableStateOf(0) }
 
-    LaunchedEffect(animation) {
+    LaunchedEffect(animation, animate) {
         frame = 0
+        if (!animate) return@LaunchedEffect
         while (true) {
             delay(animation.frameDurationMs)
             frame = (frame + 1) % animation.frameCount

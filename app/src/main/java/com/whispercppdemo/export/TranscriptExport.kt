@@ -19,7 +19,8 @@ data class TranscriptExportMetadata(
 fun exportTranscript(
     segments: List<WhisperSegment>,
     format: ExportFormat,
-    metadata: TranscriptExportMetadata
+    metadata: TranscriptExportMetadata,
+    rawWhisperSegments: List<WhisperSegment> = segments
 ): String = when (format) {
     ExportFormat.TEXT -> buildString {
         appendLine("Whisper-Modell: ${metadata.whisperModel}")
@@ -27,9 +28,9 @@ fun exportTranscript(
         appendLine("Transkriptionsdauer: ${formatDuration(metadata.transcriptionDurationSeconds)}")
         appendLine("Erstellt am: ${metadata.createdAt}")
         appendLine()
-        append(segments.joinToString("\n") { it.text })
+        append(segments.filter { it.text.isNotBlank() }.joinToString("\n") { it.text })
     }
-    ExportFormat.SUBRIP -> segments.mapIndexed { index, segment ->
+    ExportFormat.SUBRIP -> segments.filter { it.text.isNotBlank() }.mapIndexed { index, segment ->
         buildString {
             appendLine(index + 1)
             append(formatTimestamp(segment.startMs, comma = true))
@@ -39,12 +40,13 @@ fun exportTranscript(
         }
     }.joinToString("\n")
 
-    ExportFormat.JSON -> buildJsonExport(segments, metadata)
+    ExportFormat.JSON -> buildJsonExport(segments, metadata, rawWhisperSegments)
 }
 
 private fun buildJsonExport(
     segments: List<WhisperSegment>,
-    metadata: TranscriptExportMetadata
+    metadata: TranscriptExportMetadata,
+    rawWhisperSegments: List<WhisperSegment>
 ): String = buildString {
     appendLine("{")
     appendLine("  \"whisper_model\": ${metadata.whisperModel.asJsonString()},")
@@ -56,6 +58,7 @@ private fun buildJsonExport(
         appendLine("    {")
         appendLine("      \"start_ms\": ${segment.startMs},")
         appendLine("      \"end_ms\": ${segment.endMs},")
+        appendLine("      \"origin\": ${segment.exportOrigin(rawWhisperSegments).asJsonString()},")
         appendLine("      \"text\": ${segment.text.asJsonString()}")
         append("    }")
         if (index < segments.lastIndex) append(',')
@@ -63,6 +66,14 @@ private fun buildJsonExport(
     }
     appendLine("  ]")
     append('}')
+}
+
+private fun WhisperSegment.exportOrigin(rawWhisperSegments: List<WhisperSegment>): String {
+    if (text.isBlank()) return "virtual_pause"
+    val overlapsWhisper = rawWhisperSegments.any { source ->
+        source.endMs > startMs && source.startMs < endMs
+    }
+    return if (overlapsWhisper) "whisper" else "manual"
 }
 
 private fun String.asJsonString(): String = buildString(length + 2) {

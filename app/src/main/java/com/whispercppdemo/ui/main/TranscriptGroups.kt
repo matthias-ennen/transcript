@@ -46,6 +46,7 @@ import de.matthiasennen.transcript.export.formatTimestamp
 internal fun TranscriptList(
     state: TranscriptUiState,
     segments: List<WhisperSegment>,
+    rawWhisperSegments: List<WhisperSegment>,
     onTextChanged: (Int, String) -> Unit,
     onAiEditGroup: (Long) -> Unit,
     onEditGroup: (Long) -> Unit,
@@ -58,6 +59,9 @@ internal fun TranscriptList(
     if (segments.isEmpty()) return
 
     val groups = remember(segments) { groupTranscriptSegments(segments) }
+    val segmentNumbers = remember(segments, rawWhisperSegments) {
+        transcriptNumbers(segments, rawWhisperSegments)
+    }
     val expandedGroups = remember(state.selectedAudio) {
         mutableStateMapOf<Long, Boolean>().apply {
             groups.firstOrNull()?.let { firstGroup -> put(firstGroup.startMs, true) }
@@ -137,7 +141,7 @@ internal fun TranscriptList(
                 if (expanded) {
                     group.segments.forEach { indexedSegment ->
                         TranscriptSegmentCard(
-                            number = indexedSegment.originalIndex + 1,
+                            number = segmentNumbers[indexedSegment.originalIndex],
                             segment = indexedSegment.segment,
                             isEditing = isEditingGroup,
                             editingEnabled = !state.isAiPostProcessing,
@@ -168,7 +172,7 @@ internal fun TranscriptList(
 
 @Composable
 private fun TranscriptSegmentCard(
-    number: Int,
+    number: Int?,
     segment: WhisperSegment,
     isEditing: Boolean,
     editingEnabled: Boolean,
@@ -203,22 +207,24 @@ private fun TranscriptSegmentCard(
             }
         }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 8.dp, y = (-8).dp)
-                .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
-                .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT)
-                .background(MaterialTheme.colorScheme.primary, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = number.toString(),
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = MaterialTheme.typography.labelMedium.fontSize * 1.2f
+        if (number != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 8.dp, y = (-8).dp)
+                    .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
+                    .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = number.toString(),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontSize = MaterialTheme.typography.labelMedium.fontSize * 1.2f
+                    )
                 )
-            )
+            }
         }
     }
 }

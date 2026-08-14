@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="false"
@@ -72,11 +74,22 @@
         <service
             android:name=".transcription.TranscriptionService"
             android:exported="false"
+            android:process=":transcription"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Lokale Offline-Transkription langer Audio- und Videodateien" />
         </service>
+
+        <receiver
+            android:name=".transcription.TranscriptionControlReceiver"
+            android:exported="false"
+            android:process=":control" />
+
+        <service
+            android:name=".media.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>

@@ -121,11 +121,14 @@ fun WhisperSettingsScreen(
                     WhisperTimestampMode.WORDS to "Wortgenaue Berechnung"
                 )
             ) { onSettingsChanged(settings.copy(timestampMode = it)) }
-            NumberSetting("Abschnittslänge", settings.sectionMinutes, "1–10 Minuten; Standard 5 Minuten") {
-                onSettingsChanged(settings.copy(sectionMinutes = it))
-            }
+            ChoiceSetting(
+                "Abschnittslänge",
+                settings.sectionMinutes,
+                (1..5).map { minutes -> minutes to "$minutes Minute${if (minutes == 1) "" else "n"}" }
+            ) { onSettingsChanged(settings.copy(sectionMinutes = it)) }
             Text(
-                "Die App verarbeitet Abschnitte nacheinander. Mehrere parallele Whisper-Modelle würden den Arbeitsspeicherbedarf vervielfachen und bleiben deshalb deaktiviert.",
+                "Kleinere Abschnitte benötigen kleinere Arbeitspuffer und mehr Temporärdateien. " +
+                    "Whisper wird unabhängig davon pro vollständigem Lauf nur einmal geladen.",
                 style = MaterialTheme.typography.bodySmall
             )
             ResetButton { onResetGroup(WhisperSettingsGroup.SEGMENTS) }

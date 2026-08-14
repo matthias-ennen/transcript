@@ -23,7 +23,8 @@ class TranscriptionCheckpointStoreTest {
             fileName = "Aufnahme.m4a",
             modelId = "base",
             language = "auto",
-            settingsSignature = "WhisperSettings(sectionMinutes=5)"
+            settingsSignature = "WhisperSettings(sectionMinutes=5)",
+            jobId = "job-42"
         )
         val checkpoint = TranscriptionCheckpoint(
             request = request,
@@ -41,6 +42,7 @@ class TranscriptionCheckpointStoreTest {
 
         assertEquals(checkpoint, store.read())
         assertTrue(checkpoint.isCompatibleWith(request, 4_145_000L))
+        assertTrue(checkpoint.isCompatibleWith(request.copy(jobId = "new-process"), 4_145_000L))
         assertFalse(checkpoint.isCompatibleWith(request.copy(language = "en"), 4_145_000L))
         assertTrue(checkpoint.hasMeaningfulProgress())
     }

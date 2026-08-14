@@ -28,8 +28,8 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
 - abschnittsweise Transkription langer Aufnahmen mit konstant begrenztem Speicherbedarf
-- Fünf-Minuten-Abschnitte mit zwei Sekunden Kontextüberlappung und absoluten Zeitstempeln
-- automatische Wiederholung problematischer Abschnitte mit 2,5 Minuten
+- frei wählbare Ein- bis Fünf-Minuten-Abschnitte mit zwei Sekunden
+  Kontextüberlappung und absoluten Zeitstempeln; Standard sind drei Minuten
 - Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
 - atomare Wiederherstellung des fertigen Whisper-Originals und des zuletzt
   übernommenen Bearbeitungsstands nach einem Prozessneustart
@@ -93,6 +93,11 @@ Die fertige AAC-/M4A-Datei wird unter `files/recordings` im privaten
 App-Speicher abgelegt und sofort als aktuelle Audiodatei ausgewählt. Ihr Name
 enthält Datum und Uhrzeit.
 
+Die Aufnahme selbst läuft in einem Mikrofon-Foreground-Service mit sichtbarer
+Android-Systemmeldung und Beenden-Aktion. Dadurch bleibt sie bei ausgeschaltetem
+Bildschirm, Gerätesperre und einem Wechsel zu einer anderen App aktiv. Nach der
+Rückkehr übernimmt die Oberfläche Laufzeit und Aufnahmezustand wieder.
+
 Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
 abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
 durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
@@ -120,6 +125,13 @@ Whisper-Original und übernommener Bearbeitungsstand werden getrennt und atomar
 im privaten App-Speicher gehalten. Nach einem Prozessneustart stellt die App das
 zuletzt fertige Ergebnis wieder her; eine neue Datei, Aufnahme oder Transkription
 ersetzt diesen Stand bewusst.
+
+Beim Wiederherstellen wird auch die zugehörige Audiodatei vorbereitet und ihre
+Wellenform aus dem geprüften Cache geladen oder erneut erzeugt. Die sichtbare
+Zeitleiste reicht von Dateibeginn bis Dateiende: größere Lücken erscheinen als
+leere, bearbeitbare Pausenboxen ohne Whisper-Nummer. Leere Pausen werden nur im
+JSON mit `origin: "virtual_pause"` exportiert. Manuell befüllte Pausen erhalten
+`origin: "manual"` und erscheinen zusätzlich in TXT und SRT.
 
 Die vollständige Fünf-Minuten-Gruppe wird einmal als gemeinsamer, schreibgeschützter
 Whisper-Rohkontext an das lokale Modell übergeben. Danach prüft die KI jedes
@@ -233,8 +245,10 @@ bewusst den allgemeinen Text **Audio wird wiedergegeben …**.
 ## Lange Aufnahmen und Hintergrundbetrieb
 
 Die Transkription lädt nicht mehr die vollständige Aufnahme als PCM in den
-Arbeitsspeicher. `TranscriptionService` verarbeitet nacheinander
-Fünf-Minuten-Hauptabschnitte. Jeder Abschnitt enthält an den Grenzen zwei
+Arbeitsspeicher. `TranscriptionService` läuft in einem privaten Android-
+Nebenprozess und verarbeitet nacheinander einstellbare Hauptabschnitte. Dadurch
+bleibt die Oberfläche auch bei einem nativen Fehler des Transkriptions-Workers
+geöffnet. Jeder Abschnitt enthält an den Grenzen zwei
 Sekunden zusätzlichen Audiokontext, damit Wörter und Sätze nicht abgeschnitten
 werden. Die Überlappung wird anschließend anhand der zeitlichen Mitte jedes
 Whisper-Segments genau einem Hauptabschnitt zugeordnet. Auf die lokalen
@@ -243,12 +257,18 @@ addiert; dadurch bleiben auch Zeitstempel über einer Stunde korrekt.
 
 Der Decoder toleriert einen kleinen, fest begrenzten Codec-Überhang und schneidet
 das Ergebnis vor Whisper wieder auf die angeforderte Abschnittslänge zu.
-Scheitert ein Fünf-Minuten-Abschnitt aus einem anderen Grund, wird dieser einmal
-in zwei 2,5-Minuten-Sicherheitsabschnitte geteilt. Nach jedem fertigen Abschnitt
+Decoder und Whisper-Modell sind dabei niemals gleichzeitig aktiv: Zuerst werden
+alle Abschnitte einzeln zu PCM 16 kHz Mono dekodiert und atomar im privaten
+Temporärspeicher abgelegt. Derselbe PCM-Strom liefert ohne zweite Dekodierung
+die Wellenform und die optionale VAD-Analyse. Erst nach vollständiger Freigabe
+des Decoders wird das gewählte Whisper-Modell einmal geladen und für alle
+Abschnitte wiederverwendet. Nach jedem fertigen Abschnitt
 werden Textsegmente, erkannte Sprache und nächste Audioposition atomar im
 privaten App-Speicher gesichert. Eine erneute Transkription derselben Datei mit
 demselben Modell und derselben Sprache setzt dort fort. Ein bewusster Abbruch
-entfernt den Zwischenstand.
+hält den Lauf an und bewahrt den Zwischenstand sowie noch benötigte PCM-Dateien.
+Ein unabhängiger Kontrollprozess beendet bei Bedarf auch einen festgefahrenen
+nativen Worker; ein GPU-/Vulkan-Fehler erhält genau einen CPU-Sicherheitsversuch.
 
 Der Foreground-Service läuft auch bei ausgeschaltetem Bildschirm oder
 geschlossener Oberfläche weiter. Seine Systemmeldung zeigt Gesamtfortschritt

@@ -21,7 +21,10 @@ import de.matthiasennen.transcript.media.AudioDecoderOutputOverflowException
 import de.matthiasennen.transcript.media.AudioDecoderStallException
 import de.matthiasennen.transcript.media.decodeAudioChunk
 import de.matthiasennen.transcript.media.inspectAudioTrack
+import de.matthiasennen.transcript.media.CachedWaveform
+import de.matthiasennen.transcript.media.WaveformCache
 import de.matthiasennen.transcript.ui.main.WhisperModel
+import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperSettings
 import de.matthiasennen.transcript.ui.main.WhisperSettingsPreferences
 import de.matthiasennen.transcript.ui.main.WhisperVadMode
@@ -34,18 +37,22 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val CHANNEL_ID = "offline_transcription"
-private const val NOTIFICATION_ID = 2108
+internal const val TRANSCRIPTION_NOTIFICATION_ID = 2108
 private const val ACTION_START = "de.matthiasennen.transcript.START_TRANSCRIPTION"
-private const val ACTION_CANCEL = "de.matthiasennen.transcript.CANCEL_TRANSCRIPTION"
+internal const val ACTION_CANCEL_TRANSCRIPTION = "de.matthiasennen.transcript.CANCEL_TRANSCRIPTION"
 private const val EXTRA_URI = "uri"
 private const val EXTRA_FILE_NAME = "file_name"
 private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_LANGUAGE = "language"
 private const val EXTRA_SETTINGS_SIGNATURE = "whisper_settings_signature"
+private const val EXTRA_JOB_ID = "job_id"
+private const val EXTRA_FORCE_CPU = "force_cpu"
 private const val CHECKPOINT_FILE_NAME = "active-transcription.bin"
+private const val PREPARED_AUDIO_DIRECTORY = "prepared-transcription-audio"
 
 class TranscriptionService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -55,22 +62,28 @@ class TranscriptionService : Service() {
     private var activeWhisperContext: WhisperContext? = null
     private var activeVadModelPath: String? = null
     private lateinit var checkpointStore: TranscriptionCheckpointStore
+    private lateinit var preparedAudioStore: PreparedAudioStore
     private val diagnostics = ArrayDeque<String>()
     private var startedAtEpochMs = 0L
-    private var lastUiPublishAtMs = 0L
+    private val uiUpdateThrottle = ProgressUpdateThrottle(500L)
+    private val notificationUpdateThrottle = ProgressUpdateThrottle(2_000L)
+    private var processStartedAtEpochMs = 0L
+    private var forceCpuForRun = false
 
     override fun onCreate() {
         super.onCreate()
+        processStartedAtEpochMs = System.currentTimeMillis()
         checkpointStore = TranscriptionCheckpointStore(File(filesDir, CHECKPOINT_FILE_NAME))
+        preparedAudioStore = PreparedAudioStore(File(filesDir, PREPARED_AUDIO_DIRECTORY))
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_CANCEL) {
+        if (intent?.action == ACTION_CANCEL_TRANSCRIPTION) {
             requestUserCancellation()
             return START_NOT_STICKY
         }
-        if (transcriptionJob?.isActive == true) return START_REDELIVER_INTENT
+        if (transcriptionJob?.isActive == true) return START_NOT_STICKY
 
         val request = intent?.toRequest() ?: checkpointStore.read()?.request
         if (request == null) {
@@ -80,16 +93,17 @@ class TranscriptionService : Service() {
 
         stopRequested.set(false)
         userCancellationRequested.set(false)
-        TranscriptionCoordinator.update(TranscriptionState.Starting(request.fileName))
+        forceCpuForRun = intent?.getBooleanExtra(EXTRA_FORCE_CPU, false) == true
+        publishState(TranscriptionState.Starting(request.fileName))
         startForeground(
-            NOTIFICATION_ID,
+            TRANSCRIPTION_NOTIFICATION_ID,
             buildNotification("Transkription wird vorbereitet …", 0, indeterminate = true)
         )
         transcriptionJob = serviceScope.launch {
             runTranscription(request)
             transcriptionJob = null
         }
-        return START_REDELIVER_INTENT
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -114,19 +128,32 @@ class TranscriptionService : Service() {
             addDiagnostic("Audiospur wird geprüft.")
             updateNotification("Audiospur wird geprüft …", 0, indeterminate = true)
             val audioInfo = inspectAudioTrack(this, uri)
-            val whisperSettings = WhisperSettingsPreferences(this).load()
+            val persistedWhisperSettings = WhisperSettingsPreferences(this).load()
+            val whisperSettings = if (forceCpuForRun) {
+                persistedWhisperSettings.copy(backend = WhisperComputeBackend.CPU)
+            } else persistedWhisperSettings
             val vadFile = File(File(filesDir, "vad-models"), SileroVadModel.fileName)
             val installedVadModelPath = vadFile.absolutePath.takeIf {
                 vadFile.isFile && vadFile.length() == SileroVadModel.expectedBytes
             }
             val saved = checkpointStore.read()?.takeIf {
                 it.isCompatibleWith(request, audioInfo.durationMs) &&
-                    request.settingsSignature == whisperSettings.normalized().toString() &&
-                    it.hasMeaningfulProgress()
+                    request.settingsSignature == persistedWhisperSettings.normalized().toString()
             }
-            if (saved == null) checkpointStore.clear()
+            if (saved == null) {
+                checkpointStore.clear()
+                preparedAudioStore.clear()
+            }
+            val effectiveRequest = saved?.request ?: request.copy(
+                jobId = request.jobId.ifBlank { UUID.randomUUID().toString() }
+            )
+            TranscriptionControlReceiver.cancellationFile(this).delete()
+            TranscriptionControlReceiver.cpuRetryFile(this).let { retryFile ->
+                val retryJob = runCatching { retryFile.readText() }.getOrDefault("")
+                if (retryJob.isNotBlank() && retryJob != effectiveRequest.jobId) retryFile.delete()
+            }
             var checkpoint = saved ?: TranscriptionCheckpoint(
-                request = request,
+                request = effectiveRequest,
                 durationMs = audioInfo.durationMs,
                 nextStartMs = 0L,
                 detectedLanguage = null,
@@ -135,7 +162,6 @@ class TranscriptionService : Service() {
             ).also(checkpointStore::write)
             latestCheckpoint = checkpoint
             startedAtEpochMs = checkpoint.startedAtEpochMs
-            lastUiPublishAtMs = 0L
 
             val resumed = checkpoint.nextStartMs > 0L
             addDiagnostic(
@@ -147,83 +173,105 @@ class TranscriptionService : Service() {
                 }
             )
 
-            val sections = planTranscriptionSections(
+            val plannedSections = planTranscriptionSections(
                 durationMs = audioInfo.durationMs,
                 startAtMs = checkpoint.nextStartMs,
                 sectionDurationMs = whisperSettings.sectionMinutes * 60_000L
-            ).toMutableList()
-            var sectionIndex = 0
+            )
             val previouslyCompletedSections = completedSectionCount(
                 checkpoint.nextStartMs,
                 whisperSettings.sectionMinutes * 60_000L
             )
-            var sectionCount = sections.size + previouslyCompletedSections
-            activeVadModelPath = resolveVadModelPath(
-                request = request,
+            val sectionCount = plannedSections.size + previouslyCompletedSections
+            val manifest = prepareAudio(
+                request = effectiveRequest,
                 model = model,
                 uri = uri,
-                audioDurationMs = audioInfo.durationMs,
+                durationMs = audioInfo.durationMs,
+                checkpoint = checkpoint,
+                sections = plannedSections,
+                sectionOffset = previouslyCompletedSections,
+                totalSectionCount = sectionCount,
+                sectionDurationMs = whisperSettings.sectionMinutes * 60_000L
+            )
+            activeVadModelPath = resolveVadModelPath(
+                request = effectiveRequest,
+                model = model,
                 checkpoint = checkpoint,
                 settings = whisperSettings,
-                installedModelPath = installedVadModelPath
+                installedModelPath = installedVadModelPath,
+                preparedSections = manifest.sections,
+                sectionOffset = previouslyCompletedSections,
+                totalSectionCount = sectionCount
             )
+
+            ensureContinues()
+            updateNotification("Whisper-Modell wird geladen …", 0, indeterminate = true)
             activeWhisperContext = WhisperContext.createContextFromFile(
                 modelFile.absolutePath,
                 useGpu = whisperSettings.toNativeConfiguration().useGpu
             )
-            val runtimeBackend = checkNotNull(activeWhisperContext).runtimeBackend
+            var cpuRetryUsed = false
             addDiagnostic(
-                "${model.modelLabel} wurde mit Backend ${runtimeBackend.name} geladen." +
-                    if (runtimeBackend.fellBackToCpu) " Vulkan war nicht nutzbar; CPU-Rückfall aktiv." else ""
+                "${model.modelLabel} einmal für alle Abschnitte geladen · " +
+                    "Backend ${checkNotNull(activeWhisperContext).runtimeBackend.name}."
             )
-
-            while (sectionIndex < sections.size) {
+            manifest.sections.forEachIndexed { index, prepared ->
                 ensureContinues()
-                val section = sections[sectionIndex]
-                val absoluteSectionNumber = previouslyCompletedSections + sectionIndex + 1
+                val section = prepared.section
+                val absoluteSectionNumber = previouslyCompletedSections + index + 1
+                val samples = preparedAudioStore.readSection(prepared)
                 try {
-                    checkpoint = processSection(
-                        request = request,
+                    checkpoint = transcribePreparedSection(
+                        request = effectiveRequest,
                         model = model,
-                        uri = uri,
                         section = section,
-                        sectionNumber = absoluteSectionNumber.coerceAtMost(sectionCount),
+                        samples = samples,
+                        sectionNumber = absoluteSectionNumber,
                         sectionCount = sectionCount,
                         checkpoint = checkpoint,
                         whisperSettings = whisperSettings
                     )
                     latestCheckpoint = checkpoint
-                    sectionIndex++
                 } catch (throwable: Throwable) {
                     if (throwable is CancellationException || stopRequested.get()) throw throwable
-                    if (section.usedFallbackSize ||
-                        throwable is AudioDecoderOutputOverflowException
+                    if (!cpuRetryUsed && shouldRetryOnCpu(throwable) &&
+                        whisperSettings.toNativeConfiguration().useGpu
                     ) {
+                        cpuRetryUsed = true
+                        TranscriptionControlReceiver.cpuRetryFile(this)
+                            .writeText(effectiveRequest.jobId)
+                        addDiagnostic("GPU/Vulkan-Fehler erkannt; derselbe Abschnitt wird einmal auf CPU wiederholt.")
+                        activeWhisperContext?.release()
+                        activeWhisperContext = WhisperContext.createContextFromFile(
+                            modelFile.absolutePath,
+                            useGpu = false
+                        )
+                        checkpoint = transcribePreparedSection(
+                            request = effectiveRequest,
+                            model = model,
+                            section = section,
+                            samples = samples,
+                            sectionNumber = absoluteSectionNumber,
+                            sectionCount = sectionCount,
+                            checkpoint = checkpoint,
+                            whisperSettings = whisperSettings
+                        )
+                        latestCheckpoint = checkpoint
+                    } else {
                         throw throwable
                     }
-
-                    val fallbackSections = splitIntoFallbackSections(section, audioInfo.durationMs)
-                    check(fallbackSections.isNotEmpty()) { "Der Abschnitt konnte nicht aufgeteilt werden." }
-                    sections.removeAt(sectionIndex)
-                    sections.addAll(sectionIndex, fallbackSections)
-                    sectionCount += fallbackSections.size - 1
-                    addDiagnostic(
-                        "Abschnitt ab ${formatClock(section.mainStartMs / 1_000L)} wird nach einem " +
-                            "Fehler mit 2,5 Minuten wiederholt."
-                    )
-                    publishRunning(
-                        request, model, section, absoluteSectionNumber.coerceAtMost(sectionCount),
-                        sectionCount, checkpoint, 0f,
-                        "Audioaufbereitung wird mit 2,5-Minuten-Sicherheitsabschnitten fortgesetzt",
-                        "Der ursprüngliche Abschnitt ist endgültig fehlgeschlagen; " +
-                            "die begrenzte Sicherheitsaufteilung wird einmal verwendet."
-                    )
-                    System.gc()
                 }
+                preparedAudioStore.deleteSection(prepared)
+                preparedAudioStore.writeManifest(
+                    manifest.copy(sections = manifest.sections.drop(index + 1))
+                )
             }
 
             ensureContinues()
             checkpointStore.clear()
+            preparedAudioStore.clear()
+            TranscriptionControlReceiver.cpuRetryFile(this).delete()
             val elapsedSeconds = ((System.currentTimeMillis() - checkpoint.startedAtEpochMs) / 1_000L)
                 .coerceAtLeast(0L)
             val completed = TranscriptionState.Completed(
@@ -241,7 +289,7 @@ class TranscriptionService : Service() {
             activeWhisperContext = null
             completedWhisperContext?.release()
             System.gc()
-            TranscriptionCoordinator.update(completed)
+            publishState(completed)
             finishWithNotification(
                 title = "Transkription abgeschlossen",
                 text = "${checkpoint.segments.size} Textabschnitte erkannt."
@@ -249,14 +297,14 @@ class TranscriptionService : Service() {
         } catch (throwable: Throwable) {
             val checkpoint = latestCheckpoint ?: checkpointStore.read()
             if (userCancellationRequested.get()) {
-                checkpointStore.clear()
-                TranscriptionCoordinator.update(TranscriptionState.Cancelled(request.fileName))
-                finishWithNotification("Transkription abgebrochen", request.fileName)
+                publishState(TranscriptionState.Cancelled(request.fileName))
+                finishWithNotification("Transkription angehalten", "Der Zwischenstand bleibt erhalten.")
             } else if (!stopRequested.get()) {
-                val canResume = checkpoint?.hasMeaningfulProgress() == true
+                val canResume = checkpoint != null &&
+                    (checkpoint.hasMeaningfulProgress() || preparedAudioStore.readManifest() != null)
                 if (!canResume) checkpointStore.clear()
                 val message = userFacingError(throwable, canResume)
-                TranscriptionCoordinator.update(
+                publishState(
                     TranscriptionState.Failed(
                         fileName = request.fileName,
                         message = message,
@@ -274,110 +322,112 @@ class TranscriptionService : Service() {
         }
     }
 
-    private suspend fun processSection(
+    private suspend fun prepareAudio(
         request: TranscriptionRequest,
         model: WhisperModel,
         uri: Uri,
+        durationMs: Long,
+        checkpoint: TranscriptionCheckpoint,
+        sections: List<TranscriptionSection>,
+        sectionOffset: Int,
+        totalSectionCount: Int,
+        sectionDurationMs: Long
+    ): PreparedAudioManifest {
+        val requestKey = preparedAudioRequestKey(request, durationMs)
+        val existing = preparedAudioStore.readManifest()
+        if (existing != null && preparedAudioStore.isUsable(existing, requestKey, checkpoint.nextStartMs)) {
+            addDiagnostic("Vollständig vorbereitete PCM-Audiodaten werden wiederverwendet.")
+            cachePreparedWaveform(uri, existing)
+            return existing.copy(
+                sections = existing.sections.filter { it.section.mainEndMs > checkpoint.nextStartMs }
+            )
+        }
+        if (existing?.requestKey != requestKey) preparedAudioStore.clear()
+        val reusable = existing?.sections.orEmpty().takeWhile(preparedAudioStore::sectionExists)
+        val missingSections = sections.drop(reusable.size)
+        val requiredBytes = requiredPreparedAudioFreeBytes(estimatePreparedAudioBytes(missingSections))
+        check(preparedAudioStore.usableSpace >= requiredBytes) {
+            "Für die Audioaufbereitung werden mindestens ${requiredBytes / (1024L * 1024L)} MB freier Speicher benötigt."
+        }
+        val prepared = reusable.toMutableList()
+        val waveform = PreparedWaveformAccumulator(durationMs).apply {
+            existing?.waveformPeaks?.let(::restore)
+        }
+        sections.drop(reusable.size).forEachIndexed { relativeIndex, section ->
+            ensureContinues()
+            val index = reusable.size + relativeIndex
+            val sectionNumber = sectionOffset + index + 1
+            publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint, 0f,
+                "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
+                "Dekodierung auf PCM 16 kHz Mono; Whisper ist noch nicht geladen.")
+            val chunk = decodeAudioChunk(this, uri, section.decodeStartMs, section.decodeEndMs,
+                stopRequested::get, onDecoderRestart = { stall ->
+                    addDiagnostic("Decoder-Stillstand; kontrollierter Neustart. ${stall.message}")
+                }) { progress ->
+                publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint,
+                    progress, "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
+                    "Nur ein PCM-Abschnitt befindet sich im Arbeitsspeicher.")
+            }
+            ensureContinues()
+            waveform.add(section, chunk.samples)
+            val stored = preparedAudioStore.writeSection(index, chunk.samples)
+            prepared += PreparedAudioSection(index, section, stored.first, stored.second)
+            preparedAudioStore.writeManifest(
+                PreparedAudioManifest(requestKey, durationMs, sectionDurationMs, false,
+                    prepared.toList(), waveform.normalized())
+            )
+        }
+        return PreparedAudioManifest(requestKey, durationMs, sectionDurationMs, true,
+            prepared.toList(), waveform.normalized()).also {
+            preparedAudioStore.writeManifest(it)
+            cachePreparedWaveform(uri, it)
+            addDiagnostic("Audio vollständig vorbereitet; Decoder-Ressourcen sind freigegeben.")
+        }
+    }
+
+    private fun cachePreparedWaveform(uri: Uri, manifest: PreparedAudioManifest) {
+        val length = runCatching {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull() ?: -1L
+        val cache = WaveformCache(File(cacheDir, "waveforms"))
+        cache.write(cache.key(uri.toString(), manifest.durationMs, length),
+            CachedWaveform(manifest.waveformPeaks, manifest.durationMs))
+    }
+
+    private suspend fun transcribePreparedSection(
+        request: TranscriptionRequest,
+        model: WhisperModel,
         section: TranscriptionSection,
+        samples: FloatArray,
         sectionNumber: Int,
         sectionCount: Int,
         checkpoint: TranscriptionCheckpoint,
         whisperSettings: WhisperSettings
     ): TranscriptionCheckpoint {
-        val fallbackLabel = if (section.usedFallbackSize) " · Sicherheitsgröße 2,5 min" else ""
-        publishRunning(
-            request,
-            model,
-            section,
-            sectionNumber,
-            sectionCount,
-            checkpoint,
-            progressWithinSection = 0f,
-            status = "Abschnitt $sectionNumber von $sectionCount wird dekodiert$fallbackLabel",
-            detail = "Position ${formatClock(section.mainStartMs / 1_000L)} der Audiodatei."
-        )
-
-        val chunk = decodeAudioChunk(
-            context = this,
-            uri = uri,
-            startMs = section.decodeStartMs,
-            endMs = section.decodeEndMs,
-            shouldCancel = stopRequested::get,
-            onDecoderRestart = { stall ->
-                addDiagnostic(
-                    "Decoder-Stillstand in Abschnitt $sectionNumber erkannt; " +
-                        "Decoder wird genau einmal vollständig neu gestartet. ${stall.message}"
-                )
-                publishRunning(
-                    request, model, section, sectionNumber, sectionCount, checkpoint,
-                    progressWithinSection = 0f,
-                    status = "Decoder-Neustart · Abschnitt $sectionNumber von $sectionCount",
-                    detail = "Die Audioaufbereitung war ohne Fortschritt und wird einmal sauber neu gestartet."
-                )
-            }
-        ) { decoderProgress ->
-            publishRunning(
-                request,
-                model,
-                section,
-                sectionNumber,
-                sectionCount,
-                checkpoint,
-                progressWithinSection = decoderProgress * 0.15f,
-                status = "Abschnitt $sectionNumber von $sectionCount wird dekodiert",
-                detail = "Audio wird speicherschonend auf 16 kHz vorbereitet."
-            )
-        }
-        ensureContinues()
-        addDiagnostic(
-            "Abschnitt $sectionNumber dekodiert: ${chunk.samples.size} 16-kHz-Samples aus " +
-                "${chunk.mimeType}, ${chunk.sourceSampleRate} Hz, " +
-                "${chunk.sourceChannelCount} Kanal/Kanäle."
-        )
-        if (chunk.discardedTrailingSamples > 0) {
-            addDiagnostic(
-                "Decoder-Überhang sicher entfernt: " +
-                    "${chunk.discardedTrailingSamples} zusätzliche Samples."
-            )
-        }
-
         val language = if (request.language == "auto") {
             checkpoint.detectedLanguage?.takeIf(String::isNotBlank) ?: "auto"
-        } else {
-            request.language
-        }
+        } else request.language
         val vadModelPath = activeVadModelPath
-        if (vadModelPath != null) addDiagnostic("Abschnitt $sectionNumber wird mit Silero VAD verarbeitet.")
         val result = runCatching {
-            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
-                language, whisperSettings, vadModelPath)
+            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint,
+                samples, language, whisperSettings, vadModelPath)
         }.recoverCatching { throwable ->
             if (vadModelPath == null || throwable is CancellationException || stopRequested.get()) throw throwable
             activeVadModelPath = null
-            addDiagnostic("VAD-Fehler: Abschnitt $sectionNumber wird automatisch ohne VAD wiederholt.")
-            publishRunning(request, model, section, sectionNumber, sectionCount, checkpoint, 0.15f,
-                "VAD-Fehler · Abschnitt $sectionNumber wird ohne VAD fortgesetzt",
-                "Whisper erhält den vollständig dekodierten Audioabschnitt.")
-            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint, chunk.samples,
-                language, whisperSettings, null)
+            addDiagnostic("VAD-Fehler: Abschnitt $sectionNumber wird einmal ohne VAD wiederholt.")
+            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint,
+                samples, language, whisperSettings, null)
         }.getOrThrow()
         ensureContinues()
-
-        val absoluteSegments = selectAbsoluteSegments(
-            localSegments = result.segments,
-            section = section,
-            totalDurationMs = checkpoint.durationMs
-        )
-        val detectedLanguage = checkpoint.detectedLanguage ?: result.detectedLanguage.takeIf {
-            it.isNotBlank() && result.segments.any { segment -> segment.text.isNotBlank() }
-        }
+        val absoluteSegments = selectAbsoluteSegments(result.segments, section, checkpoint.durationMs)
         val updated = checkpoint.copy(
             nextStartMs = section.mainEndMs,
-            detectedLanguage = detectedLanguage,
+            detectedLanguage = checkpoint.detectedLanguage ?: result.detectedLanguage.takeIf {
+                it.isNotBlank() && result.segments.any { segment -> segment.text.isNotBlank() }
+            },
             segments = mergeCommittedSegments(checkpoint.segments, absoluteSegments)
         )
         checkpointStore.write(updated)
-        addDiagnostic("Abschnitt $sectionNumber gesichert: ${absoluteSegments.size} neue Textabschnitte.")
         publishRunning(request, model, section, sectionNumber, sectionCount, updated, 1f,
             "Abschnitt $sectionNumber von $sectionCount abgeschlossen und gesichert",
             "Nächste Position: ${formatClock(updated.nextStartMs / 1_000L)}.")
@@ -422,11 +472,12 @@ class TranscriptionService : Service() {
     private suspend fun resolveVadModelPath(
         request: TranscriptionRequest,
         model: WhisperModel,
-        uri: Uri,
-        audioDurationMs: Long,
         checkpoint: TranscriptionCheckpoint,
         settings: WhisperSettings,
-        installedModelPath: String?
+        installedModelPath: String?,
+        preparedSections: List<PreparedAudioSection>,
+        sectionOffset: Int,
+        totalSectionCount: Int
     ): String? {
         if (settings.vadMode == WhisperVadMode.OFF) {
             addDiagnostic("Silero VAD ist ausgeschaltet.")
@@ -442,8 +493,7 @@ class TranscriptionService : Service() {
         }
 
         val analyzer = VadAutomaticAnalyzer()
-        val analysisSections = planTranscriptionSections(audioDurationMs, 0L, settings.sectionMinutes * 60_000L)
-        addDiagnostic("VAD-Automatik analysiert die Audiospur speicherschonend mit Silero.")
+        addDiagnostic("VAD-Automatik analysiert dieselben vorbereiteten PCM-Abschnitte mit Silero.")
         val vadContext = runCatching {
             WhisperVadContext.createContextFromFile(installedModelPath)
         }.getOrElse { failure ->
@@ -451,36 +501,17 @@ class TranscriptionService : Service() {
             return null
         }
         val decision = try {
-            analysisSections.forEachIndexed { index, section ->
+            preparedSections.forEachIndexed { index, prepared ->
                 ensureContinues()
-                publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
-                    0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
-                    "Silero prüft reale Sprachbereiche; die Datei bleibt abschnittsweise im Speicher.")
-                val chunk = decodeAudioChunk(
-                    this,
-                    uri,
-                    section.mainStartMs,
-                    section.mainEndMs,
-                    stopRequested::get,
-                    onDecoderRestart = { stall ->
-                        addDiagnostic(
-                            "Decoder-Stillstand während der VAD-Analyse; Decoder wird genau " +
-                                "einmal neu gestartet. ${stall.message}"
-                        )
-                        publishRunning(
-                            request, model, section, index + 1, analysisSections.size, checkpoint,
-                            0f, "VAD-Automatik: Decoder wird neu gestartet",
-                            "Die vollständige VAD-Analyse wird für diesen Abschnitt einmal neu begonnen."
-                        )
-                    }
-                ) { progress ->
-                    publishRunning(request, model, section, index + 1, analysisSections.size, checkpoint,
-                        progress, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${analysisSections.size}",
-                        "Silero bewertet Sprachanteil, Pausenlänge und Zerstückelungsrisiko.")
-                }
+                val section = prepared.section
+                val sectionNumber = sectionOffset + index + 1
+                publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint,
+                    0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${preparedSections.size}",
+                    "Silero liest den vorbereiteten PCM-Abschnitt; es findet keine zweite Dekodierung statt.")
+                val samples = preparedAudioStore.readSection(prepared)
                 ensureContinues()
                 val speechSegments = vadContext.detectSegments(
-                    samples = chunk.samples,
+                    samples = samples,
                     threshold = settings.vadThresholdPercent / 100f,
                     minimumSpeechDurationMs = settings.vadMinSpeechDurationMs,
                     minimumSilenceDurationMs = settings.vadMinSilenceDurationMs,
@@ -489,9 +520,9 @@ class TranscriptionService : Service() {
                     overlapSeconds = settings.vadOverlapMs / 1_000f
                 )
                 analyzer.add(
-                    chunkDurationMs = chunk.samples.size * 1_000L / 16_000L,
+                    chunkDurationMs = samples.size * 1_000L / PREPARED_SAMPLE_RATE,
                     segments = speechSegments,
-                    chunkSampleCount = chunk.samples.size
+                    chunkSampleCount = samples.size
                 )
             }
             analyzer.decide()
@@ -502,8 +533,8 @@ class TranscriptionService : Service() {
                 "VAD-Automatik fehlgeschlagen; Whisper arbeitet sicher ohne VAD: " +
                     (failure.localizedMessage ?: failure.javaClass.simpleName)
             )
-            analysisSections.lastOrNull()?.let { finalSection ->
-                publishRunning(request, model, finalSection, analysisSections.size, analysisSections.size,
+            preparedSections.lastOrNull()?.section?.let { finalSection ->
+                publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
                     checkpoint, 1f, "VAD-Automatik: Whisper arbeitet ohne VAD",
                     "Silero-Analyse war nicht zuverlässig; der vollständige Ton bleibt erhalten.")
             }
@@ -516,16 +547,16 @@ class TranscriptionService : Service() {
             "${decision.detectedSpeechSampleCount} von ${decision.analyzedSampleCount} Samples in Sprachbereichen"
         if (decision.useVad) {
             addDiagnostic("VAD-Automatik: VAD wird verwendet ($summary; ${decision.reason}).")
-            analysisSections.lastOrNull()?.let { finalSection ->
-                publishRunning(request, model, finalSection, analysisSections.size, analysisSections.size,
+            preparedSections.lastOrNull()?.section?.let { finalSection ->
+                publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
                     checkpoint, 1f, "VAD-Automatik: VAD wird verwendet", "$summary · ${decision.reason}.")
             }
             updateNotification("VAD-Automatik: VAD wird verwendet", 0, true)
             return installedModelPath
         }
         addDiagnostic("VAD-Automatik: ohne VAD ($summary; ${decision.reason}).")
-        analysisSections.lastOrNull()?.let { finalSection ->
-            publishRunning(request, model, finalSection, analysisSections.size, analysisSections.size,
+        preparedSections.lastOrNull()?.section?.let { finalSection ->
+            publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
                 checkpoint, 1f, "VAD-Automatik: Whisper arbeitet ohne VAD", "$summary · ${decision.reason}.")
         }
         updateNotification("VAD-Automatik: Whisper arbeitet ohne VAD", 0, true)
@@ -544,14 +575,13 @@ class TranscriptionService : Service() {
         detail: String
     ) {
         val now = SystemClock.elapsedRealtime()
-        val mustPublish = progressWithinSection <= 0f || progressWithinSection >= 1f ||
-            now - lastUiPublishAtMs >= 250L
-        if (!mustPublish) return
-        lastUiPublishAtMs = now
+        val boundary = progressWithinSection <= 0f || progressWithinSection >= 1f
+        val uiSignature = "$sectionNumber|${(progressWithinSection * 200f).toInt()}|$status"
+        if (!uiUpdateThrottle.shouldPublish(now, uiSignature, force = boundary)) return
         val completedMs = section.mainStartMs +
             (section.mainDurationMs * progressWithinSection.coerceIn(0f, 1f)).toLong()
         val progress = (completedMs.toFloat() / checkpoint.durationMs.toFloat()).coerceIn(0f, 1f)
-        TranscriptionCoordinator.update(
+        publishState(
             TranscriptionState.Running(
                 fileName = request.fileName,
                 model = model,
@@ -568,7 +598,12 @@ class TranscriptionService : Service() {
                 detectedLanguage = checkpoint.detectedLanguage
             )
         )
-        updateNotification(status, (progress * 100).toInt(), indeterminate = false)
+        updateNotification(
+            text = status,
+            percent = (progress * 100).toInt(),
+            indeterminate = false,
+            force = boundary
+        )
     }
 
     private fun requestUserCancellation() {
@@ -576,6 +611,10 @@ class TranscriptionService : Service() {
         stopRequested.set(true)
         activeWhisperContext?.requestAbort()
         updateNotification("Transkription wird abgebrochen …", 0, indeterminate = true)
+    }
+
+    private fun publishState(state: TranscriptionState) {
+        TranscriptionCoordinator.publish(this, state, processStartedAtEpochMs)
     }
 
     private fun ensureContinues() {
@@ -590,9 +629,21 @@ class TranscriptionService : Service() {
         diagnostics.addLast("${formatClock(elapsed)} · $message")
     }
 
-    private fun updateNotification(text: String, percent: Int, indeterminate: Boolean) {
+    private fun updateNotification(
+        text: String,
+        percent: Int,
+        indeterminate: Boolean,
+        force: Boolean = true
+    ) {
+        val signature = "${percent.coerceIn(0, 100)}|$indeterminate|$text"
+        if (!notificationUpdateThrottle.shouldPublish(
+                SystemClock.elapsedRealtime(),
+                signature,
+                force
+            )
+        ) return
         getSystemService(NotificationManager::class.java).notify(
-            NOTIFICATION_ID,
+            TRANSCRIPTION_NOTIFICATION_ID,
             buildNotification(text, percent, indeterminate)
         )
     }
@@ -606,10 +657,12 @@ class TranscriptionService : Service() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val cancel = PendingIntent.getService(
+        val cancel = PendingIntent.getBroadcast(
             this,
             1,
-            Intent(this, TranscriptionService::class.java).apply { action = ACTION_CANCEL },
+            Intent(this, TranscriptionControlReceiver::class.java).apply {
+                action = ACTION_CANCEL_TRANSCRIPTION
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -632,7 +685,8 @@ class TranscriptionService : Service() {
             .setAutoCancel(true)
             .build()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        getSystemService(NotificationManager::class.java)
+            .notify(TRANSCRIPTION_NOTIFICATION_ID, notification)
         stopSelf()
     }
 
@@ -655,7 +709,8 @@ class TranscriptionService : Service() {
         val modelId = getStringExtra(EXTRA_MODEL_ID) ?: return null
         val language = getStringExtra(EXTRA_LANGUAGE) ?: return null
         val settingsSignature = getStringExtra(EXTRA_SETTINGS_SIGNATURE) ?: return null
-        return TranscriptionRequest(uri, fileName, modelId, language, settingsSignature)
+        val jobId = getStringExtra(EXTRA_JOB_ID).orEmpty()
+        return TranscriptionRequest(uri, fileName, modelId, language, settingsSignature, jobId)
     }
 
     companion object {
@@ -674,15 +729,42 @@ class TranscriptionService : Service() {
                 putExtra(EXTRA_MODEL_ID, model.id)
                 putExtra(EXTRA_LANGUAGE, language)
                 putExtra(EXTRA_SETTINGS_SIGNATURE, settings.normalized().toString())
+                putExtra(EXTRA_JOB_ID, UUID.randomUUID().toString())
             }
             ContextCompat.startForegroundService(context, intent)
         }
 
         fun cancel(context: Context) {
-            context.startService(
-                Intent(context, TranscriptionService::class.java).apply { action = ACTION_CANCEL }
-            )
+            context.sendBroadcast(Intent(context, TranscriptionControlReceiver::class.java).apply {
+                action = ACTION_CANCEL_TRANSCRIPTION
+            })
         }
+
+        internal fun resumeCheckpoint(context: Context, forceCpu: Boolean) {
+            val checkpoint = TranscriptionCheckpointStore(
+                File(context.filesDir, CHECKPOINT_FILE_NAME)
+            ).read() ?: return
+            val request = checkpoint.request
+            val intent = Intent(context, TranscriptionService::class.java).apply {
+                action = ACTION_START
+                putExtra(EXTRA_URI, request.uri)
+                putExtra(EXTRA_FILE_NAME, request.fileName)
+                putExtra(EXTRA_MODEL_ID, request.modelId)
+                putExtra(EXTRA_LANGUAGE, request.language)
+                putExtra(EXTRA_SETTINGS_SIGNATURE, request.settingsSignature)
+                putExtra(EXTRA_JOB_ID, request.jobId)
+                putExtra(EXTRA_FORCE_CPU, forceCpu)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+    }
+}
+
+private fun shouldRetryOnCpu(throwable: Throwable): Boolean {
+    val details = generateSequence(throwable) { it.cause }
+        .joinToString(" ") { "${it.javaClass.name} ${it.message.orEmpty()}" }
+    return listOf("vulkan", "vk_", "gpu", "device lost", "native").any {
+        details.contains(it, ignoreCase = true)
     }
 }
 

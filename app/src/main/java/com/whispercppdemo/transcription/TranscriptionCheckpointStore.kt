@@ -12,7 +12,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 private const val CHECKPOINT_MAGIC = 0x54524350
-private const val CHECKPOINT_VERSION = 2
+private const val CHECKPOINT_VERSION = 3
+private const val LEGACY_CHECKPOINT_VERSION = 2
 private const val MAX_STRING_BYTES = 4 * 1024 * 1024
 private const val MAX_SEGMENT_COUNT = 1_000_000
 
@@ -21,7 +22,8 @@ data class TranscriptionRequest(
     val fileName: String,
     val modelId: String,
     val language: String,
-    val settingsSignature: String = ""
+    val settingsSignature: String = "",
+    val jobId: String = ""
 )
 
 data class TranscriptionCheckpoint(
@@ -33,11 +35,15 @@ data class TranscriptionCheckpoint(
     val segments: List<WhisperSegment>
 ) {
     fun isCompatibleWith(request: TranscriptionRequest, actualDurationMs: Long): Boolean =
-        this.request == request && durationMs == actualDurationMs &&
+        this.request.sameWorkAs(request) && durationMs == actualDurationMs &&
             nextStartMs in 0L..actualDurationMs
 
     fun hasMeaningfulProgress(): Boolean = nextStartMs > 0L
 }
+
+internal fun TranscriptionRequest.sameWorkAs(other: TranscriptionRequest): Boolean =
+    uri == other.uri && fileName == other.fileName && modelId == other.modelId &&
+        language == other.language && settingsSignature == other.settingsSignature
 
 class TranscriptionCheckpointStore(private val checkpointFile: File) {
     private val temporaryFile = File(checkpointFile.parentFile, "${checkpointFile.name}.tmp")
@@ -46,8 +52,12 @@ class TranscriptionCheckpointStore(private val checkpointFile: File) {
         if (!checkpointFile.isFile) return null
         DataInputStream(BufferedInputStream(checkpointFile.inputStream())).use { input ->
             check(input.readInt() == CHECKPOINT_MAGIC) { "Unbekannte Zwischensicherungsdatei." }
-            check(input.readInt() == CHECKPOINT_VERSION) { "Veraltete Zwischensicherung." }
+            val version = input.readInt()
+            check(version == CHECKPOINT_VERSION || version == LEGACY_CHECKPOINT_VERSION) {
+                "Veraltete Zwischensicherung."
+            }
             val request = TranscriptionRequest(
+                jobId = if (version >= CHECKPOINT_VERSION) input.readSizedString() else "",
                 uri = input.readSizedString(),
                 fileName = input.readSizedString(),
                 modelId = input.readSizedString(),
@@ -86,6 +96,7 @@ class TranscriptionCheckpointStore(private val checkpointFile: File) {
         DataOutputStream(BufferedOutputStream(temporaryFile.outputStream())).use { output ->
             output.writeInt(CHECKPOINT_MAGIC)
             output.writeInt(CHECKPOINT_VERSION)
+            output.writeSizedString(checkpoint.request.jobId)
             output.writeSizedString(checkpoint.request.uri)
             output.writeSizedString(checkpoint.request.fileName)
             output.writeSizedString(checkpoint.request.modelId)
