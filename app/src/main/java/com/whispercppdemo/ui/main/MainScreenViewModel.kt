@@ -397,6 +397,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             detectedLanguage = restoredTranscript?.detectedLanguage,
             completedModel = restoredTranscript?.let { WhisperModel.fromId(it.modelId) },
             transcriptionDurationSeconds = restoredTranscript?.transcriptionDurationSeconds,
+            vadProcessingSummary = restoredTranscript?.vadSummary,
             status = if (restoredTranscript == null) {
                 "Wellenform wird erstellt …"
             } else {
@@ -562,24 +563,51 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
-    fun setLanguage(language: String) {
+    fun setLanguage(language: String, page: WhisperSettingsPage? = null) {
         preferences.edit().putString(LANGUAGE_KEY, language).apply()
-        uiState = uiState.copy(language = language)
+        uiState = if (page == null) {
+            uiState.copy(language = language)
+        } else {
+            uiState.copy(
+                language = language,
+                status = page.savedMessage,
+                statusKind = StatusMessageKind.IMPORTANT,
+                statusEventId = uiState.statusEventId + 1L,
+                cannaBotMode = CannaBotMode.REVIEW
+            )
+        }
     }
 
-    fun updateWhisperSettings(settings: WhisperSettings) {
+    fun updateWhisperSettings(
+        settings: WhisperSettings,
+        page: WhisperSettingsPage = WhisperSettingsPage.WHISPER
+    ) {
         if (uiState.isTranscribing) return
         val normalized = settings.normalized()
         whisperSettingsPreferences.save(normalized)
         uiState = uiState.copy(
             whisperSettings = normalized,
-            status = "Whisper-Einstellungen gespeichert.",
+            status = page.savedMessage,
+            statusKind = StatusMessageKind.IMPORTANT,
+            statusEventId = uiState.statusEventId + 1L,
             cannaBotMode = CannaBotMode.REVIEW
         )
     }
 
-    fun resetWhisperSettings(group: WhisperSettingsGroup) {
-        updateWhisperSettings(uiState.whisperSettings.reset(group))
+    fun resetWhisperSettings(
+        group: WhisperSettingsGroup,
+        page: WhisperSettingsPage = WhisperSettingsPage.WHISPER
+    ) {
+        if (uiState.isTranscribing) return
+        val normalized = uiState.whisperSettings.reset(group).normalized()
+        whisperSettingsPreferences.save(normalized)
+        uiState = uiState.copy(
+            whisperSettings = normalized,
+            status = page.resetMessage,
+            statusKind = StatusMessageKind.IMPORTANT,
+            statusEventId = uiState.statusEventId + 1L,
+            cannaBotMode = CannaBotMode.REVIEW
+        )
     }
 
     fun selectModel(model: WhisperModel) {
@@ -700,7 +728,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             aiSelfTestModel = null,
             aiSelfTestMetrics = null,
             error = null,
-            status = "KI-Unterhaltung wurde zurückgesetzt.",
+            status = "Unterhaltung wurde zurückgesetzt.",
+            statusKind = StatusMessageKind.IMPORTANT,
+            statusEventId = uiState.statusEventId + 1L,
             activityDetail = "Die nächste Anfrage beginnt mit einem neuen Gesprächskontext.",
             diagnostics = (uiState.diagnostics + "Flüchtige KI-Unterhaltung zurückgesetzt.")
                 .takeLast(12),
@@ -734,7 +764,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             aiPerformanceJson = "",
             aiPerformanceMessage = "Einstellungen für ${model.modelLabel} gespeichert.",
             aiBenchmarkResult = null,
-            status = "KI-Leistungseinstellungen gespeichert.",
+            status = "KI-Leistung und Hardware gespeichert.",
+            statusKind = StatusMessageKind.IMPORTANT,
+            statusEventId = uiState.statusEventId + 1L,
             cannaBotMode = CannaBotMode.IDLE
         )
     }
@@ -749,7 +781,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             aiPerformanceJson = "",
             aiPerformanceMessage = "Standardwerte für ${model.modelLabel} wiederhergestellt.",
             aiBenchmarkResult = null,
-            status = "KI-Standardwerte wiederhergestellt.",
+            status = "KI-Leistung und Hardware auf Standard zurückgesetzt.",
+            statusKind = StatusMessageKind.IMPORTANT,
+            statusEventId = uiState.statusEventId + 1L,
             cannaBotMode = CannaBotMode.IDLE
         )
     }
@@ -1681,6 +1715,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = 0f,
                     error = null,
                     status = "Transkription wird im Hintergrund vorbereitet …",
+                    statusKind = StatusMessageKind.IMPORTANT,
+                    statusEventId = uiState.statusEventId + 1L,
                     activityDetail = state.fileName,
                     cannaBotMode = CannaBotMode.WAITING
                 )
@@ -1699,6 +1735,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         elapsedSecondsSince(state.startedAtEpochMs, System.currentTimeMillis())
                     ),
                     status = state.status,
+                    statusKind = state.statusKind,
+                    statusEventId = uiState.statusEventId + 1L,
                     activityDetail = state.activityDetail,
                     diagnostics = state.diagnostics,
                     rawWhisperSegments = emptyList(),
@@ -1744,6 +1782,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     detectedLanguage = state.detectedLanguage,
                     completedModel = state.model,
                     transcriptionDurationSeconds = state.transcriptionDurationSeconds,
+                    vadProcessingSummary = state.vadSummary,
                     error = null,
                     status = if (canRunAutomaticAi) {
                         "Transkription fertig. Texte werden jetzt mit KI überarbeitet …"
@@ -1754,6 +1793,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     } else {
                         "Fertig: ${state.segments.size} Textabschnitte erkannt."
                     },
+                    statusKind = StatusMessageKind.COMPLETION,
+                    statusEventId = uiState.statusEventId + 1L,
                     cannaBotMode = if (canRunAutomaticAi) CannaBotMode.REVIEW else CannaBotMode.IDLE
                 )
                 persistCurrentTranscript(timelineSegments)
@@ -1799,8 +1840,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     detectedLanguage = null,
                     completedModel = null,
                     transcriptionDurationSeconds = null,
+                    vadProcessingSummary = null,
                     error = null,
                     status = "Transkription angehalten · Der Zwischenstand bleibt erhalten.",
+                    statusKind = StatusMessageKind.COMPLETION,
+                    statusEventId = uiState.statusEventId + 1L,
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 TranscriptionCoordinator.acknowledgeTerminal(application)
@@ -1824,6 +1868,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     } else {
                         "Transkription fehlgeschlagen."
                     },
+                    statusKind = StatusMessageKind.ERROR,
+                    statusEventId = uiState.statusEventId + 1L,
                     cannaBotMode = CannaBotMode.IDLE
                 )
                 cue(CannaBotCue.FAILED)
@@ -1864,6 +1910,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             detectedLanguage = stored.detectedLanguage,
             completedModel = WhisperModel.fromId(stored.modelId),
             transcriptionDurationSeconds = stored.transcriptionDurationSeconds,
+            vadProcessingSummary = stored.vadSummary,
             status = "Gespeichertes Transkript wiederhergestellt: " +
                 "${stored.displayedSegments.count { it.text.isNotBlank() }} Textabschnitte.",
             cannaBotMode = CannaBotMode.IDLE
@@ -1882,7 +1929,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 transcriptionDurationSeconds = uiState.transcriptionDurationSeconds ?: 0L,
                 savedAtEpochMs = System.currentTimeMillis(),
                 rawWhisperSegments = uiState.rawWhisperSegments,
-                displayedSegments = displayedSegments
+                displayedSegments = displayedSegments,
+                vadSummary = uiState.vadProcessingSummary
             )
         )
     }

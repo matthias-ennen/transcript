@@ -84,6 +84,23 @@ data class WhisperSettings(
 
 enum class WhisperSettingsGroup { COMPUTE, DETECTION, VAD, DECODING, SEGMENTS, PROTECTION }
 
+enum class WhisperSettingsPage {
+    WHISPER,
+    VAD;
+
+    val savedMessage: String
+        get() = when (this) {
+            WHISPER -> "Whisper-Einstellungen gespeichert."
+            VAD -> "VAD-Einstellungen gespeichert."
+        }
+
+    val resetMessage: String
+        get() = when (this) {
+            WHISPER -> "Whisper-Einstellungen auf Standard zurückgesetzt."
+            VAD -> "VAD-Einstellungen auf Standard zurückgesetzt."
+        }
+}
+
 fun WhisperSettings.reset(group: WhisperSettingsGroup): WhisperSettings {
     val defaults = WhisperSettings()
     return when (group) {

@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ui.main.WhisperModel
+import de.matthiasennen.transcript.ui.main.StatusMessageKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
@@ -40,14 +41,16 @@ sealed interface TranscriptionState {
         val activityDetail: String,
         val diagnostics: List<String>,
         val committedSegments: List<WhisperSegment>,
-        val detectedLanguage: String?
+        val detectedLanguage: String?,
+        val statusKind: StatusMessageKind = StatusMessageKind.PROGRESS
     ) : TranscriptionState
     data class Completed(
         val fileName: String,
         val model: WhisperModel,
         val segments: List<WhisperSegment>,
         val detectedLanguage: String,
-        val transcriptionDurationSeconds: Long
+        val transcriptionDurationSeconds: Long,
+        val vadSummary: VadProcessingSummary? = null
     ) : TranscriptionState
     data class Cancelled(val fileName: String) : TranscriptionState
     data class Failed(

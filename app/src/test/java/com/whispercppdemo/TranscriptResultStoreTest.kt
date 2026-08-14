@@ -1,6 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.ui.main.WhisperVadMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,7 +23,16 @@ class TranscriptResultStoreTest {
                 transcriptionDurationSeconds = 42L,
                 savedAtEpochMs = 1234L,
                 rawWhisperSegments = listOf(WhisperSegment(0L, 1000L, "Rohtext")),
-                displayedSegments = listOf(WhisperSegment(0L, 1000L, "Korrigierter Text"))
+                displayedSegments = listOf(WhisperSegment(0L, 1000L, "Korrigierter Text")),
+                vadSummary = VadProcessingSummary(
+                    requestedMode = WhisperVadMode.AUTOMATIC,
+                    usedVad = true,
+                    originalDurationMs = 10_000L,
+                    processedDurationMs = 7_000L,
+                    skippedDurationMs = 3_000L,
+                    speechRegionCount = 3,
+                    reason = "klare Pausen"
+                )
             )
 
             TranscriptResultStore(file).write(original)

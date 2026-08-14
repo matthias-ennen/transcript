@@ -2,6 +2,7 @@ package de.matthiasennen.transcript.transcription
 
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ui.main.WhisperModel
+import de.matthiasennen.transcript.ui.main.WhisperVadMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -47,7 +48,16 @@ class TranscriptionStateStoreTest {
         val states = listOf(
             TranscriptionState.Completed(
                 "Datei.wav", WhisperModel.BASE,
-                listOf(WhisperSegment(0L, 1_000L, "Text")), "de", 12L
+                listOf(WhisperSegment(0L, 1_000L, "Text")), "de", 12L,
+                VadProcessingSummary(
+                    requestedMode = WhisperVadMode.AUTOMATIC,
+                    usedVad = true,
+                    originalDurationMs = 20_000L,
+                    processedDurationMs = 15_000L,
+                    skippedDurationMs = 5_000L,
+                    speechRegionCount = 4,
+                    reason = "klare Pausen"
+                )
             ),
             TranscriptionState.Cancelled("Datei.wav"),
             TranscriptionState.Failed(
