@@ -20,6 +20,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,13 +53,20 @@ fun SettingsScreen(
     onSelectAiModel: (AiModel) -> Unit,
     onDownloadAiModel: (AiModel) -> Unit,
     onDeleteAiModel: (AiModel) -> Unit,
+    onDeleteAllAiModels: () -> Unit,
+    onRefreshDeviceStorage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var modelToDelete by remember { mutableStateOf<WhisperModel?>(null) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var aiModelToDelete by remember { mutableStateOf<AiModel?>(null) }
+    var confirmDeleteAllAi by remember { mutableStateOf(false) }
     var confirmDeleteVad by remember { mutableStateOf(false) }
     val totalBytes = state.modelInstallations.sumOf(ModelInstallation::storedBytes)
+
+    LaunchedEffect(Unit) {
+        onRefreshDeviceStorage()
+    }
 
     Column(
         modifier = modifier
@@ -67,6 +75,8 @@ fun SettingsScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        DeviceStorageCard(state.deviceStorage)
+
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Whisper-Modellverwaltung", style = MaterialTheme.typography.headlineSmall)
@@ -92,6 +102,10 @@ fun SettingsScreen(
                         onDelete = { modelToDelete = installation.model }
                     )
                 }
+                Text(
+                    "Für die meisten Aufnahmen bietet Ausgewogen ein gutes Verhältnis aus Genauigkeit, Laufzeit und Speicherbedarf.",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 OutlinedButton(onClick = { confirmDeleteAll = true }, enabled = totalBytes > 0L && !state.isBusy && !state.isRecording, modifier = Modifier.fillMaxWidth()) { Text("Alle Modelle löschen") }
             }
         }
@@ -99,39 +113,52 @@ fun SettingsScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Silero VAD", style = MaterialTheme.typography.headlineSmall)
-                Text("Erkennt Sprachbereiche vor der Transkription. Stille und längere Pausen können übersprungen werden; Zeitstempel bleiben auf die Originaldatei bezogen.")
-                Text(
-                    when {
-                        state.vadModelInstallation.isInstalled -> "Status: Installiert"
-                        state.vadModelInstallation.partialBytes > 0L -> "Status: Download unvollständig"
-                        else -> "Status: Nicht installiert"
-                    },
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text("Belegter Speicher: ${formatDownloadSize(state.vadModelInstallation.storedBytes)}")
-                if (state.isVadDownloading && state.vadDownloadTotalBytes > 0L) {
-                    LinearProgressIndicator(
-                        progress = (state.vadDownloadedBytes.toFloat() / state.vadDownloadTotalBytes).coerceIn(0f, 1f),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
                 TextButton(onClick = onOpenVadSettings, contentPadding = PaddingValues(0.dp)) {
                     Text("VAD-Einstellungen", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
                 }
-                if (state.vadModelInstallation.isInstalled) {
-                    OutlinedButton(onClick = { confirmDeleteVad = true }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
-                        Text("Silero VAD löschen")
-                    }
-                } else if (state.vadModelInstallation.partialBytes > 0L) {
-                    Button(onClick = onDownloadVadModel, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
-                        Text("Download fortsetzen")
-                    }
-                    OutlinedButton(onClick = { confirmDeleteVad = true }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
-                        Text("Unvollständigen Download löschen")
-                    }
-                } else {
-                    Button(onClick = onDownloadVadModel, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
-                        Text("${SileroVadModel.modelLabel} herunterladen · 0,9 MB")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    border = if (state.vadModelInstallation.isInstalled) BorderStroke(2.dp, Color.White) else null
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(SileroVadModel.modelLabel, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Erkennt Sprach- und Pausenbereiche, damit Whisper längere stille Abschnitte gezielt überspringen kann.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            when {
+                                state.vadModelInstallation.isInstalled ->
+                                    "Installiert · 0,9 MB · Ausgewählt"
+                                state.vadModelInstallation.partialBytes > 0L ->
+                                    "Download angefangen · ${formatDownloadSize(state.vadModelInstallation.partialBytes)} von 0,9 MB"
+                                else -> "Nicht installiert · Download 0,9 MB"
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (state.isVadDownloading) {
+                            if (state.vadDownloadTotalBytes > 0L) {
+                                LinearProgressIndicator(
+                                    progress = (state.vadDownloadedBytes.toFloat() / state.vadDownloadTotalBytes).coerceIn(0f, 1f),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                        if (!state.vadModelInstallation.isInstalled) {
+                            Button(onClick = onDownloadVadModel, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (state.vadModelInstallation.partialBytes > 0L) "Download fortsetzen" else "Herunterladen")
+                            }
+                        }
+                        if (state.vadModelInstallation.storedBytes > 0L && !state.isVadDownloading) {
+                            OutlinedButton(onClick = { confirmDeleteVad = true }, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (state.vadModelInstallation.isInstalled) "Löschen" else "Unvollständigen Download löschen")
+                            }
+                        }
                     }
                 }
             }
@@ -204,6 +231,14 @@ fun SettingsScreen(
                         onDelete = { aiModelToDelete = installation.model }
                     )
                 }
+                OutlinedButton(
+                    onClick = { confirmDeleteAllAi = true },
+                    enabled = state.aiModelInstallations.any { it.storedBytes > 0L } &&
+                        !state.isBusy && !state.isRecording && !state.isAiModelPreloading,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Alle KI-Modelle löschen")
+                }
                 Text(
                     "Für die beste Qualität empfehlen wir „Ausgewogen“. Größere Modelle benötigen mehr Arbeitsspeicher und Zeit.",
                     style = MaterialTheme.typography.bodySmall
@@ -269,6 +304,25 @@ fun SettingsScreen(
         )
     }
 
+    if (confirmDeleteAllAi) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAllAi = false },
+            title = { Text("Alle KI-Modelle löschen?") },
+            text = {
+                Text("Alle installierten KI-Modelle und unvollständigen Downloads werden entfernt.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteAllAi = false
+                    onDeleteAllAiModels()
+                }) { Text("Alle löschen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteAllAi = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+
     if (confirmDeleteVad) {
         AlertDialog(
             onDismissRequest = { confirmDeleteVad = false },
@@ -277,6 +331,30 @@ fun SettingsScreen(
             confirmButton = { TextButton(onClick = { confirmDeleteVad = false; onDeleteVadModel() }) { Text("Löschen") } },
             dismissButton = { TextButton(onClick = { confirmDeleteVad = false }) { Text("Abbrechen") } }
         )
+    }
+}
+
+@Composable
+private fun DeviceStorageCard(storage: DeviceStorageSnapshot) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Gerätespeicher", style = MaterialTheme.typography.titleLarge)
+            if (storage.totalBytes > 0L) {
+                Text(
+                    "${formatDownloadSize(storage.usedBytes)} belegt · ${formatDownloadSize(storage.freeBytes)} frei",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                LinearProgressIndicator(
+                    progress = storage.usedFraction,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Text("Speicherwerte sind derzeit nicht verfügbar.", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
 }
 
@@ -399,6 +477,7 @@ private fun ModelStorageCard(
         ) {
             Text(installation.model.qualityLabel, style = MaterialTheme.typography.titleMedium)
             Text(installation.model.modelLabel, style = MaterialTheme.typography.bodyMedium)
+            Text(installation.model.description, style = MaterialTheme.typography.bodySmall)
             Text(
                 when {
                     installation.isInstalled ->

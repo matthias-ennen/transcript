@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.os.StatFs
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -132,6 +133,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         modelsDirectory.mkdirs()
         vadModelsDirectory.mkdirs()
         aiModelsDirectory.mkdirs()
+        refreshDeviceStorage()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
         val whisperSettings = whisperSettingsPreferences.load()
         refreshModelInstallations(selectedModel)
@@ -1242,6 +1244,42 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         AiModelDownloadService.start(application, model)
     }
 
+    fun deleteAllAiModels() {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "Alle KI-Modelle werden gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    AiEngineSessionManager.release()
+                    AiModel.entries.forEach { model ->
+                        val file = aiModelFile(model)
+                        check(!file.exists() || file.delete()) {
+                            "${model.modelLabel} konnte nicht gelöscht werden."
+                        }
+                        val partial = partialAiModelFile(model)
+                        check(!partial.exists() || partial.delete()) {
+                            "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
+                        }
+                    }
+                }
+            }.onSuccess {
+                refreshAiModelInstallations(uiState.selectedAiModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiModelReady = false,
+                    status = "Alle KI-Modelle wurden gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }.onFailure(::fail)
+        }
+    }
+
     fun deleteAiModel(model: AiModel) {
         if (uiState.isBusy) return
         viewModelScope.launch {
@@ -2172,12 +2210,24 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
             partialBytes = partialVadModelFile().takeIf(File::isFile)?.length() ?: 0L
         ))
+        refreshDeviceStorage()
     }
 
     private fun aiModelFile(model: AiModel): File = File(aiModelsDirectory, model.fileName)
 
     private fun partialAiModelFile(model: AiModel): File =
         File(aiModelsDirectory, "${model.fileName}.part")
+
+    fun refreshDeviceStorage() {
+        val snapshot = runCatching {
+            val stats = StatFs(application.filesDir.absolutePath)
+            normalizedStorageSnapshot(
+                totalBytes = stats.blockCountLong * stats.blockSizeLong,
+                freeBytes = stats.availableBlocksLong * stats.blockSizeLong
+            )
+        }.getOrDefault(DeviceStorageSnapshot())
+        uiState = uiState.copy(deviceStorage = snapshot)
+    }
 
     private fun refreshAiModelInstallations(selectedModel: AiModel) {
         val installations = AiModel.entries.map { model ->
@@ -2193,6 +2243,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             selectedAiModel = selectedModel,
             aiModelInstallations = installations
         )
+        refreshDeviceStorage()
     }
 
     private fun refreshModelInstallations(selectedModel: WhisperModel) {
@@ -2226,6 +2277,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 CannaBotMode.IDLE
             }
         ).withRecalculatedTranscriptionEstimate()
+        refreshDeviceStorage()
     }
 
     private fun displayName(uri: Uri): String {

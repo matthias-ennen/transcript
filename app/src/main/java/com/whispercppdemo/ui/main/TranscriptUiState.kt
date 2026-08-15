@@ -34,6 +34,7 @@ data class TranscriptUiState(
     val whisperSettings: WhisperSettings = WhisperSettings(),
     val selectedModel: WhisperModel = WhisperModel.BASE,
     val modelInstallations: List<ModelInstallation> = emptyList(),
+    val deviceStorage: DeviceStorageSnapshot = DeviceStorageSnapshot(),
     val modelReady: Boolean = false,
     val downloadingModel: WhisperModel? = null,
     val downloadedBytes: Long = 0L,
