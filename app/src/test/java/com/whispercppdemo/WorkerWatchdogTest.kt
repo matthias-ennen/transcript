@@ -118,6 +118,76 @@ class WorkerWatchdogTest {
         )
     }
 
+    @Test
+    fun `only a matching vulkan model phase may retry on cpu`() {
+        val vulkanInference = heartbeat(
+            heartbeatAtEpochMs = now - 16_000L,
+            lastProgressAtEpochMs = now - 181_000L
+        )
+
+        assertTrue(
+            shouldRetryUnresponsiveWorkerOnCpu(
+                heartbeat = vulkanInference,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false
+            )
+        )
+        assertFalse(
+            shouldRetryUnresponsiveWorkerOnCpu(
+                heartbeat = vulkanInference.copy(backend = "CPU"),
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false
+            )
+        )
+        assertFalse(
+            shouldRetryUnresponsiveWorkerOnCpu(
+                heartbeat = vulkanInference.copy(phase = "decoding"),
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false
+            )
+        )
+        assertFalse(
+            shouldRetryUnresponsiveWorkerOnCpu(
+                heartbeat = vulkanInference,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = true
+            )
+        )
+    }
+
+    @Test
+    fun `fully prepared audio is resumable before the first text segment`() {
+        val checkpoint = TranscriptionCheckpoint(
+            request = TranscriptionRequest(
+                uri = "content://video",
+                fileName = "reference.mp4",
+                modelId = "large-v3",
+                language = "de",
+                jobId = "job-large-model"
+            ),
+            durationMs = 180_000L,
+            nextStartMs = 0L,
+            detectedLanguage = null,
+            startedAtEpochMs = workerStart,
+            segments = emptyList()
+        )
+
+        assertTrue(
+            canResumeAfterWorkerExit(
+                checkpoint = checkpoint,
+                preparedAudioUsable = true,
+                committedSegments = emptyList()
+            )
+        )
+        assertFalse(
+            canResumeAfterWorkerExit(
+                checkpoint = checkpoint,
+                preparedAudioUsable = false,
+                committedSegments = emptyList()
+            )
+        )
+    }
+
     private fun heartbeat(
         workerStartedAtEpochMs: Long = workerStart,
         heartbeatAtEpochMs: Long,

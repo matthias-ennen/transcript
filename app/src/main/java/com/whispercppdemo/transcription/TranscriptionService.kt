@@ -225,11 +225,13 @@ class TranscriptionService : Service() {
             )
 
             ensureContinues()
+            val nativeConfiguration = whisperSettings.toNativeConfiguration()
+            activeBackend = if (nativeConfiguration.useGpu) "VULKAN_REQUESTED" else "CPU"
             markWorkerProgress("model_loading", 0)
             updateNotification("Whisper-Modell wird geladen …", 0, indeterminate = true)
             activeWhisperContext = WhisperContext.createContextFromFile(
                 modelFile.absolutePath,
-                useGpu = whisperSettings.toNativeConfiguration().useGpu
+                useGpu = nativeConfiguration.useGpu
             )
             var cpuRetryUsed = false
             addDiagnostic(
@@ -258,7 +260,7 @@ class TranscriptionService : Service() {
                 } catch (throwable: Throwable) {
                     if (throwable is CancellationException || stopRequested.get()) throw throwable
                     if (!cpuRetryUsed && shouldRetryOnCpu(throwable) &&
-                        whisperSettings.toNativeConfiguration().useGpu
+                        nativeConfiguration.useGpu
                     ) {
                         cpuRetryUsed = true
                         TranscriptionControlReceiver.cpuRetryFile(this)
