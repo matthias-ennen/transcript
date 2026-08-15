@@ -28,6 +28,12 @@ data class AiSelfTestMetrics(
     val thinkingDisabled: Boolean
 )
 
+data class AiModelPreloadMetrics(
+    val modelAlreadyLoaded: Boolean,
+    val modelLoadMs: Long,
+    val cpuFallbackUsed: Boolean
+)
+
 sealed interface AiPostProcessingState {
     data object Idle : AiPostProcessingState
 
@@ -37,6 +43,27 @@ sealed interface AiPostProcessingState {
     ) : AiPostProcessingState
 
     data class SelfTestStarting(val model: AiModel) : AiPostProcessingState
+
+    data class ModelPreloadStarting(val model: AiModel) : AiPostProcessingState
+
+    data class ModelPreloadRunning(
+        val model: AiModel,
+        val status: String,
+        val activityDetail: String,
+        val diagnostics: List<String>
+    ) : AiPostProcessingState
+
+    data class ModelPreloadCompleted(
+        val model: AiModel,
+        val metrics: AiModelPreloadMetrics,
+        val diagnostics: List<String>
+    ) : AiPostProcessingState
+
+    data class ModelPreloadFailed(
+        val model: AiModel,
+        val message: String,
+        val diagnostics: List<String>
+    ) : AiPostProcessingState
 
     data class SelfTestRunning(
         val model: AiModel,
