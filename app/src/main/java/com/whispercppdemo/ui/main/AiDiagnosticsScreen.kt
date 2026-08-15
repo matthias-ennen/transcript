@@ -5,12 +5,17 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -28,8 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import android.os.SystemClock
+import de.matthiasennen.transcript.ai.thermalStatusLabel
 import kotlinx.coroutines.delay
 
 @Composable
@@ -39,10 +47,15 @@ fun AiDiagnosticsScreen(
     onPromptChange: (String) -> Unit,
     onStart: () -> Unit,
     onResetConversation: () -> Unit,
+    onRefreshThermalStatus: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LaunchedEffect(Unit) {
         onEnter()
+        while (true) {
+            delay(2_000L)
+            onRefreshThermalStatus()
+        }
     }
     Column(
         modifier = modifier
@@ -52,6 +65,7 @@ fun AiDiagnosticsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         LiveStatusLine(state)
+        ThermalStatusIndicator(state.aiDiagnosticsThermalStatus)
         AiSelfTestCard(
             state = state,
             onPromptChange = onPromptChange,
@@ -60,6 +74,82 @@ fun AiDiagnosticsScreen(
         )
         if (state.diagnostics.isNotEmpty()) {
             DiagnosticsLogCard(state.diagnostics)
+        }
+    }
+}
+
+
+@Composable
+private fun ThermalStatusIndicator(rawStatus: Int?) {
+    val status = normalizeAiDiagnosticsThermalStatus(rawStatus)
+    val colors = listOf(
+        Color(0xFF4CAF50),
+        Color(0xFF8BC34A),
+        Color(0xFFFFC107),
+        Color(0xFFFF9800),
+        Color(0xFFF4511E),
+        Color(0xFFD32F2F),
+        Color(0xFF8E0000)
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = status?.let { "Thermischer Zustand: ${thermalStatusLabel(it)}" }
+                    ?: "Thermischer Zustand",
+                style = MaterialTheme.typography.titleSmall
+            )
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val indicatorWidth = maxWidth
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Box(modifier = Modifier.height(16.dp).fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(MaterialTheme.shapes.small)
+                        ) {
+                            colors.forEach { color ->
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxSize()
+                                        .background(color)
+                                )
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.height(18.dp).fillMaxWidth()) {
+                        status?.let {
+                            Text(
+                                text = "▲",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.offset(
+                                    x = (indicatorWidth - 16.dp) * (it / 6f)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Keine Drosselung", style = MaterialTheme.typography.labelSmall)
+                Text("Leicht", style = MaterialTheme.typography.labelSmall)
+                Text("Mittel", style = MaterialTheme.typography.labelSmall)
+                Text("Stark", style = MaterialTheme.typography.labelSmall)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Kritisch", style = MaterialTheme.typography.labelSmall)
+                Text("Notfall", style = MaterialTheme.typography.labelSmall)
+                Text("Abschaltung", style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }

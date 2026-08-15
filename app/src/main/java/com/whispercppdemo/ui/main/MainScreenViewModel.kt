@@ -796,6 +796,28 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 AiPostProcessingService.preloadModel(application, model)
             }
         }
+        refreshAiDiagnosticsThermalStatus()
+    }
+
+    fun refreshAiDiagnosticsThermalStatus() {
+        val thermalStatus = normalizeAiDiagnosticsThermalStatus(
+            AiHardwareProbe.readThermalStatus(application)
+        )
+        uiState = if (thermalStatus == null) {
+            val alreadyReported = uiState.status == "Keine Thermaldaten verfügbar."
+            uiState.copy(
+                aiDiagnosticsThermalStatus = null,
+                status = "Keine Thermaldaten verfügbar.",
+                statusKind = StatusMessageKind.IMPORTANT,
+                statusEventId = if (alreadyReported) {
+                    uiState.statusEventId
+                } else {
+                    uiState.statusEventId + 1L
+                }
+            )
+        } else {
+            uiState.copy(aiDiagnosticsThermalStatus = thermalStatus)
+        }
     }
 
     fun startAiSelfTest() {
@@ -817,9 +839,6 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             isBusy = true,
             isAiSelfTest = true,
-            aiSelfTestResponse = null,
-            aiSelfTestModel = null,
-            aiSelfTestMetrics = null,
             progress = null,
             error = null,
             status = "KI-Test wird vorbereitet …",
@@ -1790,6 +1809,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         "KI-Test erfolgreich: ${state.response.length} Zeichen empfangen.")
                         .takeLast(12),
                     showAiDiagnosticsWelcome = false,
+                    aiTestPrompt = aiDiagnosticsPromptAfterResult(
+                        currentPrompt = uiState.aiTestPrompt,
+                        successful = true
+                    ),
                     aiSelfTestResponse = state.response,
                     aiSelfTestModel = state.model,
                     aiSelfTestMetrics = state.metrics,
@@ -1807,9 +1830,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     progress = null,
                     activityDetail = null,
                     diagnostics = state.diagnostics.takeLast(12),
-                    aiSelfTestResponse = null,
-                    aiSelfTestModel = null,
-                    aiSelfTestMetrics = null,
+                    aiTestPrompt = aiDiagnosticsPromptAfterResult(
+                        currentPrompt = uiState.aiTestPrompt,
+                        successful = false
+                    ),
                     error = state.message,
                     status = "KI-Test fehlgeschlagen.",
                     cannaBotMode = CannaBotMode.IDLE

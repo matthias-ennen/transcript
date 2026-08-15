@@ -62,6 +62,7 @@ data class TranscriptUiState(
     val performanceProfileModel: AiModel = AiModel.BALANCED,
     val aiPerformanceConfiguration: LocalAiConfiguration = LocalAiConfiguration(),
     val aiHardwareSnapshot: AiHardwareSnapshot? = null,
+    val aiDiagnosticsThermalStatus: Int? = null,
     val performanceModelLayerCount: Int = 0,
     val isAiBenchmarkRunning: Boolean = false,
     val aiBenchmarkProgress: Float = 0f,

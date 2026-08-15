@@ -54,6 +54,13 @@ data class AiHardwareSnapshot(
 }
 
 object AiHardwareProbe {
+    fun readThermalStatus(context: Context): Int? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return runCatching {
+            context.getSystemService(PowerManager::class.java)?.currentThermalStatus
+        }.getOrNull()?.takeIf { it in 0..6 }
+    }
+
     fun read(context: Context): AiHardwareSnapshot {
         LocalAiEngine.configureNativeLibraryDirectory(context.applicationInfo.nativeLibraryDir)
         val activityManager = context.getSystemService(ActivityManager::class.java)
@@ -64,7 +71,6 @@ object AiHardwareProbe {
         val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
         val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
             status == BatteryManager.BATTERY_STATUS_FULL
-        val powerManager = context.getSystemService(PowerManager::class.java)
         val nativeResult = runCatching { JSONObject(LocalAiEngine.runtimeCapabilitiesJson()) }
         val native = nativeResult.getOrElse { JSONObject() }
         val nativeError = nativeResult.exceptionOrNull()?.let { error ->
@@ -105,11 +111,7 @@ object AiHardwareProbe {
             appPssBytes = Debug.getPss().toLong() * 1_024L,
             batteryPercent = if (level >= 0 && scale > 0) level * 100 / scale else -1,
             charging = charging,
-            thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                powerManager.currentThermalStatus
-            } else {
-                0
-            },
+            thermalStatus = readThermalStatus(context) ?: -1,
             nativeRuntimeLoaded = native.optBoolean("nativeRuntimeLoaded", false),
             nativeRuntimeError = nativeError,
             cpuVariant = native.optString("cpuVariant", "Unbekannt"),

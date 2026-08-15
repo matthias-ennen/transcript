@@ -34,3 +34,11 @@ internal fun canSendAiDiagnosticsRequest(
     prompt: String
 ): Boolean = modelInstalled && modelReady && !modelPreloading && !operationActive &&
     prompt.isNotBlank()
+
+internal fun aiDiagnosticsPromptAfterResult(
+    currentPrompt: String,
+    successful: Boolean
+): String = if (successful) "" else currentPrompt
+
+internal fun normalizeAiDiagnosticsThermalStatus(status: Int?): Int? =
+    status?.takeIf { it in 0..6 }

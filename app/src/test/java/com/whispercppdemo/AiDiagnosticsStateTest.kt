@@ -55,6 +55,24 @@ class AiDiagnosticsStateTest {
     }
 
     @Test
+    fun `completed response clears prompt while failed response keeps it`() {
+        assertEquals("", aiDiagnosticsPromptAfterResult("Neue Frage", successful = true))
+        assertEquals(
+            "Neue Frage",
+            aiDiagnosticsPromptAfterResult("Neue Frage", successful = false)
+        )
+    }
+
+    @Test
+    fun `thermal marker accepts only official Android status range`() {
+        assertEquals(0, normalizeAiDiagnosticsThermalStatus(0))
+        assertEquals(6, normalizeAiDiagnosticsThermalStatus(6))
+        assertEquals(null, normalizeAiDiagnosticsThermalStatus(-1))
+        assertEquals(null, normalizeAiDiagnosticsThermalStatus(7))
+        assertEquals(null, normalizeAiDiagnosticsThermalStatus(null))
+    }
+
+    @Test
     fun `prompt can be typed while loading but sent only after ready`() {
         assertFalse(
             canSendAiDiagnosticsRequest(
