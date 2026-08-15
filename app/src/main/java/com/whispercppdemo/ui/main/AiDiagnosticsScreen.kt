@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -35,7 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.CircleShape
 import android.os.SystemClock
 import de.matthiasennen.transcript.ai.thermalStatusLabel
 import kotlinx.coroutines.delay
@@ -96,11 +99,22 @@ private fun ThermalStatusIndicator(rawStatus: Int?) {
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                text = status?.let { "Thermischer Zustand: ${thermalStatusLabel(it)}" }
-                    ?: "Thermischer Zustand",
-                style = MaterialTheme.typography.titleSmall
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Thermischer Zustand:",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                status?.let {
+                    ThermalLegendDot(colors[it])
+                    Text(
+                        text = thermalStatusLabel(it),
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                }
+            }
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val indicatorWidth = maxWidth
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -137,21 +151,50 @@ private fun ThermalStatusIndicator(rawStatus: Int?) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Keine Drosselung", style = MaterialTheme.typography.labelSmall)
-                Text("Leicht", style = MaterialTheme.typography.labelSmall)
-                Text("Mittel", style = MaterialTheme.typography.labelSmall)
-                Text("Stark", style = MaterialTheme.typography.labelSmall)
+                ThermalLegendItem("Keine Drosselung", colors[0], status == 0)
+                ThermalLegendItem("Leicht", colors[1], status == 1)
+                ThermalLegendItem("Mittel", colors[2], status == 2)
+                ThermalLegendItem("Stark", colors[3], status == 3)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Kritisch", style = MaterialTheme.typography.labelSmall)
-                Text("Notfall", style = MaterialTheme.typography.labelSmall)
-                Text("Abschaltung", style = MaterialTheme.typography.labelSmall)
+                ThermalLegendItem("Kritisch", colors[4], status == 4)
+                ThermalLegendItem("Notfall", colors[5], status == 5)
+                ThermalLegendItem("Abschaltung", colors[6], status == 6)
             }
         }
     }
+}
+
+@Composable
+private fun ThermalLegendItem(
+    label: String,
+    color: Color,
+    active: Boolean
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        ThermalLegendDot(color)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+        )
+    }
+}
+
+@Composable
+private fun ThermalLegendDot(color: Color) {
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(color)
+    )
 }
 
 @Composable
