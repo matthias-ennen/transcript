@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import android.os.SystemClock
+import de.matthiasennen.transcript.ai.thermalStatusLabel
 import kotlinx.coroutines.delay
 
 @Composable
@@ -101,6 +102,7 @@ private fun ThermalStatusIndicator(rawStatus: Int?) {
                 style = MaterialTheme.typography.titleSmall
             )
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val indicatorWidth = maxWidth
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Box(modifier = Modifier.height(16.dp).fillMaxWidth()) {
                         Row(
@@ -124,7 +126,7 @@ private fun ThermalStatusIndicator(rawStatus: Int?) {
                                 text = "▲",
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.offset(
-                                    x = (maxWidth - 16.dp) * (it / 6f)
+                                    x = (indicatorWidth - 16.dp) * (it / 6f)
                                 )
                             )
                         }
