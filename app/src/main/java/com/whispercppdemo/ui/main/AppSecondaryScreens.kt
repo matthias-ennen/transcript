@@ -173,14 +173,15 @@ fun SettingsScreen(
                     title = "KI-Nachbearbeitung aktivieren",
                     description = "Schaltet die optionale lokale Textkorrektur frei.",
                     checked = state.aiPostProcessingEnabled,
-                    enabled = !state.isBusy && !state.isRecording,
+                    enabled = !state.isBusy && !state.isRecording && !state.isAiModelPreloading,
                     onCheckedChange = onAiEnabledChanged
                 )
                 AiSettingSwitch(
                     title = "Nach der Transkription automatisch ausführen",
                     description = "Whisper wird zuerst entladen; danach bearbeitet die KI das gesamte Transkript.",
                     checked = state.automaticAiPostProcessingEnabled,
-                    enabled = state.aiPostProcessingEnabled && !state.isBusy && !state.isRecording,
+                    enabled = state.aiPostProcessingEnabled && !state.isBusy &&
+                        !state.isRecording && !state.isAiModelPreloading,
                     onCheckedChange = onAiAutomaticChanged
                 )
 
@@ -193,7 +194,8 @@ fun SettingsScreen(
                     AiModelStorageCard(
                         installation = installation,
                         selected = installation.model == state.selectedAiModel,
-                        enabled = !state.isBusy && !state.isRecording,
+                        enabled = !state.isBusy && !state.isRecording &&
+                            !state.isAiModelPreloading,
                         isDownloading = state.downloadingAiModel == installation.model,
                         downloadedBytes = state.aiDownloadedBytes,
                         totalBytes = state.aiDownloadTotalBytes,
