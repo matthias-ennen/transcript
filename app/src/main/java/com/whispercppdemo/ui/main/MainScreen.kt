@@ -201,6 +201,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onPromptChange = viewModel::updateAiTestPrompt,
                 onStart = viewModel::startAiSelfTest,
                 onResetConversation = viewModel::resetAiTestConversation,
+                onRefreshThermalStatus = viewModel::refreshAiDiagnosticsThermalStatus,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.AI_PERFORMANCE -> AiPerformanceScreen(
