@@ -67,6 +67,25 @@ internal enum class WorkerWatchdogState {
     HEARTBEAT_MISSING
 }
 
+internal fun shouldRetryUnresponsiveWorkerOnCpu(
+    heartbeat: WorkerHeartbeat?,
+    expectedJobId: String,
+    cpuRetryAlreadyUsed: Boolean
+): Boolean {
+    if (cpuRetryAlreadyUsed || heartbeat == null) return false
+    if (heartbeat.jobId != expectedJobId) return false
+    val backend = heartbeat.backend.uppercase()
+    val gpuBackend = backend.contains("VULKAN") || backend.contains("GPU")
+    return gpuBackend && heartbeat.phase in setOf("model_loading", "inference")
+}
+
+internal fun canResumeAfterWorkerExit(
+    checkpoint: TranscriptionCheckpoint?,
+    preparedAudioUsable: Boolean,
+    committedSegments: List<WhisperSegment>
+): Boolean = checkpoint != null &&
+    (checkpoint.hasMeaningfulProgress() || preparedAudioUsable || committedSegments.isNotEmpty())
+
 /**
  * Liveness deliberately depends only on the independent worker heartbeat.
  * Native Whisper progress can remain unchanged for a long time on large models
@@ -135,10 +154,29 @@ object TranscriptionCoordinator {
                 val exit = findWorkerExit(context, envelope.workerStartedAtEpochMs)
                 if (exit != null) {
                     val running = envelope.state as? TranscriptionState.Running
+                    val checkpoint = TranscriptionCheckpointStore(
+                        File(context.filesDir, "active-transcription.bin")
+                    ).read()
+                    val preparedAudioUsable = checkpoint?.let { saved ->
+                        val store = PreparedAudioStore(
+                            File(context.filesDir, "prepared-transcription-audio")
+                        )
+                        store.readManifest()?.let { manifest ->
+                            store.isUsable(
+                                manifest,
+                                preparedAudioRequestKey(saved.request, saved.durationMs),
+                                saved.nextStartMs
+                            )
+                        } == true
+                    } == true
                     val failure = TranscriptionState.Failed(
                         fileName = envelope.state.fileName(),
                         message = workerExitMessage(exit),
-                        canResume = running?.committedSegments?.isNotEmpty() == true,
+                        canResume = canResumeAfterWorkerExit(
+                            checkpoint = checkpoint,
+                            preparedAudioUsable = preparedAudioUsable,
+                            committedSegments = running?.committedSegments.orEmpty()
+                        ),
                         committedSegments = running?.committedSegments.orEmpty()
                     )
                     val failedEnvelope = envelope.copy(
@@ -162,8 +200,9 @@ object TranscriptionCoordinator {
                                 watchdogRecoveryRequestedForStart = envelope.workerStartedAtEpochMs
                                 Log.w(
                                     WATCHDOG_LOG_TAG,
-                                    "CPU recovery requested: reason=heartbeat_missing " +
+                                    "Unresponsive worker handling requested: reason=heartbeat_missing " +
                                         "workerStart=${envelope.workerStartedAtEpochMs} " +
+                                        "phase=${heartbeat?.phase} backend=${heartbeat?.backend} " +
                                         "heartbeatAgeMs=${heartbeat?.let { now - it.heartbeatAtEpochMs }}"
                                 )
                                 context.sendBroadcast(

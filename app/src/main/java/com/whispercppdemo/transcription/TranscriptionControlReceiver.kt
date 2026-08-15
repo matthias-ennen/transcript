@@ -23,8 +23,15 @@ class TranscriptionControlReceiver : BroadcastReceiver() {
                 val checkpoint = TranscriptionCheckpointStore(
                     File(appContext.filesDir, "active-transcription.bin")
                 ).read()
+                val heartbeat = workerHeartbeatStore(appContext.filesDir).read()
                 val cpuRetryAlreadyUsed = watchdogRecovery && checkpoint != null &&
                     cpuRetryFile(appContext).readTextOrEmpty() == checkpoint.request.jobId
+                val cpuRetryAllowed = watchdogRecovery && checkpoint != null &&
+                    shouldRetryUnresponsiveWorkerOnCpu(
+                        heartbeat = heartbeat,
+                        expectedJobId = checkpoint.request.jobId,
+                        cpuRetryAlreadyUsed = cpuRetryAlreadyUsed
+                    )
                 if (!watchdogRecovery) {
                     cancellationFile(appContext).apply {
                         parentFile?.mkdirs()
@@ -34,16 +41,21 @@ class TranscriptionControlReceiver : BroadcastReceiver() {
                 appContext.stopService(Intent(appContext, TranscriptionService::class.java))
                 Thread.sleep(CANCEL_GRACE_PERIOD_MS)
                 killWorkerIfStillRunning(appContext, checkpoint?.request?.jobId.orEmpty())
-                if (watchdogRecovery && checkpoint != null && !cpuRetryAlreadyUsed) {
+                if (cpuRetryAllowed && checkpoint != null) {
                     cpuRetryFile(appContext).writeText(checkpoint.request.jobId)
                     TranscriptionService.resumeCheckpoint(appContext, forceCpu = true)
                 } else if (watchdogRecovery && checkpoint != null) {
+                    val reason = if (cpuRetryAlreadyUsed) {
+                        "Whisper blieb auch beim einmaligen CPU-Sicherheitsversuch stehen."
+                    } else {
+                        "Der Transkriptionsprozess hat kein Lebenszeichen mehr gesendet. " +
+                            "Ein CPU-Neustart ist nur nach einem bestätigten Vulkan-Stillstand zulässig."
+                    }
                     TranscriptionCoordinator.publish(
                         appContext,
                         TranscriptionState.Failed(
                             fileName = checkpoint.request.fileName,
-                            message = "Whisper blieb auch beim einmaligen CPU-Sicherheitsversuch stehen. " +
-                                "Der Zwischenstand bleibt erhalten.",
+                            message = "$reason Der Zwischenstand bleibt erhalten.",
                             canResume = true,
                             committedSegments = checkpoint.segments
                         ),
