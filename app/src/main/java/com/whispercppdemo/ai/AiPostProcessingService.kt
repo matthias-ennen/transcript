@@ -32,6 +32,7 @@ private const val CHANNEL_ID = "local_ai_postprocessing"
 private const val NOTIFICATION_ID = 2111
 private const val ACTION_START = "de.matthiasennen.transcript.START_AI_POSTPROCESSING"
 private const val ACTION_START_SELF_TEST = "de.matthiasennen.transcript.START_AI_SELF_TEST"
+private const val ACTION_PRELOAD_MODEL = "de.matthiasennen.transcript.PRELOAD_AI_MODEL"
 private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_TEST_PROMPT = "test_prompt"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
@@ -53,6 +54,21 @@ class AiPostProcessingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (processingJob?.isActive == true) return START_REDELIVER_INTENT
+        if (intent?.action == ACTION_PRELOAD_MODEL) {
+            val model = AiModel.fromId(intent.getStringExtra(EXTRA_MODEL_ID))
+            stopRequested.set(false)
+            diagnostics.clear()
+            AiPostProcessingCoordinator.update(AiPostProcessingState.ModelPreloadStarting(model))
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification("KI-Modell wird geladen …", 0, true)
+            )
+            processingJob = serviceScope.launch {
+                runModelPreload(model)
+                processingJob = null
+            }
+            return START_REDELIVER_INTENT
+        }
         if (intent?.action == ACTION_START_SELF_TEST) {
             val model = AiModel.fromId(intent.getStringExtra(EXTRA_MODEL_ID))
             val prompt = intent.getStringExtra(EXTRA_TEST_PROMPT).orEmpty()
@@ -95,6 +111,86 @@ class AiPostProcessingService : Service() {
         stopRequested.set(true)
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun runModelPreload(model: AiModel) {
+        try {
+            val modelFile = File(File(filesDir, "ai-models"), model.fileName)
+            check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
+                "${model.modelLabel} ist nicht vollständig installiert."
+            }
+            val configuration = guardedConfiguration(modelFile, model)
+            activeConfiguration = configuration
+            val alreadyLoaded = AiEngineSessionManager.isLoaded(model, modelFile, configuration)
+            addDiagnostic("Vorladen: ausgewähltes Modell ${model.modelLabel}.")
+            addDiagnostic(
+                if (alreadyLoaded) {
+                    "Passende Modell- und Laufzeitkonfiguration ist bereits im RAM."
+                } else {
+                    "Passende Modell- und Laufzeitkonfiguration wird neu geladen."
+                }
+            )
+            AiPostProcessingCoordinator.update(
+                AiPostProcessingState.ModelPreloadRunning(
+                    model = model,
+                    status = if (alreadyLoaded) {
+                        "KI-Modell ist geladen."
+                    } else {
+                        "KI-Modell wird geladen …"
+                    },
+                    activityDetail = if (alreadyLoaded) {
+                        "${model.modelLabel} wird aus dem RAM wiederverwendet."
+                    } else {
+                        "${model.modelLabel} wird für die KI-Diagnose vorbereitet."
+                    },
+                    diagnostics = diagnostics.toList()
+                )
+            )
+            val session = AiEngineSessionManager.withModel(
+                model,
+                modelFile,
+                configuration
+            ) { engine, _ -> engine.runtimeReport() }
+            val report = session.value
+            addDiagnostic(
+                if (session.info.modelAlreadyLoaded) {
+                    "KI-Modell war bereits im RAM; kein erneutes Laden."
+                } else {
+                    "KI-Modell in ${session.info.modelLoadMs} ms geladen und bleibt im RAM."
+                }
+            )
+            addDiagnostic(
+                "Backend angefordert: ${report.requestedBackend} · aktiv: ${report.activeBackend} · ${report.activeCpuBackend}."
+            )
+            if (session.info.cpuFallbackUsed || report.fallbackUsed) {
+                addDiagnostic("Automatischer CPU-Fallback wurde für die geladene Sitzung verwendet.")
+            }
+            AiPostProcessingCoordinator.update(
+                AiPostProcessingState.ModelPreloadCompleted(
+                    model = model,
+                    metrics = AiModelPreloadMetrics(
+                        modelAlreadyLoaded = session.info.modelAlreadyLoaded,
+                        modelLoadMs = session.info.modelLoadMs,
+                        cpuFallbackUsed = session.info.cpuFallbackUsed || report.fallbackUsed
+                    ),
+                    diagnostics = diagnostics.toList()
+                )
+            )
+            finishWithNotification("KI-Modell geladen", "${model.modelLabel} ist einsatzbereit.")
+        } catch (throwable: Throwable) {
+            if (!stopRequested.get() && throwable !is CancellationException) {
+                val message = throwable.localizedMessage ?: "Das KI-Modell konnte nicht geladen werden."
+                addDiagnostic("Vorladefehler: $message")
+                AiPostProcessingCoordinator.update(
+                    AiPostProcessingState.ModelPreloadFailed(
+                        model = model,
+                        message = message,
+                        diagnostics = diagnostics.toList()
+                    )
+                )
+                finishWithNotification("KI-Modell nicht geladen", message)
+            }
+        }
     }
 
     private fun runSelfTest(model: AiModel, prompt: String) {
@@ -534,6 +630,14 @@ class AiPostProcessingService : Service() {
     }
 
     companion object {
+        fun preloadModel(context: Context, model: AiModel) {
+            val intent = Intent(context, AiPostProcessingService::class.java).apply {
+                action = ACTION_PRELOAD_MODEL
+                putExtra(EXTRA_MODEL_ID, model.id)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
+
         fun startSelfTest(context: Context, model: AiModel, prompt: String) {
             val intent = Intent(context, AiPostProcessingService::class.java).apply {
                 action = ACTION_START_SELF_TEST
