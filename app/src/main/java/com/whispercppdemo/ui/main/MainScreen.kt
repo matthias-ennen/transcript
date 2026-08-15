@@ -47,7 +47,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
@@ -190,6 +189,8 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     }
                 },
                 onDeleteAiModel = viewModel::deleteAiModel,
+                onDeleteAllAiModels = viewModel::deleteAllAiModels,
+                onRefreshDeviceStorage = viewModel::refreshDeviceStorage,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.ABOUT -> AboutScreen(
@@ -350,10 +351,13 @@ private fun TranscriptTopBar(
                 ) {
                     Text(if (page == AppPage.MAIN) "Simple Transcript" else page.title)
                     if (page in advancedSettingsPages) {
-                        Column(modifier = Modifier.padding(start = 4.dp)) {
-                            Icon(Icons.Default.KeyboardArrowUp, null, Modifier.size(14.dp))
-                            Icon(Icons.Default.ArrowDropDown, "Einstellungsseite auswählen", Modifier.size(14.dp))
-                        }
+                        Icon(
+                            Icons.Default.ArrowDropDown,
+                            "Einstellungsseite auswählen",
+                            Modifier
+                                .padding(start = 4.dp)
+                                .size(18.dp)
+                        )
                     }
                 }
                 DropdownMenu(
