@@ -35,11 +35,15 @@ import kotlinx.coroutines.delay
 @Composable
 fun AiDiagnosticsScreen(
     state: TranscriptUiState,
+    onEnter: () -> Unit,
     onPromptChange: (String) -> Unit,
     onStart: () -> Unit,
     onResetConversation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    LaunchedEffect(Unit) {
+        onEnter()
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -97,7 +101,7 @@ internal fun LiveStatusLine(
             state.error == null &&
             estimateStatus != null
     val isActiveOperation = state.isBusy || state.isRecording || state.isPlaying ||
-        state.isWaveformLoading
+        state.isWaveformLoading || state.isAiModelPreloading
     val primaryStatus = if (alternatesReadyStatus) {
         state.mediaReadyStatus ?: state.status
     } else {
@@ -224,10 +228,12 @@ private fun AiSelfTestCard(
                 style = MaterialTheme.typography.bodySmall
             )
             OutlinedTextField(
-                value = state.aiSelfTestResponse.orEmpty(),
+                value = aiDiagnosticsResponseText(
+                    showWelcome = state.showAiDiagnosticsWelcome,
+                    modelResponse = state.aiSelfTestResponse
+                ),
                 onValueChange = {},
                 label = { Text("KI-Antwort") },
-                placeholder = { Text("Die Antwort der KI erscheint hier …") },
                 minLines = 4,
                 maxLines = 8,
                 readOnly = true,
@@ -240,19 +246,31 @@ private fun AiSelfTestCard(
                 placeholder = { Text("Eigene Eingabe für die KI …") },
                 minLines = 3,
                 maxLines = 8,
-                enabled = !state.isBusy,
+                enabled = !state.isBusy || state.isAiModelPreloading,
                 modifier = Modifier.fillMaxWidth()
             )
             Button(
                 onClick = onStart,
-                enabled = modelInstalled && !state.isBusy && state.aiTestPrompt.isNotBlank(),
+                enabled = canSendAiDiagnosticsRequest(
+                    modelInstalled = modelInstalled,
+                    modelReady = state.isAiModelReady,
+                    modelPreloading = state.isAiModelPreloading,
+                    operationActive = state.isBusy,
+                    prompt = state.aiTestPrompt
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (state.isAiSelfTest) "Anfrage läuft …" else "Anfrage an KI senden")
+                Text(
+                    when {
+                        state.isAiSelfTest -> "Anfrage läuft …"
+                        state.isAiModelPreloading -> "KI-Modell wird geladen …"
+                        else -> "Anfrage an KI senden"
+                    }
+                )
             }
             OutlinedButton(
                 onClick = onResetConversation,
-                enabled = !state.isBusy,
+                enabled = !state.isBusy && !state.isAiModelPreloading,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Unterhaltung zurücksetzen")

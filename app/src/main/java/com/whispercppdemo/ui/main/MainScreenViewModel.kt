@@ -706,8 +706,107 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(aiTestPrompt = prompt)
     }
 
+    fun prepareAiDiagnostics() {
+        val model = uiState.selectedAiModel
+        val modelFile = aiModelFile(model)
+        val configuration = aiPerformancePreferences.load(model)
+        val matchingSessionLoaded = AiEngineSessionManager.isLoaded(
+            model,
+            modelFile,
+            configuration
+        )
+        val operationActive = uiState.isBusy || uiState.isRecording ||
+            uiState.isRecordingStopping || uiState.isAiModelPreloading ||
+            AiPostProcessingCoordinator.state.value != AiPostProcessingState.Idle
+        val decision = aiDiagnosticsPreloadDecision(
+            modelInstalled = uiState.selectedAiModelInstalled,
+            operationActive = operationActive,
+            matchingSessionLoaded = matchingSessionLoaded
+        )
+
+        // Opening the page starts a fresh volatile diagnostic conversation. The loaded model
+        // itself remains alive and can be reused immediately.
+        uiState = uiState.copy(
+            showAiDiagnosticsWelcome = true,
+            aiSelfTestResponse = null,
+            aiSelfTestModel = null,
+            aiSelfTestMetrics = null,
+            error = null
+        )
+
+        when (decision) {
+            AiDiagnosticsPreloadDecision.MODEL_MISSING -> {
+                uiState = uiState.copy(
+                    isAiModelPreloading = false,
+                    isAiModelReady = false,
+                    status = "Bitte zuerst das ausgewählte KI-Modell herunterladen.",
+                    statusKind = StatusMessageKind.IMPORTANT,
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail = null,
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }
+            AiDiagnosticsPreloadDecision.OPERATION_ACTIVE -> {
+                uiState = uiState.copy(
+                    isAiModelPreloading = false,
+                    isAiModelReady = false,
+                    status = "KI-Modell kann noch nicht geladen werden.",
+                    statusKind = StatusMessageKind.IMPORTANT,
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail =
+                        "Zuerst den laufenden Vorgang abschließen und die KI-Diagnose erneut öffnen.",
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            AiDiagnosticsPreloadDecision.ALREADY_LOADED -> {
+                AiEngineSessionManager.resetTestConversation()
+                val report = AiEngineSessionManager.runtimeReport(model, modelFile, configuration)
+                val backendDiagnostic = report?.let {
+                    "Backend angefordert: ${it.requestedBackend} · aktiv: ${it.activeBackend} · ${it.activeCpuBackend}."
+                }
+                uiState = uiState.copy(
+                    isAiModelPreloading = false,
+                    isAiModelReady = true,
+                    status = "KI-Modell ist geladen.",
+                    statusKind = StatusMessageKind.COMPLETION,
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail = "${model.modelLabel} wird aus dem RAM wiederverwendet.",
+                    diagnostics = (uiState.diagnostics + listOfNotNull(
+                        "KI-Diagnose geöffnet: ${model.modelLabel} ist bereits im RAM.",
+                        backendDiagnostic
+                    )).takeLast(12),
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }
+            AiDiagnosticsPreloadDecision.START -> {
+                AiEngineSessionManager.resetTestConversation()
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiModelPreloading = true,
+                    isAiModelReady = false,
+                    status = "KI-Modell wird geladen …",
+                    statusKind = StatusMessageKind.IMPORTANT,
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail = "${model.modelLabel} wird für die KI-Diagnose vorbereitet.",
+                    diagnostics = (uiState.diagnostics +
+                        "KI-Diagnose geöffnet: Vorladen von ${model.modelLabel} gestartet.")
+                        .takeLast(12),
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+                AiPostProcessingService.preloadModel(application, model)
+            }
+        }
+    }
+
     fun startAiSelfTest() {
-        if (uiState.isBusy || !uiState.selectedAiModelInstalled || uiState.aiTestPrompt.isBlank()) return
+        if (!canSendAiDiagnosticsRequest(
+                modelInstalled = uiState.selectedAiModelInstalled,
+                modelReady = uiState.isAiModelReady,
+                modelPreloading = uiState.isAiModelPreloading,
+                operationActive = uiState.isBusy,
+                prompt = uiState.aiTestPrompt
+            )
+        ) return
         val selectedModelFile = aiModelFile(uiState.selectedAiModel)
         val performanceConfiguration = aiPerformancePreferences.load(uiState.selectedAiModel)
         val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(
@@ -742,9 +841,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun resetAiTestConversation() {
-        if (uiState.isBusy) return
+        if (uiState.isBusy || uiState.isAiModelPreloading) return
         AiEngineSessionManager.resetTestConversation()
         uiState = uiState.copy(
+            showAiDiagnosticsWelcome = true,
             aiSelfTestResponse = null,
             aiSelfTestModel = null,
             aiSelfTestMetrics = null,
@@ -1068,7 +1168,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun setAiPostProcessingEnabled(enabled: Boolean) {
-        if (uiState.isBusy) return
+        if (uiState.isBusy || uiState.isAiModelPreloading) return
         aiPreferences.setEnabled(enabled)
         if (!enabled) aiPreferences.setAutomatic(false)
         uiState = uiState.copy(
@@ -1078,17 +1178,19 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun setAutomaticAiPostProcessingEnabled(enabled: Boolean) {
-        if (uiState.isBusy || !uiState.aiPostProcessingEnabled) return
+        if (uiState.isBusy || uiState.isAiModelPreloading || !uiState.aiPostProcessingEnabled) return
         aiPreferences.setAutomatic(enabled)
         uiState = uiState.copy(automaticAiPostProcessingEnabled = enabled)
     }
 
     fun selectAiModel(model: AiModel) {
-        if (uiState.isBusy) return
+        if (uiState.isBusy || uiState.isAiModelPreloading) return
         AiEngineSessionManager.releaseIfDifferent(model)
         aiPreferences.setSelectedModel(model)
         refreshAiModelInstallations(model)
         uiState = uiState.copy(
+            isAiModelReady = false,
+            showAiDiagnosticsWelcome = true,
             aiSelfTestResponse = null,
             aiSelfTestModel = null,
             aiSelfTestMetrics = null,
@@ -1101,7 +1203,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun downloadAiModel(model: AiModel = uiState.selectedAiModel) {
-        if (uiState.isBusy) return
+        if (uiState.isBusy || uiState.isAiModelPreloading) return
         AiEngineSessionManager.releaseIfDifferent(model)
         aiPreferences.setSelectedModel(model)
         uiState = uiState.copy(
@@ -1579,6 +1681,82 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private fun handleAiPostProcessingState(state: AiPostProcessingState) {
         when (state) {
             AiPostProcessingState.Idle -> Unit
+            is AiPostProcessingState.ModelPreloadStarting -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiModelPreloading = true,
+                    isAiModelReady = false,
+                    progress = null,
+                    error = null,
+                    status = "KI-Modell wird geladen …",
+                    statusKind = StatusMessageKind.IMPORTANT,
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail = "${state.model.modelLabel} wird für die KI-Diagnose vorbereitet.",
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            is AiPostProcessingState.ModelPreloadRunning -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    isAiModelPreloading = true,
+                    isAiModelReady = false,
+                    progress = null,
+                    error = null,
+                    status = state.status,
+                    statusKind = StatusMessageKind.IMPORTANT,
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail = state.activityDetail,
+                    diagnostics = state.diagnostics.takeLast(12),
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            is AiPostProcessingState.ModelPreloadCompleted -> {
+                val selectedModelStillMatches = state.model == uiState.selectedAiModel
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiModelPreloading = false,
+                    isAiModelReady = selectedModelStillMatches,
+                    progress = null,
+                    error = null,
+                    status = if (selectedModelStillMatches) {
+                        "KI-Modell ist geladen."
+                    } else {
+                        "Ausgewähltes KI-Modell wurde geändert."
+                    },
+                    statusKind = if (selectedModelStillMatches) {
+                        StatusMessageKind.COMPLETION
+                    } else {
+                        StatusMessageKind.IMPORTANT
+                    },
+                    statusEventId = uiState.statusEventId + 1L,
+                    activityDetail = if (state.metrics.modelAlreadyLoaded) {
+                        "${state.model.modelLabel} war bereits im RAM."
+                    } else {
+                        "${state.model.modelLabel} wurde in ${state.metrics.modelLoadMs} ms geladen."
+                    },
+                    diagnostics = state.diagnostics.takeLast(12),
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.SUCCESS)
+                AiPostProcessingCoordinator.reset()
+            }
+            is AiPostProcessingState.ModelPreloadFailed -> {
+                uiState = uiState.copy(
+                    isBusy = false,
+                    isAiModelPreloading = false,
+                    isAiModelReady = false,
+                    progress = null,
+                    activityDetail = null,
+                    diagnostics = state.diagnostics.takeLast(12),
+                    error = state.message,
+                    status = "KI-Modell konnte nicht geladen werden.",
+                    statusKind = StatusMessageKind.ERROR,
+                    statusEventId = uiState.statusEventId + 1L,
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+                AiPostProcessingCoordinator.reset()
+            }
             is AiPostProcessingState.SelfTestStarting -> {
                 uiState = uiState.copy(
                     isBusy = true,
@@ -1611,6 +1789,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     diagnostics = (state.diagnostics +
                         "KI-Test erfolgreich: ${state.response.length} Zeichen empfangen.")
                         .takeLast(12),
+                    showAiDiagnosticsWelcome = false,
                     aiSelfTestResponse = state.response,
                     aiSelfTestModel = state.model,
                     aiSelfTestMetrics = state.metrics,

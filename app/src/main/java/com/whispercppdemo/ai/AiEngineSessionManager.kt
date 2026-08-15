@@ -34,7 +34,7 @@ internal object AiEngineSessionManager {
         file: File,
         configuration: LocalAiConfiguration
     ): Boolean = engine != null && modelId == model.id && modelPath == file.absolutePath &&
-        configurationKey == configuration.runtimeKey()
+        configurationKey == configuration.normalized().runtimeKey()
 
     @Synchronized
     fun hasTestConversation(
@@ -42,6 +42,17 @@ internal object AiEngineSessionManager {
         file: File,
         configuration: LocalAiConfiguration
     ): Boolean = isLoaded(model, file, configuration) && requireNotNull(engine).hasTestConversation()
+
+    @Synchronized
+    fun runtimeReport(
+        model: AiModel,
+        file: File,
+        configuration: LocalAiConfiguration
+    ): LocalAiRuntimeReport? = if (isLoaded(model, file, configuration)) {
+        requireNotNull(engine).runtimeReport()
+    } else {
+        null
+    }
 
     @Synchronized
     fun <T> withModel(
@@ -52,33 +63,52 @@ internal object AiEngineSessionManager {
     ): AiEngineSessionResult<T> {
         val normalized = configuration.normalized()
         return try {
-            runWithConfiguration(model, file, normalized, false, block)
+            runWithConfiguration(
+                model = model,
+                file = file,
+                activeConfiguration = normalized,
+                sessionConfigurationKey = normalized.runtimeKey(),
+                cpuFallbackUsed = false,
+                block = block
+            )
         } catch (failure: Throwable) {
             val canFallback = shouldRetryWithCpu(normalized, failure.message)
             if (!canFallback) throw failure
             releaseLocked()
-            runWithConfiguration(model, file, normalized.cpuFallback(), true, block)
+            runWithConfiguration(
+                model = model,
+                file = file,
+                activeConfiguration = normalized.cpuFallback(),
+                sessionConfigurationKey = normalized.runtimeKey(),
+                cpuFallbackUsed = true,
+                block = block
+            )
         }
     }
 
     private fun <T> runWithConfiguration(
         model: AiModel,
         file: File,
-        configuration: LocalAiConfiguration,
+        activeConfiguration: LocalAiConfiguration,
+        sessionConfigurationKey: String,
         cpuFallbackUsed: Boolean,
         block: (LocalAiEngine, AiEngineSessionInfo) -> T
     ): AiEngineSessionResult<T> {
-        val alreadyLoaded = isLoaded(model, file, configuration)
+        val alreadyLoaded = engine != null && modelId == model.id &&
+            modelPath == file.absolutePath && configurationKey == sessionConfigurationKey
         var loadMs = 0L
         if (!alreadyLoaded) {
             releaseLocked()
             val startedAt = SystemClock.elapsedRealtime()
-            val loadedEngine = LocalAiEngine(file.absolutePath, configuration)
+            val loadedEngine = LocalAiEngine(file.absolutePath, activeConfiguration)
             loadMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
             engine = loadedEngine
             modelId = model.id
             modelPath = file.absolutePath
-            configurationKey = configuration.runtimeKey()
+            // A CPU fallback satisfies the original requested runtime configuration. Keeping
+            // that request key prevents the next prompt from discarding the safe fallback and
+            // attempting the failed Vulkan configuration again.
+            configurationKey = sessionConfigurationKey
         }
         val info = AiEngineSessionInfo(alreadyLoaded, loadMs, cpuFallbackUsed)
         return AiEngineSessionResult(block(requireNotNull(engine), info), info)

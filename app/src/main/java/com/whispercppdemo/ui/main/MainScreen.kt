@@ -197,6 +197,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             )
             AppPage.AI_DIAGNOSTICS -> AiDiagnosticsScreen(
                 state = state,
+                onEnter = viewModel::prepareAiDiagnostics,
                 onPromptChange = viewModel::updateAiTestPrompt,
                 onStart = viewModel::startAiSelfTest,
                 onResetConversation = viewModel::resetAiTestConversation,
