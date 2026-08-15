@@ -139,6 +139,35 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     val srtExporter = rememberExporter(context, state, ExportFormat.SUBRIP)
     val jsonExporter = rememberExporter(context, state, ExportFormat.JSON)
 
+    LaunchedEffect(state.pendingSharedMediaImport, state.isSharedMediaImporting) {
+        if (state.pendingSharedMediaImport != null || state.isSharedMediaImporting) {
+            page = AppPage.MAIN
+        }
+    }
+
+    state.pendingSharedMediaImport?.let { request ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelSharedMediaImport,
+            title = { Text("Aktuellen Vorgang ersetzen?") },
+            text = {
+                Text(
+                    "Die geteilte Datei „${request.fileName}“ ersetzt die aktuell ausgewählte " +
+                        "Datei und das vorhandene Transkript. Möchtest du fortfahren?"
+                )
+            },
+            confirmButton = {
+                Button(onClick = viewModel::confirmSharedMediaImport) {
+                    Text("Ersetzen und importieren")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = viewModel::cancelSharedMediaImport) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TranscriptTopBar(
