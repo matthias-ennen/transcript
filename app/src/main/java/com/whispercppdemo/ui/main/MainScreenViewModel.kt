@@ -79,6 +79,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val modelsDirectory = File(application.filesDir, "models")
     private val vadModelsDirectory = File(application.filesDir, "vad-models")
     private val aiModelsDirectory = File(application.filesDir, "ai-models")
+    private val sharedMediaImportStore = SharedMediaImportStore(
+        File(application.filesDir, "shared-media")
+    )
     private val aiPreferences = AiPreferences(application)
     private val aiPerformancePreferences = AiPerformancePreferences(application)
     private val waveformCache = WaveformCache(File(application.filesDir, "waveforms"))
@@ -133,6 +136,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         modelsDirectory.mkdirs()
         vadModelsDirectory.mkdirs()
         aiModelsDirectory.mkdirs()
+        sharedMediaImportStore.clearPending()
         refreshDeviceStorage()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
         val whisperSettings = whisperSettingsPreferences.load()
@@ -180,6 +184,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
+        sharedMediaImportStore.clearCommitted()
         selectAudioInternal(
             uri = uri,
             fileName = displayName(uri),
@@ -187,8 +192,134 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
     }
 
+    fun receiveSharedMedia(uri: Uri?, mimeType: String?) {
+        if (uri == null) {
+            reportUnsupportedShare("Die geteilte Datei konnte nicht gelesen werden.")
+            return
+        }
+        val resolvedMime = mimeType
+            ?.substringBefore(';')
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf(String::isNotBlank)
+            ?: application.contentResolver.getType(uri)?.lowercase()
+        if (!isSupportedSharedMediaMime(resolvedMime)) {
+            reportUnsupportedShare("Dieses Audio- oder Videoformat wird nicht unterstützt.")
+            return
+        }
+        if (uiState.isBusy || uiState.isRecording || uiState.isRecordingStopping) {
+            reportUnsupportedShare("Während eines laufenden Vorgangs kann keine Datei übernommen werden.")
+            return
+        }
+        val request = SharedMediaRequest(
+            uri = uri,
+            fileName = displayName(uri),
+            mimeType = resolvedMime.orEmpty(),
+            declaredSizeBytes = contentLength(uri)
+        )
+        val currentWorkExists = uiState.selectedAudio != null ||
+            uiState.segments.isNotEmpty() ||
+            uiState.draftSegments.isNotEmpty() ||
+            uiState.completedModel != null
+        if (currentWorkExists) {
+            uiState = uiState.copy(
+                pendingSharedMediaImport = request,
+                status = "Geteilte Datei wartet auf Bestätigung.",
+                error = null,
+                cannaBotMode = CannaBotMode.WAITING
+            )
+        } else {
+            importSharedMedia(request)
+        }
+    }
+
+    fun confirmSharedMediaImport() {
+        val request = uiState.pendingSharedMediaImport ?: return
+        uiState = uiState.copy(pendingSharedMediaImport = null)
+        importSharedMedia(request)
+    }
+
+    fun cancelSharedMediaImport() {
+        if (uiState.pendingSharedMediaImport == null) return
+        uiState = uiState.copy(
+            pendingSharedMediaImport = null,
+            status = "Geteilte Datei wurde nicht übernommen.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
+    fun reportUnsupportedShare(message: String) {
+        uiState = uiState.copy(
+            pendingSharedMediaImport = null,
+            isSharedMediaImporting = false,
+            error = message,
+            status = "Geteilte Datei konnte nicht übernommen werden.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+        cue(CannaBotCue.FAILED)
+    }
+
+    private fun importSharedMedia(request: SharedMediaRequest) {
+        if (uiState.isBusy || uiState.isSharedMediaImporting) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                pendingSharedMediaImport = null,
+                isSharedMediaImporting = true,
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "Geteilte Datei wird sicher übernommen …",
+                activityDetail = "Datei wird in den privaten App-Speicher kopiert.",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val stats = StatFs(application.filesDir.absolutePath)
+                    val availableBytes = stats.availableBlocksLong * stats.blockSizeLong
+                    val staged = application.contentResolver.openInputStream(request.uri)?.use { input ->
+                        sharedMediaImportStore.stage(
+                            input = input,
+                            requestedFileName = request.fileName,
+                            declaredSizeBytes = request.declaredSizeBytes,
+                            availableBytes = availableBytes
+                        )
+                    } ?: error("Die geteilte Datei ist nicht lesbar.")
+                    try {
+                        inspectAudioTrack(application, Uri.fromFile(staged.file))
+                        sharedMediaImportStore.commit(staged)
+                    } catch (failure: Throwable) {
+                        staged.file.delete()
+                        throw failure
+                    }
+                }
+            }.onSuccess { importedFile ->
+                uiState = uiState.copy(
+                    isSharedMediaImporting = false,
+                    isBusy = false,
+                    activityDetail = null
+                )
+                selectAudioInternal(
+                    uri = Uri.fromFile(importedFile),
+                    fileName = request.fileName,
+                    status = "Geteilte Datei wurde sicher übernommen."
+                )
+            }.onFailure { failure ->
+                uiState = uiState.copy(
+                    isSharedMediaImporting = false,
+                    isBusy = false,
+                    activityDetail = null,
+                    error = failure.localizedMessage ?: "Die geteilte Datei ist nicht lesbar.",
+                    status = "Geteilte Datei konnte nicht importiert werden.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+            }
+        }
+    }
+
     fun startRecording() {
         if (uiState.isBusy || uiState.isRecording || uiState.isRecordingStopping) return
+        sharedMediaImportStore.clearCommitted()
         stopPlayback(release = true)
         transcriptResultPersistence.clear()
         uiState = uiState.copy(
