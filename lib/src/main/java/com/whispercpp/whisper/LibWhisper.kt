@@ -67,6 +67,15 @@ private class NativeWhisperProgressListener(
     }
 }
 
+class WhisperTranscriptionException(
+    val errorCode: Int
+) : IllegalStateException(
+    when (errorCode) {
+        -3 -> "Whisper konnte die Sprache nicht automatisch bestimmen (Fehlercode -3)."
+        else -> "Whisper konnte die Audiodaten nicht verarbeiten (Fehlercode $errorCode)."
+    }
+)
+
 class WhisperContext private constructor(
     private var ptr: Long,
     val runtimeBackend: WhisperRuntimeBackend
@@ -127,9 +136,7 @@ class WhisperContext private constructor(
             if (WhisperLib.isAbortRequested(abortToken)) {
                 throw java.util.concurrent.CancellationException("Whisper-Transkription abgebrochen.")
             }
-            check(result == 0) {
-                "Whisper konnte die Audiodatei nicht verarbeiten (Fehlercode $result)."
-            }
+            if (result != 0) throw WhisperTranscriptionException(result)
             val textCount = WhisperLib.getTextSegmentCount(ptr)
             val segments = List(textCount) { index ->
                 WhisperSegment(
