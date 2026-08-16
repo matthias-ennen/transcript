@@ -1,6 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.ui.main.WhisperSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,9 +22,11 @@ class TranscriptionCheckpointStoreTest {
         val request = TranscriptionRequest(
             uri = "content://audio/long-recording",
             fileName = "Aufnahme.m4a",
-            modelId = "base",
-            language = "auto",
-            settingsSignature = "WhisperSettings(sectionMinutes=5)",
+            configuration = TranscriptionJobConfiguration(
+                modelId = "base",
+                language = "auto",
+                whisperSettings = WhisperSettings(sectionMinutes = 5)
+            ),
             jobId = "job-42"
         )
         val checkpoint = TranscriptionCheckpoint(
@@ -43,7 +46,22 @@ class TranscriptionCheckpointStoreTest {
         assertEquals(checkpoint, store.read())
         assertTrue(checkpoint.isCompatibleWith(request, 4_145_000L))
         assertTrue(checkpoint.isCompatibleWith(request.copy(jobId = "new-process"), 4_145_000L))
-        assertFalse(checkpoint.isCompatibleWith(request.copy(language = "en"), 4_145_000L))
+        assertFalse(
+            checkpoint.isCompatibleWith(
+                request.copy(configuration = request.configuration.copy(language = "en")),
+                4_145_000L
+            )
+        )
+        assertFalse(
+            checkpoint.isCompatibleWith(
+                request.copy(
+                    configuration = request.configuration.copy(
+                        whisperSettings = request.configuration.whisperSettings.copy(sectionMinutes = 2)
+                    )
+                ),
+                4_145_000L
+            )
+        )
         assertTrue(checkpoint.hasMeaningfulProgress())
     }
 
@@ -53,8 +71,11 @@ class TranscriptionCheckpointStoreTest {
             request = TranscriptionRequest(
                 uri = "content://audio/recording",
                 fileName = "Aufnahme.m4a",
-                modelId = "tiny",
-                language = "auto"
+                configuration = TranscriptionJobConfiguration(
+                    modelId = "tiny",
+                    language = "auto",
+                    whisperSettings = WhisperSettings()
+                )
             ),
             durationMs = 60_000L,
             nextStartMs = 0L,

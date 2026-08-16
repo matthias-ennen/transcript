@@ -1,5 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
+import de.matthiasennen.transcript.ui.main.WhisperSettings
+
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
@@ -161,8 +163,11 @@ class WorkerWatchdogTest {
             request = TranscriptionRequest(
                 uri = "content://video",
                 fileName = "reference.mp4",
-                modelId = "large-v3",
-                language = "de",
+                configuration = TranscriptionJobConfiguration(
+                    modelId = "large-v3",
+                    language = "de",
+                    whisperSettings = WhisperSettings()
+                ),
                 jobId = "job-large-model"
             ),
             durationMs = 180_000L,

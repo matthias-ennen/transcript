@@ -27,7 +27,6 @@ import de.matthiasennen.transcript.ui.main.WhisperModel
 import de.matthiasennen.transcript.ui.main.StatusMessageKind
 import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperSettings
-import de.matthiasennen.transcript.ui.main.WhisperSettingsPreferences
 import de.matthiasennen.transcript.ui.main.WhisperVadMode
 import de.matthiasennen.transcript.download.SileroVadModel
 import kotlinx.coroutines.CancellationException
@@ -54,9 +53,7 @@ private const val ACTION_START = "de.matthiasennen.transcript.START_TRANSCRIPTIO
 internal const val ACTION_CANCEL_TRANSCRIPTION = "de.matthiasennen.transcript.CANCEL_TRANSCRIPTION"
 private const val EXTRA_URI = "uri"
 private const val EXTRA_FILE_NAME = "file_name"
-private const val EXTRA_MODEL_ID = "model_id"
-private const val EXTRA_LANGUAGE = "language"
-private const val EXTRA_SETTINGS_SIGNATURE = "whisper_settings_signature"
+private const val EXTRA_JOB_CONFIGURATION = "job_configuration"
 private const val EXTRA_JOB_ID = "job_id"
 private const val EXTRA_FORCE_CPU = "force_cpu"
 private const val CHECKPOINT_FILE_NAME = "active-transcription.bin"
@@ -136,7 +133,8 @@ class TranscriptionService : Service() {
         var latestCheckpoint: TranscriptionCheckpoint? = null
         try {
             val uri = Uri.parse(request.uri)
-            val model = WhisperModel.fromId(request.modelId)
+            val jobConfiguration = request.configuration.normalized()
+            val model = WhisperModel.fromId(jobConfiguration.modelId)
             val modelFile = File(File(filesDir, "models"), model.fileName)
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
@@ -145,17 +143,21 @@ class TranscriptionService : Service() {
             addDiagnostic("Audiospur wird geprüft.")
             updateNotification("Audiospur wird geprüft …", 0, indeterminate = true)
             val audioInfo = inspectAudioTrack(this, uri)
-            val persistedWhisperSettings = WhisperSettingsPreferences(this).load()
             val whisperSettings = if (forceCpuForRun) {
-                persistedWhisperSettings.copy(backend = WhisperComputeBackend.CPU)
-            } else persistedWhisperSettings
+                jobConfiguration.whisperSettings.copy(backend = WhisperComputeBackend.CPU)
+            } else {
+                jobConfiguration.whisperSettings
+            }
+            addDiagnostic(
+                "Auftragskonfiguration: Abschnitt ${whisperSettings.sectionMinutes} min, " +
+                    "VAD ${whisperSettings.vadMode.name}, Sprache ${jobConfiguration.language}."
+            )
             val vadFile = File(File(filesDir, "vad-models"), SileroVadModel.fileName)
             val installedVadModelPath = vadFile.absolutePath.takeIf {
                 vadFile.isFile && vadFile.length() == SileroVadModel.expectedBytes
             }
             val saved = checkpointStore.read()?.takeIf {
-                it.isCompatibleWith(request, audioInfo.durationMs) &&
-                    request.settingsSignature == persistedWhisperSettings.normalized().toString()
+                it.isCompatibleWith(request, audioInfo.durationMs)
             }
             if (saved == null) {
                 checkpointStore.clear()
@@ -883,11 +885,12 @@ class TranscriptionService : Service() {
     private fun Intent.toRequest(): TranscriptionRequest? {
         val uri = getStringExtra(EXTRA_URI) ?: return null
         val fileName = getStringExtra(EXTRA_FILE_NAME) ?: return null
-        val modelId = getStringExtra(EXTRA_MODEL_ID) ?: return null
-        val language = getStringExtra(EXTRA_LANGUAGE) ?: return null
-        val settingsSignature = getStringExtra(EXTRA_SETTINGS_SIGNATURE) ?: return null
+        val encodedConfiguration = getStringExtra(EXTRA_JOB_CONFIGURATION) ?: return null
+        val configuration = runCatching {
+            TranscriptionJobConfiguration.decode(encodedConfiguration)
+        }.getOrNull() ?: return null
         val jobId = getStringExtra(EXTRA_JOB_ID).orEmpty()
-        return TranscriptionRequest(uri, fileName, modelId, language, settingsSignature, jobId)
+        return TranscriptionRequest(uri, fileName, configuration, jobId)
     }
 
     companion object {
@@ -903,9 +906,10 @@ class TranscriptionService : Service() {
                 action = ACTION_START
                 putExtra(EXTRA_URI, uri.toString())
                 putExtra(EXTRA_FILE_NAME, fileName)
-                putExtra(EXTRA_MODEL_ID, model.id)
-                putExtra(EXTRA_LANGUAGE, language)
-                putExtra(EXTRA_SETTINGS_SIGNATURE, settings.normalized().toString())
+                putExtra(
+                    EXTRA_JOB_CONFIGURATION,
+                    TranscriptionJobConfiguration(model.id, language, settings).encode()
+                )
                 putExtra(EXTRA_JOB_ID, UUID.randomUUID().toString())
             }
             ContextCompat.startForegroundService(context, intent)
@@ -926,9 +930,7 @@ class TranscriptionService : Service() {
                 action = ACTION_START
                 putExtra(EXTRA_URI, request.uri)
                 putExtra(EXTRA_FILE_NAME, request.fileName)
-                putExtra(EXTRA_MODEL_ID, request.modelId)
-                putExtra(EXTRA_LANGUAGE, request.language)
-                putExtra(EXTRA_SETTINGS_SIGNATURE, request.settingsSignature)
+                putExtra(EXTRA_JOB_CONFIGURATION, request.configuration.encode())
                 putExtra(EXTRA_JOB_ID, request.jobId)
                 putExtra(EXTRA_FORCE_CPU, forceCpu)
             }
