@@ -12,6 +12,14 @@ import java.nio.ByteOrder
 import java.util.concurrent.CancellationException
 private const val DECODER_TIMEOUT_US = 10_000L
 
+internal fun isExtractorEndOfStream(sampleSize: Int): Boolean = sampleSize < 0
+
+internal fun decoderTimestampOffsetUs(firstSampleTimeUs: Long): Long =
+    if (firstSampleTimeUs < 0L) -firstSampleTimeUs else 0L
+
+internal fun normalizedDecoderTimestampUs(sampleTimeUs: Long, timestampOffsetUs: Long): Long =
+    sampleTimeUs + timestampOffsetUs
+
 data class AudioTrackInfo(
     val durationMs: Long,
     val sourceSampleRate: Int,
@@ -120,6 +128,7 @@ private fun decodeAudioChunkAttempt(
         )
         val bufferInfo = MediaCodec.BufferInfo()
         var inputEnded = false
+        var inputTimestampOffsetUs: Long? = null
         var outputEnded = false
         var reachedRequestedEnd = false
         val watchdog = DecoderProgressWatchdog(SystemClock.elapsedRealtime())
@@ -135,7 +144,7 @@ private fun decodeAudioChunkAttempt(
                         ?: error("Der Audiodecoder stellte keinen Eingabepuffer bereit.")
                     val size = extractor.readSampleData(inputBuffer, 0)
                     val sampleTime = extractor.sampleTime
-                    if (size < 0 || sampleTime < 0L || sampleTime > endUs) {
+                    if (isExtractorEndOfStream(size) || sampleTime > endUs) {
                         decoder.queueInputBuffer(
                             inputIndex,
                             0,
@@ -145,7 +154,17 @@ private fun decodeAudioChunkAttempt(
                         )
                         inputEnded = true
                     } else {
-                        decoder.queueInputBuffer(inputIndex, 0, size, sampleTime, 0)
+                        val timestampOffsetUs = inputTimestampOffsetUs
+                            ?: decoderTimestampOffsetUs(sampleTime).also {
+                                inputTimestampOffsetUs = it
+                            }
+                        decoder.queueInputBuffer(
+                            inputIndex,
+                            0,
+                            size,
+                            normalizedDecoderTimestampUs(sampleTime, timestampOffsetUs),
+                            0
+                        )
                         extractor.advance()
                     }
                     madeProgress = true
