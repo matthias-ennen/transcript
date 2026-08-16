@@ -144,7 +144,8 @@ class TranscriptionService : Service() {
                 TranscriptionState.Failed(
                     fileName = request.fileName,
                     message = message,
-                    canResume = checkpointStore.read() != null
+                    canResume = checkpointStore.read() != null,
+                    committedSegments = emptyList()
                 )
             )
             finishWithNotification("Transkription unterbrochen", message)
