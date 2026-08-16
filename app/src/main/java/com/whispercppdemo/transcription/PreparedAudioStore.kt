@@ -40,9 +40,7 @@ internal fun preparedAudioRequestKey(request: TranscriptionRequest, durationMs: 
         request.jobId,
         request.uri,
         request.fileName,
-        request.modelId,
-        request.language,
-        request.settingsSignature,
+        request.configuration.encode(),
         durationMs.toString()
     ).joinToString("|")
     return MessageDigest.getInstance("SHA-256")

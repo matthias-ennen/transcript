@@ -12,19 +12,19 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 private const val CHECKPOINT_MAGIC = 0x54524350
-private const val CHECKPOINT_VERSION = 3
-private const val LEGACY_CHECKPOINT_VERSION = 2
+private const val CHECKPOINT_VERSION = 4
 private const val MAX_STRING_BYTES = 4 * 1024 * 1024
 private const val MAX_SEGMENT_COUNT = 1_000_000
 
 data class TranscriptionRequest(
     val uri: String,
     val fileName: String,
-    val modelId: String,
-    val language: String,
-    val settingsSignature: String = "",
+    val configuration: TranscriptionJobConfiguration,
     val jobId: String = ""
-)
+) {
+    val modelId: String get() = configuration.modelId
+    val language: String get() = configuration.language
+}
 
 data class TranscriptionCheckpoint(
     val request: TranscriptionRequest,
@@ -42,8 +42,8 @@ data class TranscriptionCheckpoint(
 }
 
 internal fun TranscriptionRequest.sameWorkAs(other: TranscriptionRequest): Boolean =
-    uri == other.uri && fileName == other.fileName && modelId == other.modelId &&
-        language == other.language && settingsSignature == other.settingsSignature
+    uri == other.uri && fileName == other.fileName &&
+        configuration.normalized() == other.configuration.normalized()
 
 class TranscriptionCheckpointStore(private val checkpointFile: File) {
     private val temporaryFile = File(checkpointFile.parentFile, "${checkpointFile.name}.tmp")
@@ -53,16 +53,12 @@ class TranscriptionCheckpointStore(private val checkpointFile: File) {
         DataInputStream(BufferedInputStream(checkpointFile.inputStream())).use { input ->
             check(input.readInt() == CHECKPOINT_MAGIC) { "Unbekannte Zwischensicherungsdatei." }
             val version = input.readInt()
-            check(version == CHECKPOINT_VERSION || version == LEGACY_CHECKPOINT_VERSION) {
-                "Veraltete Zwischensicherung."
-            }
+            check(version == CHECKPOINT_VERSION) { "Veraltete Zwischensicherung." }
             val request = TranscriptionRequest(
-                jobId = if (version >= CHECKPOINT_VERSION) input.readSizedString() else "",
+                jobId = input.readSizedString(),
                 uri = input.readSizedString(),
                 fileName = input.readSizedString(),
-                modelId = input.readSizedString(),
-                language = input.readSizedString(),
-                settingsSignature = input.readSizedString()
+                configuration = TranscriptionJobConfiguration.decode(input.readSizedString())
             )
             val durationMs = input.readLong()
             val nextStartMs = input.readLong()
@@ -99,9 +95,7 @@ class TranscriptionCheckpointStore(private val checkpointFile: File) {
             output.writeSizedString(checkpoint.request.jobId)
             output.writeSizedString(checkpoint.request.uri)
             output.writeSizedString(checkpoint.request.fileName)
-            output.writeSizedString(checkpoint.request.modelId)
-            output.writeSizedString(checkpoint.request.language)
-            output.writeSizedString(checkpoint.request.settingsSignature)
+            output.writeSizedString(checkpoint.request.configuration.encode())
             output.writeLong(checkpoint.durationMs)
             output.writeLong(checkpoint.nextStartMs)
             output.writeNullableString(checkpoint.detectedLanguage)
