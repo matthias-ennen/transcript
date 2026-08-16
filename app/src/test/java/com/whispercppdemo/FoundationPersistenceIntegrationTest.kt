@@ -23,9 +23,11 @@ class FoundationPersistenceIntegrationTest {
         val request = TranscriptionRequest(
             uri = "content://recording/42",
             fileName = "Aufnahme.m4a",
-            modelId = "base",
-            language = "auto",
-            settingsSignature = "stable"
+            configuration = TranscriptionJobConfiguration(
+                modelId = "base",
+                language = "auto",
+                whisperSettings = WhisperSettings()
+            )
         )
         val checkpointFile = temporaryFolder.newFile("active.bin").also { it.delete() }
         val checkpointStore = TranscriptionCheckpointStore(checkpointFile)

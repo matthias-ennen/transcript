@@ -161,8 +161,11 @@ class WorkerWatchdogTest {
             request = TranscriptionRequest(
                 uri = "content://video",
                 fileName = "reference.mp4",
-                modelId = "large-v3",
-                language = "de",
+                configuration = TranscriptionJobConfiguration(
+                    modelId = "large-v3",
+                    language = "de",
+                    whisperSettings = WhisperSettings()
+                ),
                 jobId = "job-large-model"
             ),
             durationMs = 180_000L,
