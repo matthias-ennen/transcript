@@ -1,5 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
+import de.matthiasennen.transcript.ui.main.WhisperSettings
+
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.TranscriptExportMetadata

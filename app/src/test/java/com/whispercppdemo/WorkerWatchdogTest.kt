@@ -1,5 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
+import de.matthiasennen.transcript.ui.main.WhisperSettings
+
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
