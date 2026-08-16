@@ -31,6 +31,32 @@ class AudioSampleDiagnosticsTest {
         assertEquals(1f, result.nearSilentSampleRatio)
     }
 
+    @Test
+    fun `valid Opus preroll packet is not treated as end of stream`() {
+        assertEquals(false, isExtractorEndOfStream(sampleSize = 291))
+        assertEquals(true, isExtractorEndOfStream(sampleSize = -1))
+    }
+
+    @Test
+    fun `negative Opus preroll timestamps are normalized monotonically`() {
+        val offsetUs = decoderTimestampOffsetUs(firstSampleTimeUs = -14_500L)
+
+        assertEquals(14_500L, offsetUs)
+        assertEquals(0L, normalizedDecoderTimestampUs(-14_500L, offsetUs))
+        assertEquals(20_000L, normalizedDecoderTimestampUs(5_500L, offsetUs))
+    }
+
+    @Test
+    fun `non negative timestamps keep their original time axis`() {
+        val offsetUs = decoderTimestampOffsetUs(firstSampleTimeUs = 60_000_000L)
+
+        assertEquals(0L, offsetUs)
+        assertEquals(
+            60_000_000L,
+            normalizedDecoderTimestampUs(60_000_000L, offsetUs)
+        )
+    }
+
     @Test(expected = UnusableAudioSamplesException::class)
     fun `non finite decoder output is rejected`() {
         analyzeAudioSamples(floatArrayOf(0f, Float.NaN, 0.2f))
