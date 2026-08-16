@@ -1575,6 +1575,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
             rawWhisperSegments = emptyList(),
+            segments = emptyList(),
+            detectedLanguage = null,
+            completedModel = uiState.selectedModel,
+            transcriptionDurationSeconds = null,
+            vadProcessingSummary = null,
+            diagnostics = emptyList(),
             error = null,
             activityDetail = null,
             status = "Transkription wird im Hintergrund vorbereitet …",
@@ -2135,6 +2141,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     rawWhisperSegments = emptyList(),
                     segments = state.committedSegments,
                     detectedLanguage = state.detectedLanguage,
+                    completedModel = state.model,
+                    transcriptionDurationSeconds = null,
+                    vadProcessingSummary = null,
                     error = null,
                     cannaBotMode = CannaBotMode.RUNNING
                 )

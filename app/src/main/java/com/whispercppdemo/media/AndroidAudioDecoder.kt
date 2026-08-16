@@ -19,6 +19,16 @@ data class AudioTrackInfo(
     val mimeType: String
 )
 
+data class AudioSampleDiagnostics(
+    val sampleCount: Int,
+    val durationMs: Long,
+    val peak: Float,
+    val rms: Float,
+    val nearSilentSampleRatio: Float
+)
+
+class UnusableAudioSamplesException(message: String) : IllegalStateException(message)
+
 data class DecodedAudioChunk(
     val samples: FloatArray,
     val decodeStartMs: Long,
@@ -26,7 +36,9 @@ data class DecodedAudioChunk(
     val sourceSampleRate: Int,
     val sourceChannelCount: Int,
     val mimeType: String,
-    val discardedTrailingSamples: Int
+    val pcmEncoding: Int,
+    val discardedTrailingSamples: Int,
+    val diagnostics: AudioSampleDiagnostics
 )
 
 fun inspectAudioTrack(context: Context, uri: Uri): AudioTrackInfo {
@@ -205,6 +217,8 @@ private fun decodeAudioChunkAttempt(
         if (shouldCancel()) throw CancellationException("Audiodekodierung abgebrochen.")
         onProgress(1f)
         val trimmedSamples = trimDecoderSamples(samples.toArray(), requestedOutputSamples)
+        val diagnostics = analyzeAudioSamples(trimmedSamples.samples)
+        validateAudioSamples(diagnostics)
         return DecodedAudioChunk(
             samples = trimmedSamples.samples,
             decodeStartMs = startMs,
@@ -212,7 +226,9 @@ private fun decodeAudioChunkAttempt(
             sourceSampleRate = sampleRate,
             sourceChannelCount = channelCount,
             mimeType = mime,
-            discardedTrailingSamples = trimmedSamples.discardedTrailingSamples
+            pcmEncoding = pcmEncoding,
+            discardedTrailingSamples = trimmedSamples.discardedTrailingSamples,
+            diagnostics = diagnostics
         )
     } finally {
         if (codecStarted) runCatching { codec?.stop() }
@@ -263,13 +279,59 @@ private fun readPcmSample(buffer: ByteBuffer, offset: Int, encoding: Int): Float
         AudioFormat.ENCODING_PCM_FLOAT -> buffer.getFloat(offset).coerceIn(-1f, 1f)
         AudioFormat.ENCODING_PCM_32BIT -> buffer.getInt(offset) / 2_147_483_648f
         AudioFormat.ENCODING_PCM_8BIT -> ((buffer.get(offset).toInt() and 0xff) - 128) / 128f
-        else -> buffer.getShort(offset) / 32_768f
+        AudioFormat.ENCODING_PCM_16BIT -> buffer.getShort(offset) / 32_768f
+        else -> throw UnusableAudioSamplesException(
+            "Der Android-Audiodecoder lieferte ein nicht unterstütztes PCM-Format ($encoding)."
+        )
     }
 
 private fun bytesPerSample(encoding: Int): Int = when (encoding) {
     AudioFormat.ENCODING_PCM_FLOAT, AudioFormat.ENCODING_PCM_32BIT -> 4
     AudioFormat.ENCODING_PCM_8BIT -> 1
-    else -> 2
+    AudioFormat.ENCODING_PCM_16BIT -> 2
+    else -> throw UnusableAudioSamplesException(
+        "Der Android-Audiodecoder lieferte ein nicht unterstütztes PCM-Format ($encoding)."
+    )
+}
+
+internal fun analyzeAudioSamples(samples: FloatArray): AudioSampleDiagnostics {
+    if (samples.isEmpty()) {
+        return AudioSampleDiagnostics(0, 0L, 0f, 0f, 1f)
+    }
+    var peak = 0f
+    var sumSquares = 0.0
+    var nearSilent = 0
+    samples.forEach { sample ->
+        if (!sample.isFinite()) {
+            throw UnusableAudioSamplesException(
+                "Die dekodierte Audiospur enthält ungültige Samplewerte."
+            )
+        }
+        val absolute = kotlin.math.abs(sample)
+        peak = maxOf(peak, absolute)
+        sumSquares += sample.toDouble() * sample.toDouble()
+        if (absolute < 0.0001f) nearSilent++
+    }
+    return AudioSampleDiagnostics(
+        sampleCount = samples.size,
+        durationMs = samples.size.toLong() * 1_000L / TARGET_SAMPLE_RATE,
+        peak = peak,
+        rms = kotlin.math.sqrt(sumSquares / samples.size).toFloat(),
+        nearSilentSampleRatio = nearSilent.toFloat() / samples.size.toFloat()
+    )
+}
+
+private fun validateAudioSamples(diagnostics: AudioSampleDiagnostics) {
+    if (diagnostics.sampleCount == 0) {
+        throw UnusableAudioSamplesException(
+            "Die Audiospur wurde dekodiert, enthält aber keine Audiosamples."
+        )
+    }
+    if (diagnostics.peak < 0.00001f || diagnostics.rms < 0.000001f) {
+        throw UnusableAudioSamplesException(
+            "Die Audiospur wurde dekodiert, enthält aber kein verwertbares Audiosignal."
+        )
+    }
 }
 
 private class StreamingMonoResampler(

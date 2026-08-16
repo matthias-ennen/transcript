@@ -14,11 +14,13 @@ import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperContext
+import com.whispercpp.whisper.WhisperTranscriptionException
 import com.whispercpp.whisper.WhisperVadContext
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
 import de.matthiasennen.transcript.media.AudioDecoderOutputOverflowException
 import de.matthiasennen.transcript.media.AudioDecoderStallException
+import de.matthiasennen.transcript.media.UnusableAudioSamplesException
 import de.matthiasennen.transcript.media.decodeAudioChunk
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.media.CachedWaveform
@@ -143,6 +145,11 @@ class TranscriptionService : Service() {
             addDiagnostic("Audiospur wird geprüft.")
             updateNotification("Audiospur wird geprüft …", 0, indeterminate = true)
             val audioInfo = inspectAudioTrack(this, uri)
+            addDiagnostic(
+                "Eingangsaudio: ${audioInfo.mimeType}, ${audioInfo.sourceSampleRate} Hz, " +
+                    "${audioInfo.sourceChannelCount} Kanal/Kanäle, " +
+                    "${formatClock(audioInfo.durationMs / 1_000L)}."
+            )
             val whisperSettings = if (forceCpuForRun) {
                 jobConfiguration.whisperSettings.copy(backend = WhisperComputeBackend.CPU)
             } else {
@@ -331,10 +338,14 @@ class TranscriptionService : Service() {
                 publishState(TranscriptionState.Cancelled(request.fileName))
                 finishWithNotification("Transkription angehalten", "Der Zwischenstand bleibt erhalten.")
             } else if (!stopRequested.get()) {
-                val canResume = checkpoint != null &&
+                val resumableDataExists = checkpoint != null &&
                     (checkpoint.hasMeaningfulProgress() || preparedAudioStore.readManifest() != null)
-                if (!canResume) checkpointStore.clear()
-                val message = userFacingError(throwable, canResume)
+                val canResume = resumableDataExists && !isFinalInputFailure(throwable)
+                if (!canResume) {
+                    checkpointStore.clear()
+                    if (isFinalInputFailure(throwable)) preparedAudioStore.clear()
+                }
+                val message = userFacingError(throwable, canResume, request.language)
                 publishState(
                     TranscriptionState.Failed(
                         fileName = request.fileName,
@@ -407,6 +418,15 @@ class TranscriptionService : Service() {
                     "Nur ein PCM-Abschnitt befindet sich im Arbeitsspeicher.")
             }
             ensureContinues()
+            addDiagnostic(
+                "PCM Abschnitt $sectionNumber: ${chunk.mimeType}, " +
+                    "${chunk.sourceSampleRate} Hz/${chunk.sourceChannelCount} Kanal/Kanäle → " +
+                    "16 kHz Mono, ${pcmEncodingLabel(chunk.pcmEncoding)}, " +
+                    "${chunk.diagnostics.sampleCount} Samples, " +
+                    "Peak ${formatLevel(chunk.diagnostics.peak)}, " +
+                    "RMS ${formatLevel(chunk.diagnostics.rms)}, " +
+                    "nahezu still ${formatPercent(chunk.diagnostics.nearSilentSampleRatio)}."
+            )
             waveform.add(section, chunk.samples)
             val stored = preparedAudioStore.writeSection(index, chunk.samples)
             prepared += PreparedAudioSection(index, section, stored.first, stored.second)
@@ -940,20 +960,44 @@ class TranscriptionService : Service() {
 }
 
 private fun shouldRetryOnCpu(throwable: Throwable): Boolean {
-    val details = generateSequence(throwable) { it.cause }
-        .joinToString(" ") { "${it.javaClass.name} ${it.message.orEmpty()}" }
+    val causes = generateSequence(throwable) { it.cause }.toList()
+    if (causes.filterIsInstance<WhisperTranscriptionException>().any { it.errorCode == -3 }) {
+        return true
+    }
+    val details = causes.joinToString(" ") { "${it.javaClass.name} ${it.message.orEmpty()}" }
     return listOf("vulkan", "vk_", "gpu", "device lost", "native").any {
         details.contains(it, ignoreCase = true)
     }
 }
+
+private fun isFinalInputFailure(throwable: Throwable): Boolean =
+    generateSequence(throwable) { it.cause }.any {
+        it is UnusableAudioSamplesException ||
+            (it is WhisperTranscriptionException && it.errorCode == -3)
+    }
 
 private fun completedSectionCount(positionMs: Long, sectionDurationMs: Long): Int =
     if (positionMs <= 0L) 0 else {
         ((positionMs + sectionDurationMs - 1L) / sectionDurationMs).toInt()
     }
 
-private fun userFacingError(throwable: Throwable, canResume: Boolean): String {
+private fun userFacingError(
+    throwable: Throwable,
+    canResume: Boolean,
+    requestedLanguage: String
+): String {
     val checkpointSuffix = if (canResume) " Der Zwischenstand bleibt erhalten." else ""
+    val whisperFailure = generateSequence(throwable) { it.cause }
+        .filterIsInstance<WhisperTranscriptionException>()
+        .firstOrNull()
+    if (whisperFailure?.errorCode == -3 && requestedLanguage == "auto") {
+        return "Die automatische Spracherkennung ist fehlgeschlagen. " +
+            "Wähle die gesprochene Sprache fest aus und starte die Transkription erneut."
+    }
+    val unusableAudio = generateSequence(throwable) { it.cause }
+        .filterIsInstance<UnusableAudioSamplesException>()
+        .firstOrNull()
+    if (unusableAudio != null) return unusableAudio.message.orEmpty()
     return when (throwable) {
         is AudioDecoderOutputOverflowException ->
             "Der Audiodecoder hat ungewöhnlich viele zusätzliche Audiodaten geliefert." +
@@ -974,6 +1018,19 @@ private fun userFacingError(throwable: Throwable, canResume: Boolean): String {
         } ?: "Die Transkription wurde unerwartet unterbrochen.$checkpointSuffix"
     }
 }
+
+private fun pcmEncodingLabel(encoding: Int): String = when (encoding) {
+    android.media.AudioFormat.ENCODING_PCM_8BIT -> "PCM 8 Bit"
+    android.media.AudioFormat.ENCODING_PCM_16BIT -> "PCM 16 Bit"
+    android.media.AudioFormat.ENCODING_PCM_32BIT -> "PCM 32 Bit"
+    android.media.AudioFormat.ENCODING_PCM_FLOAT -> "PCM Float"
+    else -> "PCM $encoding"
+}
+
+private fun formatLevel(value: Float): String =
+    if (value <= 0f) "−∞ dB" else "%.1f dB".format(20.0 * kotlin.math.log10(value.toDouble()))
+
+private fun formatPercent(value: Float): String = "%.1f %%".format(value * 100f)
 
 private fun formatClock(totalSeconds: Long): String {
     val safeSeconds = totalSeconds.coerceAtLeast(0L)
