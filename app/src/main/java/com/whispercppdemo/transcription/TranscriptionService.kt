@@ -10,6 +10,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -78,6 +79,8 @@ class TranscriptionService : Service() {
     private var processStartedAtEpochMs = 0L
     private var forceCpuForRun = false
     private var heartbeatScheduler: ScheduledExecutorService? = null
+    private var wakeLockRenewalScheduler: ScheduledExecutorService? = null
+    private lateinit var wakeLockGuard: TranscriptionWakeLockGuard
     @Volatile private var activeJobId = ""
     @Volatile private var activePhase = "idle"
     @Volatile private var activeBackend = "none"
@@ -89,6 +92,26 @@ class TranscriptionService : Service() {
         processStartedAtEpochMs = System.currentTimeMillis()
         checkpointStore = TranscriptionCheckpointStore(File(filesDir, CHECKPOINT_FILE_NAME))
         preparedAudioStore = PreparedAudioStore(File(filesDir, PREPARED_AUDIO_DIRECTORY))
+        val platformWakeLock = getSystemService(PowerManager::class.java).newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "$packageName:offline-transcription"
+        ).apply {
+            setReferenceCounted(false)
+        }
+        wakeLockGuard = TranscriptionWakeLockGuard(
+            object : WakeLockHandle {
+                override val isHeld: Boolean
+                    get() = platformWakeLock.isHeld
+
+                override fun acquire(timeoutMs: Long) {
+                    platformWakeLock.acquire(timeoutMs)
+                }
+
+                override fun release() {
+                    platformWakeLock.release()
+                }
+            }
+        )
         createNotificationChannel()
     }
 
@@ -113,11 +136,44 @@ class TranscriptionService : Service() {
             TRANSCRIPTION_NOTIFICATION_ID,
             buildNotification("Transkription wird vorbereitet …", 0, indeterminate = true)
         )
+        try {
+            acquireTranscriptionWakeLock()
+        } catch (throwable: Throwable) {
+            val message = "Der Prozessor konnte für die Transkription nicht aktiv gehalten werden."
+            publishState(
+                TranscriptionState.Failed(
+                    fileName = request.fileName,
+                    message = message,
+                    canResume = checkpointStore.read() != null
+                )
+            )
+            finishWithNotification("Transkription unterbrochen", message)
+            return START_NOT_STICKY
+        }
         transcriptionJob = serviceScope.launch {
             runTranscription(request)
             transcriptionJob = null
         }
         return START_NOT_STICKY
+    }
+
+    private fun acquireTranscriptionWakeLock() {
+        wakeLockGuard.acquire()
+        wakeLockRenewalScheduler?.shutdownNow()
+        wakeLockRenewalScheduler = Executors.newSingleThreadScheduledExecutor().also { scheduler ->
+            scheduler.scheduleAtFixedRate(
+                { runCatching(wakeLockGuard::renew) },
+                WAKE_LOCK_RENEW_INTERVAL_MS,
+                WAKE_LOCK_RENEW_INTERVAL_MS,
+                TimeUnit.MILLISECONDS
+            )
+        }
+    }
+
+    private fun releaseTranscriptionWakeLock() {
+        wakeLockRenewalScheduler?.shutdownNow()
+        wakeLockRenewalScheduler = null
+        runCatching(wakeLockGuard::release)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -127,6 +183,7 @@ class TranscriptionService : Service() {
         activeWhisperContext?.requestAbort()
         heartbeatScheduler?.shutdownNow()
         heartbeatScheduler = null
+        releaseTranscriptionWakeLock()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -365,6 +422,7 @@ class TranscriptionService : Service() {
             heartbeatScheduler?.shutdownNow()
             heartbeatScheduler = null
             workerHeartbeatStore(filesDir).clear()
+            releaseTranscriptionWakeLock()
         }
     }
 
