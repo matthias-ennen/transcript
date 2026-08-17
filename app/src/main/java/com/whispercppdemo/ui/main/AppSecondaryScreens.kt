@@ -55,6 +55,7 @@ fun SettingsScreen(
     onDownloadAiModel: (AiModel) -> Unit,
     onDeleteAiModel: (AiModel) -> Unit,
     onDeleteAllAiModels: () -> Unit,
+    onChooseRecordingFolder: () -> Unit,
     onRefreshDeviceStorage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -79,6 +80,11 @@ fun SettingsScreen(
     ) {
         LiveStatusLine(state)
         DeviceStorageCard(state.deviceStorage)
+        RecordingFolderCard(
+            folderName = state.recordingFolderName,
+            enabled = !state.isBusy && !state.isRecording,
+            onChooseFolder = onChooseRecordingFolder
+        )
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -334,6 +340,38 @@ fun SettingsScreen(
             confirmButton = { TextButton(onClick = { confirmDeleteVad = false; onDeleteVadModel() }) { Text("Löschen") } },
             dismissButton = { TextButton(onClick = { confirmDeleteVad = false }) { Text("Abbrechen") } }
         )
+    }
+}
+
+@Composable
+private fun RecordingFolderCard(
+    folderName: String?,
+    enabled: Boolean,
+    onChooseFolder: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Eigene Aufnahmen", style = MaterialTheme.typography.titleLarge)
+            if (folderName == null) {
+                Text(
+                    "Noch kein Aufnahmeordner festgelegt. Neue Aufnahmen starten erst nach der Ordnerauswahl.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                Text("Aufnahmen werden gespeichert in", style = MaterialTheme.typography.bodyMedium)
+                Text(folderName, style = MaterialTheme.typography.titleMedium)
+            }
+            OutlinedButton(
+                onClick = onChooseFolder,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (folderName == null) "Ordner wählen" else "Ordner ändern")
+            }
+        }
     }
 }
 
