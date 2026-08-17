@@ -58,7 +58,7 @@ class RecordingService : Service() {
         RecordingCoordinator.update(RecordingState.Starting)
         startForeground(RECORDING_NOTIFICATION_ID, buildNotification("Aufnahme wird gestartet …"))
         runCatching { recorder.start() }
-            .onSuccess { file ->
+            .onSuccess { output ->
                 startedAtEpochMs = System.currentTimeMillis()
                 acquireWakeLock()
                 meterJob = serviceScope.launch {
@@ -67,7 +67,7 @@ class RecordingService : Service() {
                             .coerceAtLeast(0L)
                         val accepted = RecordingCoordinator.updateRunning(
                             RecordingState.Running(
-                                file = file,
+                                output = output,
                                 startedAtEpochMs = startedAtEpochMs,
                                 elapsedSeconds = elapsed,
                                 amplitude = recorder.currentAmplitude()
@@ -102,10 +102,10 @@ class RecordingService : Service() {
         }
         meterJob?.cancel()
         meterJob = null
-        val file = recorder.stop()
+        val output = recorder.stop()
         releaseWakeLock()
-        if (file != null && file.isFile && file.length() > 0L) {
-            RecordingCoordinator.update(RecordingState.Completed(file))
+        if (output != null) {
+            RecordingCoordinator.update(RecordingState.Completed(output))
         } else {
             RecordingCoordinator.update(
                 RecordingState.Failed("Die Aufnahme war zu kurz oder konnte nicht gespeichert werden.")
