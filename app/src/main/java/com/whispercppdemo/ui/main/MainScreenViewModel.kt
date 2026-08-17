@@ -459,7 +459,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is RecordingState.Completed -> {
                 selectAudioInternal(
-                    uri = state.output.uri,
+                    uri = Uri.parse(state.output.uriString),
                     fileName = state.output.fileName,
                     status = "Aufnahme gespeichert und ausgewählt."
                 )
