@@ -36,14 +36,8 @@ fun WhisperSettingsScreen(
         LiveStatusLine(state)
 
         ExpandableSettingsCard("language_prompt", "Sprache und Vorgabetext", preferences) {
-            ChoiceSetting(
-                title = "Sprache",
+            WhisperLanguageSelector(
                 selected = state.language,
-                options = listOf(
-                    "auto" to "Automatisch – empfohlen",
-                    "de" to "Deutsch",
-                    "en" to "Englisch"
-                ),
                 onSelected = onLanguageChanged
             )
             TextSetting(

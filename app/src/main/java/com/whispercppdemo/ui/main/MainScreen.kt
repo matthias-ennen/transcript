@@ -70,12 +70,6 @@ import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.ai.AiModel
 import kotlinx.coroutines.launch
 
-private val languages = listOf(
-    "auto" to "Automatisch – empfohlen",
-    "en" to "Englisch",
-    "de" to "Deutsch"
-)
-
 private enum class PendingTranscriptAction {
     SELECT_AUDIO,
     START_RECORDING,
@@ -947,38 +941,11 @@ private fun LanguageSelector(
     enabled: Boolean,
     onSelected: (String) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val label = languages.firstOrNull { it.first == selected }?.second ?: selected
-
-    LaunchedEffect(enabled) {
-        if (!enabled) expanded = false
-    }
-
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val selectorWidth = maxWidth
-        LabeledSelectorButton(
-            label = "Sprache",
-            value = label,
-            enabled = enabled,
-            onClick = { expanded = true },
-            contentDescription = if (expanded) "Sprachliste schließen" else "Sprachliste öffnen"
-        )
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.width(selectorWidth)
-        ) {
-            languages.forEach { (code, name) ->
-                DropdownMenuItem(
-                    text = { Text(name) },
-                    onClick = {
-                        onSelected(code)
-                        expanded = false
-                    }
-                )
-            }
-        }
-    }
+    WhisperLanguageSelector(
+        selected = selected,
+        enabled = enabled,
+        onSelected = onSelected
+    )
 }
 
 @Composable
