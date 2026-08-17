@@ -309,7 +309,7 @@ internal fun LiveStatusLine(
         }
     }
     val isActive = isActiveOperation || alternatesReadyStatus || announcesChangedModelEstimate ||
-        !supplementalStatus.isNullOrBlank()
+        !supplementalStatus.isNullOrBlank() || visibleKind == StatusMessageKind.IMPORTANT
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(
