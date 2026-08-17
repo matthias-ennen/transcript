@@ -2,9 +2,7 @@ package de.matthiasennen.transcript.media
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import android.net.Uri
-
-data class RecordingOutput(val uri: Uri, val fileName: String)
+data class RecordingOutput(val uriString: String, val fileName: String)
 
 sealed interface RecordingState {
     data object Idle : RecordingState
