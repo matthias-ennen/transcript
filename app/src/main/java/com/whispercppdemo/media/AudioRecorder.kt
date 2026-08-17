@@ -35,7 +35,7 @@ class AudioRecorder(private val context: Context) {
                 runCatching { DocumentsContract.deleteDocument(context.contentResolver, outputUri) }
                 error("Die Aufnahmedatei ist nicht beschreibbar.")
             }
-        val recordingOutput = RecordingOutput(outputUri, fileName)
+        val recordingOutput = RecordingOutput(outputUri.toString(), fileName)
         val mediaRecorder = try {
             createRecorder().apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -79,9 +79,14 @@ class AudioRecorder(private val context: Context) {
             outputDescriptor = null
             output = null
         }
-        if (completed == null || !hasContent(completed.uri)) {
+        if (completed == null || !hasContent(android.net.Uri.parse(completed.uriString))) {
             (completed ?: failedOutput)?.let {
-                runCatching { DocumentsContract.deleteDocument(context.contentResolver, it.uri) }
+                runCatching {
+                    DocumentsContract.deleteDocument(
+                        context.contentResolver,
+                        android.net.Uri.parse(it.uriString)
+                    )
+                }
             }
             return null
         }
