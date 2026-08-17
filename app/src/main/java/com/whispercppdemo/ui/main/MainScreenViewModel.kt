@@ -797,6 +797,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     }
 
+    /** Emits the model-only guidance once for each actual visit to the central settings page. */
+    fun announceSettingsPerformance() {
+        if (
+            uiState.isBusy ||
+            uiState.isRecording ||
+            uiState.isTranscribing ||
+            uiState.error != null
+        ) return
+        uiState = uiState.copy(
+            status = uiState.selectedModel.settingsPerformanceMessage(),
+            statusKind = StatusMessageKind.IMPORTANT,
+            statusEventId = uiState.statusEventId + 1L,
+            cannaBotMode = CannaBotMode.REVIEW
+        )
+    }
+
     fun startTranscriptEditing(groupStartMs: Long) {
         if (uiState.isBusy || uiState.segments.isEmpty()) return
         if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return

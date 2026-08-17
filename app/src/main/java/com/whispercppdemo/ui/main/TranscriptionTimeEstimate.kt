@@ -2,18 +2,17 @@ package de.matthiasennen.transcript.ui.main
 
 import kotlin.math.ceil
 
-private const val ESTIMATE_STARTUP_SECONDS = 30.0
-
 internal fun WhisperModel.transcriptionRealtimeFactor(): Double = when (this) {
     WhisperModel.TINY -> 0.75
     WhisperModel.BASE -> 1.0
     WhisperModel.SMALL_Q5_1 -> 1.6
-    WhisperModel.LARGE_V3_TURBO_Q5_0 -> 6.0
-    WhisperModel.LARGE_V3_Q5_0 -> 7.0
+    WhisperModel.LARGE_V3_TURBO_Q5_0 -> 5.0
+    WhisperModel.LARGE_V3_Q5_0 -> 6.0
 }
 
 /**
- * Calibrated estimate for on-device transcription based on measured device runs.
+ * A deliberately simple preview: media duration multiplied by the selected model factor.
+ * The displayed result is always rounded up to the next full minute.
  */
 internal fun estimateTranscriptionDurationSeconds(
     audioDurationMs: Long,
@@ -21,8 +20,7 @@ internal fun estimateTranscriptionDurationSeconds(
 ): Long? {
     if (audioDurationMs <= 0L) return null
     val audioSeconds = audioDurationMs / 1_000.0
-    val estimateSeconds =
-        audioSeconds * model.transcriptionRealtimeFactor() + ESTIMATE_STARTUP_SECONDS
+    val estimateSeconds = audioSeconds * model.transcriptionRealtimeFactor()
     return ceil(estimateSeconds / 60.0).toLong().coerceAtLeast(1L) * 60L
 }
 
