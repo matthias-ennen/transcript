@@ -39,6 +39,7 @@ import de.matthiasennen.transcript.download.SileroVadModel
 @Composable
 fun SettingsScreen(
     state: TranscriptUiState,
+    onEnter: () -> Unit,
     onOpenAiDiagnostics: () -> Unit,
     onOpenAiPerformance: () -> Unit,
     onOpenWhisperSettings: () -> Unit,
@@ -66,6 +67,7 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) {
         onRefreshDeviceStorage()
+        onEnter()
     }
 
     Column(
@@ -75,6 +77,7 @@ fun SettingsScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        LiveStatusLine(state)
         DeviceStorageCard(state.deviceStorage)
 
         Card(modifier = Modifier.fillMaxWidth()) {
