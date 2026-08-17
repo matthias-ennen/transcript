@@ -123,7 +123,7 @@ class TranscriptionTimeEstimateTest {
     @Test
     fun `runtime display combines elapsed and fixed estimate`() {
         assertEquals(
-            "Laufzeit: 03:42 (≈ 05:00)",
+            "Laufzeit: 03:42 (≈ 04:00)",
             transcriptionRuntimeDisplay(
                 elapsedSeconds = 3L * 60L + 42L,
                 estimateSeconds = estimateTranscriptionDurationSeconds(
