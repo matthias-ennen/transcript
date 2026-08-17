@@ -20,8 +20,8 @@ class TranscriptionTimeEstimateTest {
         assertEquals(0.75, WhisperModel.TINY.transcriptionRealtimeFactor(), 0.0)
         assertEquals(1.0, WhisperModel.BASE.transcriptionRealtimeFactor(), 0.0)
         assertEquals(1.6, WhisperModel.SMALL_Q5_1.transcriptionRealtimeFactor(), 0.0)
-        assertEquals(6.0, WhisperModel.LARGE_V3_TURBO_Q5_0.transcriptionRealtimeFactor(), 0.0)
-        assertEquals(7.0, WhisperModel.LARGE_V3_Q5_0.transcriptionRealtimeFactor(), 0.0)
+        assertEquals(5.0, WhisperModel.LARGE_V3_TURBO_Q5_0.transcriptionRealtimeFactor(), 0.0)
+        assertEquals(6.0, WhisperModel.LARGE_V3_Q5_0.transcriptionRealtimeFactor(), 0.0)
     }
 
     @Test
@@ -48,6 +48,43 @@ class TranscriptionTimeEstimateTest {
     }
 
     @Test
+    fun `ten minutes use only the defined model factors`() {
+        val durationMs = 10L * 60L * 1_000L
+
+        assertEquals(
+            8L * 60L,
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.TINY)
+        )
+        assertEquals(
+            10L * 60L,
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.BASE)
+        )
+        assertEquals(
+            16L * 60L,
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.SMALL_Q5_1)
+        )
+        assertEquals(
+            50L * 60L,
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.LARGE_V3_TURBO_Q5_0)
+        )
+        assertEquals(
+            60L * 60L,
+            estimateTranscriptionDurationSeconds(durationMs, WhisperModel.LARGE_V3_Q5_0)
+        )
+    }
+
+    @Test
+    fun `estimate is always rounded up to the next full minute`() {
+        assertEquals(
+            11L * 60L,
+            estimateTranscriptionDurationSeconds(
+                10L * 60L * 1_000L + 23L * 1_000L,
+                WhisperModel.BASE
+            )
+        )
+    }
+
+    @Test
     fun `duration is rounded and formatted for minutes and hours`() {
         assertEquals("ca. 1 Minute", formatTranscriptionEstimate(60L))
         assertEquals("ca. 12 Minuten", formatTranscriptionEstimate(12L * 60L))
@@ -58,7 +95,7 @@ class TranscriptionTimeEstimateTest {
     @Test
     fun `ready status contains the selected model estimate`() {
         assertEquals(
-            "Voraussichtliche Transkriptionsdauer: ca. 4 Minuten",
+            "Voraussichtliche Transkriptionsdauer: ca. 3 Minuten",
             transcriptionEstimateStatus(
                 estimateTranscriptionDurationSeconds(
                     3L * 60L * 1_000L,
@@ -80,7 +117,7 @@ class TranscriptionTimeEstimateTest {
         )
 
         assertEquals("Voraussichtliche Transkriptionsdauer: ca. 8 Minuten", tiny)
-        assertEquals("Voraussichtliche Transkriptionsdauer: ca. 11 Minuten", base)
+        assertEquals("Voraussichtliche Transkriptionsdauer: ca. 10 Minuten", base)
     }
 
     @Test
@@ -107,11 +144,11 @@ class TranscriptionTimeEstimateTest {
 
         val changedQuality = loadedFile.copy(selectedModel = WhisperModel.BASE)
             .withRecalculatedTranscriptionEstimate()
-        assertEquals(11L * 60L, changedQuality.transcriptionEstimateSeconds)
+        assertEquals(10L * 60L, changedQuality.transcriptionEstimateSeconds)
 
         val stoppedRecording = changedQuality.copy(audioDurationMs = 3L * 60L * 1_000L)
             .withRecalculatedTranscriptionEstimate()
-        assertEquals(4L * 60L, stoppedRecording.transcriptionEstimateSeconds)
+        assertEquals(3L * 60L, stoppedRecording.transcriptionEstimateSeconds)
 
         val clearedFile = stoppedRecording.copy(audioDurationMs = 0L)
             .withRecalculatedTranscriptionEstimate()
