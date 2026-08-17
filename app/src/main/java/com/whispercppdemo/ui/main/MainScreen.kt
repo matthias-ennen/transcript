@@ -178,6 +178,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         when (page) {
             AppPage.SETTINGS -> SettingsScreen(
                 state = state,
+                onEnter = viewModel::announceSettingsPerformance,
                 onOpenAiDiagnostics = { page = AppPage.AI_DIAGNOSTICS },
                 onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
                 onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
