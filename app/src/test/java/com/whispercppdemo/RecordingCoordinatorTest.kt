@@ -1,8 +1,9 @@
 package de.matthiasennen.transcript
 
+import android.net.Uri
 import de.matthiasennen.transcript.media.RecordingCoordinator
+import de.matthiasennen.transcript.media.RecordingOutput
 import de.matthiasennen.transcript.media.RecordingState
-import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,7 +13,10 @@ import org.junit.Before
 import org.junit.Test
 
 class RecordingCoordinatorTest {
-    private val recordingFile = File("recording-test.m4a")
+    private val recordingOutput = RecordingOutput(
+        uri = Uri.parse("content://test/recording-test.m4a"),
+        fileName = "recording-test.m4a"
+    )
 
     @Before
     fun setUp() {
@@ -47,10 +51,10 @@ class RecordingCoordinatorTest {
     fun `completed recording cannot be overwritten by meter callback`() {
         RecordingCoordinator.update(RecordingState.Starting)
         assertTrue(RecordingCoordinator.beginStopping())
-        RecordingCoordinator.update(RecordingState.Completed(recordingFile))
+        RecordingCoordinator.update(RecordingState.Completed(recordingOutput))
 
         assertFalse(RecordingCoordinator.updateRunning(running(elapsedSeconds = 4L)))
-        assertEquals(RecordingState.Completed(recordingFile), RecordingCoordinator.state.value)
+        assertEquals(RecordingState.Completed(recordingOutput), RecordingCoordinator.state.value)
     }
 
     @Test
@@ -65,7 +69,7 @@ class RecordingCoordinatorTest {
     }
 
     private fun running(elapsedSeconds: Long) = RecordingState.Running(
-        file = recordingFile,
+        output = recordingOutput,
         startedAtEpochMs = 1_000L,
         elapsedSeconds = elapsedSeconds,
         amplitude = 0.5f
