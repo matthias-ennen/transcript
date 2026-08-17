@@ -45,6 +45,8 @@ import de.matthiasennen.transcript.download.VadModelInstallation
 import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.CachedWaveform
 import de.matthiasennen.transcript.media.RecordingCoordinator
+import de.matthiasennen.transcript.media.RecordingFolder
+import de.matthiasennen.transcript.media.RecordingFolderPreferences
 import de.matthiasennen.transcript.media.RecordingService
 import de.matthiasennen.transcript.media.RecordingState
 import de.matthiasennen.transcript.media.WaveformCache
@@ -90,6 +92,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     )
     private val transcriptResultPersistence = TranscriptResultPersistence(transcriptResultStore)
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
+    private val recordingFolderPreferences = RecordingFolderPreferences(application)
     private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
     private val audioPlayer = AudioPlayerController(
         context = application,
@@ -143,8 +146,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         refreshModelInstallations(selectedModel)
         refreshVadModelInstallation()
         val aiSettings = aiPreferences.load()
+        val recordingFolder = recordingFolderPreferences.loadValid()
         uiState = uiState.copy(
             language = preferences.getString(LANGUAGE_KEY, "auto") ?: "auto",
+            recordingFolderName = recordingFolder?.displayName,
             whisperSettings = whisperSettings,
             selectedAiModel = aiSettings.selectedModel,
             aiPostProcessingEnabled = aiSettings.enabled,
@@ -346,6 +351,35 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
     }
 
+    fun recordingFolder(): RecordingFolder? = recordingFolderPreferences.loadValid()
+
+    fun saveRecordingFolder(uri: Uri, grantedFlags: Int): Boolean {
+        val folder = recordingFolderPreferences.save(uri, grantedFlags) ?: run {
+            uiState = uiState.copy(
+                error = "Der ausgewählte Ordner kann nicht dauerhaft beschrieben werden.",
+                status = "Aufnahmeordner konnte nicht verwendet werden.",
+                cannaBotMode = CannaBotMode.IDLE
+            )
+            cue(CannaBotCue.FAILED)
+            return false
+        }
+        uiState = uiState.copy(
+            recordingFolderName = folder.displayName,
+            error = null,
+            status = "Aufnahmeordner „${folder.displayName}“ ausgewählt.",
+            cannaBotMode = CannaBotMode.REVIEW
+        )
+        cue(CannaBotCue.SUCCESS)
+        return true
+    }
+
+    fun reportRecordingFolderSelectionCancelled() {
+        uiState = uiState.copy(
+            status = "Kein Aufnahmeordner ausgewählt. Aufnahme nicht gestartet.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
     fun reportMicrophonePermissionDenied() {
         uiState = uiState.copy(
             error = "Für eine Aufnahme benötigt Transcript die Mikrofonberechtigung.",
@@ -409,7 +443,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     elapsedSeconds = state.elapsedSeconds,
                     liveWaveform = (uiState.liveWaveform + state.amplitude).takeLast(72),
                     selectedAudio = if (joiningActiveRecording) null else uiState.selectedAudio,
-                    selectedFileName = if (joiningActiveRecording) state.file.name else uiState.selectedFileName,
+                    selectedFileName = if (joiningActiveRecording) state.output.fileName else uiState.selectedFileName,
                     waveform = if (joiningActiveRecording) emptyList() else uiState.waveform,
                     isWaveformLoading = if (joiningActiveRecording) false else uiState.isWaveformLoading,
                     waveformProgress = if (joiningActiveRecording) null else uiState.waveformProgress,
@@ -425,8 +459,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is RecordingState.Completed -> {
                 selectAudioInternal(
-                    uri = Uri.fromFile(state.file),
-                    fileName = state.file.name,
+                    uri = Uri.parse(state.output.uriString),
+                    fileName = state.output.fileName,
                     status = "Aufnahme gespeichert und ausgewählt."
                 )
                 RecordingCoordinator.reset()

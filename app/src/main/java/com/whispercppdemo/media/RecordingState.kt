@@ -2,7 +2,7 @@ package de.matthiasennen.transcript.media
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.File
+data class RecordingOutput(val uriString: String, val fileName: String)
 
 sealed interface RecordingState {
     data object Idle : RecordingState
@@ -10,13 +10,13 @@ sealed interface RecordingState {
     data object Stopping : RecordingState
 
     data class Running(
-        val file: File,
+        val output: RecordingOutput,
         val startedAtEpochMs: Long,
         val elapsedSeconds: Long,
         val amplitude: Float
     ) : RecordingState
 
-    data class Completed(val file: File) : RecordingState
+    data class Completed(val output: RecordingOutput) : RecordingState
     data class Failed(val message: String) : RecordingState
 }
 

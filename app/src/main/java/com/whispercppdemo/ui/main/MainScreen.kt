@@ -2,6 +2,7 @@ package de.matthiasennen.transcript.ui.main
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -93,7 +94,20 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
     var pendingVadModelDownload by remember { mutableStateOf(false) }
     var pendingRecording by remember { mutableStateOf(false) }
+    var pendingRecordingAfterFolderSelection by remember { mutableStateOf(false) }
     var pendingTranscription by remember { mutableStateOf(false) }
+    var showRecordingFolderPrompt by remember { mutableStateOf(false) }
+    val recordingFolderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            val stored = viewModel.saveRecordingFolder(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            if (!stored) pendingRecordingAfterFolderSelection = false
+        } else if (pendingRecordingAfterFolderSelection) {
+            pendingRecordingAfterFolderSelection = false
+            viewModel.reportRecordingFolderSelectionCancelled()
+        }
+    }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -122,6 +136,21 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 context,
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingRecording = true
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.startRecording()
+        }
+    }
+    LaunchedEffect(state.recordingFolderName, pendingRecordingAfterFolderSelection) {
+        if (!pendingRecordingAfterFolderSelection || state.recordingFolderName == null) return@LaunchedEffect
+        pendingRecordingAfterFolderSelection = false
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             pendingRecording = true
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -158,6 +187,18 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 OutlinedButton(onClick = viewModel::cancelSharedMediaImport) {
                     Text("Abbrechen")
                 }
+            }
+        )
+    }
+
+    if (showRecordingFolderPrompt) {
+        RecordingFolderRequiredDialog(
+            state = state,
+            onDismiss = { showRecordingFolderPrompt = false },
+            onChooseFolder = {
+                showRecordingFolderPrompt = false
+                pendingRecordingAfterFolderSelection = true
+                recordingFolderPicker.launch(null)
             }
         )
     }
@@ -214,6 +255,10 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 },
                 onDeleteAiModel = viewModel::deleteAiModel,
                 onDeleteAllAiModels = viewModel::deleteAllAiModels,
+                onChooseRecordingFolder = {
+                    pendingRecordingAfterFolderSelection = false
+                    recordingFolderPicker.launch(null)
+                },
                 onRefreshDeviceStorage = viewModel::refreshDeviceStorage,
                 modifier = Modifier.padding(innerPadding)
             )
@@ -295,6 +340,8 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                         Unit
                     } else if (state.isRecording) {
                         viewModel.stopRecording()
+                    } else if (viewModel.recordingFolder() == null) {
+                        showRecordingFolderPrompt = true
                     } else if (
                         ContextCompat.checkSelfPermission(
                             context,

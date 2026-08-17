@@ -20,6 +20,7 @@ enum class CannaBotCue { NONE, RUNNING_RIGHT, RUNNING_LEFT, JUMPING, WAVING, SUC
 data class TranscriptUiState(
     val selectedAudio: Uri? = null,
     val selectedFileName: String? = null,
+    val recordingFolderName: String? = null,
     val pendingSharedMediaImport: SharedMediaRequest? = null,
     val isSharedMediaImporting: Boolean = false,
     val isRecording: Boolean = false,

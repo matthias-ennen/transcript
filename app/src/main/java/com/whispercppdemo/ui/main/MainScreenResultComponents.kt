@@ -75,6 +75,52 @@ internal fun CancelTranscriptionDialog(
 }
 
 @Composable
+internal fun RecordingFolderRequiredDialog(
+    state: TranscriptUiState,
+    onDismiss: () -> Unit,
+    onChooseFolder: () -> Unit
+) {
+    val transition = rememberInfiniteTransition(label = "recording-folder-question-pulse")
+    val alpha = transition.animateFloat(
+        initialValue = 0.20f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_800),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "recording-folder-question-alpha"
+    ).value
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CannaBotStatusAnimation(state)
+                Text(
+                    text = "Lege einen Ordner fest, in dem Transcript deine Aufnahmen speichert.",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onChooseFolder, shape = RoundedCornerShape(50)) {
+                Text("Ordner wählen")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(50)) {
+                Text("Abbrechen")
+            }
+        }
+    )
+}
+
+@Composable
 internal fun AiCorrectionTraceCard(trace: AiCorrectionTrace) {
     var expanded by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
