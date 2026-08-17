@@ -1,6 +1,5 @@
 package de.matthiasennen.transcript
 
-import android.net.Uri
 import de.matthiasennen.transcript.media.RecordingCoordinator
 import de.matthiasennen.transcript.media.RecordingOutput
 import de.matthiasennen.transcript.media.RecordingState
@@ -14,7 +13,7 @@ import org.junit.Test
 
 class RecordingCoordinatorTest {
     private val recordingOutput = RecordingOutput(
-        uri = Uri.parse("content://test/recording-test.m4a"),
+        uriString = "content://test/recording-test.m4a",
         fileName = "recording-test.m4a"
     )
 
