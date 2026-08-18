@@ -27,6 +27,7 @@ data class TranscriptUiState(
     val isRecording: Boolean = false,
     val isRecordingStopping: Boolean = false,
     val isPlaying: Boolean = false,
+    val isSegmentRepeatEnabled: Boolean = false,
     val playbackPositionMs: Long = 0L,
     val audioDurationMs: Long = 0L,
     val mediaReadyStatus: String? = null,
