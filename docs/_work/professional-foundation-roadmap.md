@@ -73,6 +73,12 @@ PR #24 und Build #217 abgeschlossen:
 
 Diese Punkte sind kein offenes Arbeitspaket mehr.
 
+Die Hintergrunddienste und die Download-Infrastruktur wurden mit PR #84 nach
+erfolgreichem GitHub-Actions-Build #400 und manueller Abnahme am 18.08.2026
+abgeschlossen. Downloadvorgänge besitzen nun einen gemeinsamen, prüfsummen-
+gesicherten Ablauf, eindeutige Benachrichtigungen und einen sicheren Umgang mit
+unzureichendem Speicherplatz.
+
 ## Roadmap und Reihenfolge
 
 ### 1. Statusdarstellung und Benachrichtigung
@@ -116,7 +122,7 @@ Transkriptions- und Exportverhalten bleiben unverändert.
 
 Ergebnis: wartbarer Unterbau in kleinen, einzeln prüfbaren Pull Requests.
 
-### 5. Hintergrunddienste und Download-Infrastruktur
+### 5. Hintergrunddienste und Download-Infrastruktur — abgeschlossen am 18.08.2026
 
 [Issue #29](https://github.com/matthias-ennen/transcript/issues/29)
 
@@ -124,7 +130,9 @@ Eindeutige Notification-IDs, gemeinsame Symbol- und Benachrichtigungsverwaltung,
 einheitliche Downloadbasis sowie robuste Fortsetzungs-, Fehler- und
 Bereinigungspfade für Whisper-, VAD- und Qwen-Modelle.
 
-Ergebnis: konfliktfreie und nachvollziehbare Hintergrundvorgänge.
+Ergebnis: konfliktfreie und nachvollziehbare Hintergrundvorgänge; bei
+unzureichendem Speicher wird kein Download gestartet, keine Datei gelöscht und
+eine CannaBot-Sprechblase mit der Schaltfläche **Okay** angezeigt.
 
 ### 6. Manuelle und automatische KI-Nachbearbeitung
 
