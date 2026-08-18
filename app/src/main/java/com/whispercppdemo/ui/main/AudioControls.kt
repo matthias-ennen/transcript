@@ -175,9 +175,7 @@ internal fun PlaybackIcon(isPlaying: Boolean) {
 @Composable
 internal fun SegmentRepeatIcon(enabled: Boolean) {
     Icon(
-        painter = painterResource(
-            if (enabled) R.drawable.ic_repeat_one else R.drawable.ic_repeat
-        ),
+        painter = painterResource(R.drawable.ic_repeat),
         contentDescription = if (enabled) {
             "Einzel-Wiederholung ausschalten"
         } else {
