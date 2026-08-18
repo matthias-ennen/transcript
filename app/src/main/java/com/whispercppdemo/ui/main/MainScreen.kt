@@ -203,6 +203,14 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         )
     }
 
+    state.downloadStorageIssue?.let { issue ->
+        DownloadStorageRequiredDialog(
+            state = state,
+            issue = issue,
+            onConfirm = viewModel::dismissDownloadStorageIssue
+        )
+    }
+
     Scaffold(
         topBar = {
             TranscriptTopBar(
