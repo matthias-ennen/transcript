@@ -100,15 +100,18 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 .withRecalculatedTranscriptionEstimate()
         },
         onCompletion = {
-            playbackTimer?.cancel()
-            playbackTimer = null
-            uiState = uiState.copy(
-                isPlaying = false,
-                playbackPositionMs = uiState.audioDurationMs,
-                status = "Wiedergabe beendet.",
-                cannaBotMode = CannaBotMode.IDLE
-            )
-            cue(CannaBotCue.WAVING)
+            if (!restartSegmentRepeat()) {
+                playbackTimer?.cancel()
+                playbackTimer = null
+                audioPlayer.seekTo(0L)
+                uiState = uiState.copy(
+                    isPlaying = false,
+                    playbackPositionMs = uiState.audioDurationMs,
+                    status = "Wiedergabe beendet.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.WAVING)
+            }
         },
         onError = { message ->
             playbackTimer?.cancel()
@@ -123,6 +126,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     )
     private var playbackTimer: Job? = null
+    private var repeatSegmentIndex: Int? = null
     private var waveformJob: Job? = null
     private var aiBenchmarkJob: Job? = null
     private var transcriptionElapsedTimer: Job? = null
@@ -332,6 +336,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         uiState = uiState.copy(
             isRecording = true,
             isRecordingStopping = false,
+            isSegmentRepeatEnabled = false,
             liveWaveform = emptyList(),
             rawWhisperSegments = emptyList(),
             segments = emptyList(),
@@ -531,6 +536,24 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )?.let(::seekPlaybackTo)
     }
 
+    fun toggleSegmentRepeat() {
+        if (!transcriptSegmentNavigationEnabled()) return
+        val enabled = !uiState.isSegmentRepeatEnabled
+        repeatSegmentIndex = if (enabled) {
+            repeatTranscriptSegmentIndex(uiState.segments, uiState.playbackPositionMs)
+        } else {
+            null
+        }
+        uiState = uiState.copy(
+            isSegmentRepeatEnabled = enabled,
+            status = if (enabled) {
+                "Einzel-Wiederholung eingeschaltet."
+            } else {
+                "Einzel-Wiederholung ausgeschaltet."
+            }
+        )
+    }
+
     private fun transcriptSegmentNavigationEnabled(): Boolean =
         uiState.completedModel != null && uiState.segments.isNotEmpty() &&
             !uiState.isRecording && !uiState.isBusy
@@ -538,6 +561,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private fun seekPlaybackTo(positionMs: Long) {
         val position = positionMs.coerceIn(0L, uiState.audioDurationMs.coerceAtLeast(0L))
         audioPlayer.seekTo(position)
+        if (uiState.isSegmentRepeatEnabled) {
+            repeatSegmentIndex = repeatTranscriptSegmentIndex(uiState.segments, position)
+        }
         uiState = uiState.copy(playbackPositionMs = position)
     }
 
@@ -569,6 +595,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isRecording = false,
             isRecordingStopping = false,
             isPlaying = false,
+            isSegmentRepeatEnabled = false,
             playbackPositionMs = 0L,
             audioDurationMs = 0L,
             mediaReadyStatus = null,
@@ -1612,6 +1639,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
+            isSegmentRepeatEnabled = false,
             rawWhisperSegments = emptyList(),
             segments = emptyList(),
             detectedLanguage = null,
@@ -1652,8 +1680,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         playbackTimer?.cancel()
         playbackTimer = viewModelScope.launch {
             while (uiState.isPlaying) {
+                val positionMs = audioPlayer.positionMs()
+                val repeatStartMs = repeatTranscriptSegmentStartMs(
+                    segments = uiState.segments,
+                    segmentIndex = repeatSegmentIndex,
+                    positionMs = positionMs
+                )
+                if (repeatStartMs != null && audioPlayer.restartFrom(repeatStartMs)) {
+                    uiState = uiState.copy(
+                        playbackPositionMs = repeatStartMs,
+                        status = "Textabschnitt wird wiederholt."
+                    )
+                    delay(100L)
+                    continue
+                }
                 uiState = uiState.copy(
-                    playbackPositionMs = audioPlayer.positionMs(),
+                    playbackPositionMs = positionMs,
                     audioDurationMs = audioPlayer.durationMs().takeIf { it > 0L }
                         ?: uiState.audioDurationMs
                 )
@@ -1704,6 +1746,23 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         audioPlayer.pause()
         if (release) audioPlayer.release()
         uiState = uiState.copy(isPlaying = false)
+    }
+
+    private fun restartSegmentRepeat(): Boolean {
+        if (!uiState.isSegmentRepeatEnabled) return false
+        val repeatStartMs = repeatSegmentIndex
+            ?.let(uiState.segments::getOrNull)
+            ?.startMs
+            ?: return false
+        if (!audioPlayer.restartFrom(repeatStartMs)) return false
+        uiState = uiState.copy(
+            isPlaying = true,
+            playbackPositionMs = repeatStartMs,
+            status = "Textabschnitt wird wiederholt.",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        startPlaybackTimer()
+        return true
     }
 
     private fun handleModelDownloadState(downloadState: ModelDownloadState) {
