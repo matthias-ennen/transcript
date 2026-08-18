@@ -1,8 +1,8 @@
 package de.matthiasennen.transcript
 
 import de.matthiasennen.transcript.download.TranscriptNotifications
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class TranscriptNotificationsTest {
     @Test
