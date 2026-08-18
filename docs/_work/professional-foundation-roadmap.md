@@ -81,123 +81,74 @@ unzureichendem Speicherplatz.
 
 ## Roadmap und Reihenfolge
 
-### 1. Statusdarstellung und Benachrichtigung
+Die operative Reihenfolge wird in [Issue #26](https://github.com/matthias-ennen/transcript/issues/26) gepflegt. Dieses Dokument übernimmt dieselbe Priorisierung.
 
-[Issue #25](https://github.com/matthias-ennen/transcript/issues/25)
+### Abgeschlossen
 
-Korrektes Transkript-Symbol, Laufzeit in der KanaBot-Statuszeile, ruhiger Wechsel
-zwischen Status und Laufzeit. Nur der Text pulsiert; KanaBots bestehende
-Sprite-Sheet-Animation bleibt unverändert erhalten.
+- #25 – Statusdarstellung und Benachrichtigung
+- #37 – Einstellungsseite: Modellverwaltungen vereinheitlichen
+- #32 – Android-Import über „Teilen mit Transcript“
+- #28 – Architektur-Refactoring ohne Funktionsänderung
+- #29 – Hintergrunddienste und Download-Infrastruktur (PR #84, Build #400, manuell abgenommen)
 
-Ergebnis: signierte Test-APK und Xiaomi-Prüfung.
+### Direkt folgende Arbeitspakete
 
-### 2. Einstellungsseite: Modellverwaltungen vereinheitlichen
+#### 6. Wiederholungsschleifen und Halluzinationen analysieren
 
-[Issue #37](https://github.com/matthias-ennen/transcript/issues/37)
+[Issue #78](https://github.com/matthias-ennen/transcript/issues/78)
 
-Whisper-, Silero-VAD- und lokale KI-Modellkarten erhalten dieselbe
-Informationshierarchie und Auswahlhervorhebung. Whisper zeigt kurze
-Modellbeschreibungen und einen Empfehlungstext; Silero VAD erhält eine
-vollständige Modellkarte; alle KI-Modelle können gemeinsam gelöscht werden.
+Anhand langer, reproduzierbarer Audio- oder Videodateien wird technisch unterschieden, ob Wiederholungen aus Whisper, der Abschnittsbildung, Überlappungen oder der Ergebniszusammenführung stammen. Eine mögliche Gegenmaßnahme wird danach separat entschieden.
 
-Ergebnis: einheitliche Modellverwaltung in der signierten Test-APK.
+#### 7. Einzel-Wiederholungsmodus für Transkriptsegmente
 
-### 3. Testkorpus und Android-Geräte-Qualitätsgate
+[Issue #77](https://github.com/matthias-ennen/transcript/issues/77)
 
-[Issue #27](https://github.com/matthias-ennen/transcript/issues/27)
+Die Wiedergabe erhält einen nicht dauerhaft gespeicherten Umschalter, der das aktuelle Segment nach seinem Ende wiederholt. Beide vorhandenen Schaltflächenleisten zeigen denselben Zustand.
 
-Reproduzierbarer Audio-/Video-Testkorpus, Release-Smoke- und erste
-Instrumentierungstests sowie ein Xiaomi-Protokoll für Laufzeit, Speicher, Wärme,
-Auslassungen, Zeitstempel, VAD, Abbruch und Wiederaufnahme.
+#### 8. Manuelle Nachbearbeitung und Speicherung des Transkripts
 
-Ergebnis: belastbarer Referenzstand für alle folgenden Änderungen.
+[Issue #73](https://github.com/matthias-ennen/transcript/issues/73)
 
-### 4. Architektur-Refactoring ohne Funktionsänderung
+Manuelle Änderungen, Übernehmen, Abbrechen, Rückkehr zum Original, Speicherung und Export des aktuellen Vorgangs werden zuverlässig abgesichert.
 
-[Issue #28](https://github.com/matthias-ennen/transcript/issues/28)
+#### 9. KI-Antwortzeiten verkürzen
 
-`MainScreenViewModel`, große Compose-Screens und Services werden schrittweise
-nach fachlichen Verantwortlichkeiten aufgeteilt. Oberfläche, Einstellungen,
-Transkriptions- und Exportverhalten bleiben unverändert.
+[Issue #61](https://github.com/matthias-ennen/transcript/issues/61)
 
-Ergebnis: wartbarer Unterbau in kleinen, einzeln prüfbaren Pull Requests.
+Messbare Analyse und Beschleunigung der lokalen KI-Laufzeit als Grundlage für die KI-Nachbearbeitung.
 
-### 5. Hintergrunddienste und Download-Infrastruktur — abgeschlossen am 18.08.2026
+#### 10. Lokalen Songmodus integrieren
 
-[Issue #29](https://github.com/matthias-ennen/transcript/issues/29)
+[Issue #41](https://github.com/matthias-ennen/transcript/issues/41)
 
-Eindeutige Notification-IDs, gemeinsame Symbol- und Benachrichtigungsverwaltung,
-einheitliche Downloadbasis sowie robuste Fortsetzungs-, Fehler- und
-Bereinigungspfade für Whisper-, VAD- und Qwen-Modelle.
+Lokale Gesangstrennung und drei Modellstufen für Songs; danach kann die KI-Nachbearbeitung beide Arbeitsarten einheitlich behandeln.
 
-Ergebnis: konfliktfreie und nachvollziehbare Hintergrundvorgänge; bei
-unzureichendem Speicher wird kein Download gestartet, keine Datei gelöscht und
-eine CannaBot-Sprechblase mit der Schaltfläche **Okay** angezeigt.
-
-### 6. Manuelle und automatische KI-Nachbearbeitung
+#### 11. Manuelle und automatische KI-Nachbearbeitung absichern
 
 [Issue #30](https://github.com/matthias-ennen/transcript/issues/30)
 
-Genau ein Zielsegment pro Auftrag; zwei vorherige und zwei nachfolgende Segmente
-nur als Lesekontext. Längen-, Ähnlichkeits-, Zahlen-, Namen-, Auslassungs- und
-Erfindungsprüfungen schützen vor unsicheren Übernahmen. Manuelle Einzelabschnitt-
-und automatische Gesamttranskript-Nachbearbeitung werden eindeutig getrennt.
+Genau ein Zielsegment je Auftrag, kontrollierter Lesekontext und Schutzprüfungen für manuelle und automatische lokale KI-Korrektur.
 
-Ergebnis: zuverlässige, abbrechbare und nachvollziehbare lokale KI-Korrektur.
-
-### 7. Whisper-Original und nachbearbeitete Fassung vergleichen
+#### 12. Whisper-Original und nachbearbeitete Fassung vergleichen
 
 [Issue #31](https://github.com/matthias-ennen/transcript/issues/31)
 
-Umschaltung zwischen Whisper-Original und nachbearbeiteter Fassung,
-Herkunftskennzeichnung bearbeiteter Segmente und bewusste Auswahl der Fassung
-für Export und Teilen. Die genaue Bedienung und Symbolgestaltung werden vor der
-Implementierung gemeinsam festgelegt. Vorgesehene Gestaltungsrichtung:
-Textdatei für Whisper, Textdatei mit Zauberstab und Sternen für KI.
+Vergleich, Herkunftskennzeichnung und bewusste Auswahl der Fassung für Export und Teilen.
 
-Ergebnis: transparente Kontrolle ohne Transkriptbibliothek.
+### Folge bis Version 1.0
 
-### 8. Android-Import über „Teilen mit Transcript“
+13. #39 – Freiwillige Unterstützung mit getrennten Play- und Direct-Zahlungswegen  
+14. #33 – Deutsche und englische Oberfläche, Barrierefreiheit und Displaytests  
+15. #34 – Android-Plattform und Release-Pipeline modernisieren  
+16. #51 – Rechtliche Projektseiten über GitHub Pages bereitstellen und in der App verlinken  
+17. #27 – Testkorpus und Android-Geräte-Qualitätsgate als finales Qualitätsgate  
+18. #35 – Repository-, Lizenz- und Store-Abschluss für Version 1.0
 
-[Issue #32](https://github.com/matthias-ennen/transcript/issues/32)
+### Parallel oder außerhalb der direkten Folge
 
-Unterstützte Audio- und Videodateien können aus Dateimanager, Galerie oder einer
-anderen App direkt an Transcript übergeben werden. MIME-Filter,
-URI-Berechtigungen und der Schutz des aktuellen Vorgangs werden abgesichert.
-
-Ergebnis: vollständiger Android-Dateiarbeitsablauf für eine einzelne Datei.
-
-### 9. Deutsche und englische Oberfläche, Barrierefreiheit und Displaytests
-
-[Issue #33](https://github.com/matthias-ennen/transcript/issues/33)
-
-Alle sichtbaren Texte werden in Ressourcen überführt und vollständig auf Deutsch
-und Englisch angeboten. TalkBack, große Schrift, Touch-Ziele, Kontrast und
-verschiedene Displaygrößen werden geprüft. Die GUI-Sprache bleibt unabhängig von
-der Whisper-Sprache.
-
-Ergebnis: vollständige, verständliche Produktoberfläche.
-
-### 10. Android-Plattform und Release-Pipeline modernisieren
-
-[Issue #34](https://github.com/matthias-ennen/transcript/issues/34)
-
-Umstellung auf targetSdk/API 36, kontrollierte Werkzeugaktualisierung, getrennte
-Debug-App-ID, ARM64-Test-APK, Release-AAB, Instrumentierungstests in CI,
-versionierte Native-Patches und archivierte Mapping-/Symbols-Dateien.
-
-Ergebnis: aktueller und reproduzierbarer Release-Kandidat.
-
-### 11. Repository-, Lizenz- und Store-Abschluss
-
-[Issue #35](https://github.com/matthias-ennen/transcript/issues/35)
-
-Lizenz, Sicherheitsdokument, Changelog, SBOM, GitHub Release,
-Datenschutzerklärung, Play-Store-Angaben, Screenshots sowie interner und
-geschlossener Test. Eine Donate-/Unterstützungsfunktion wird gesondert auf
-Store-Konformität geprüft und nicht ungeprüft aktiviert.
-
-Ergebnis: menschlich freigegebener Version-1.0-Release-Kandidat.
+- #44 – Produktakte: Name, Positionierung und Store-Auftritt; kein eigenes technisches Arbeitspaket
+- #46 – Statussymbole als vorbereitendes Designpaket vor #31
+- #40 – Windows-Desktop-Version erst nach dem Android-Version-1.0-Abschluss
 
 ## Abhängigkeiten
 
@@ -206,8 +157,15 @@ flowchart TD
     I25["#25 Status"] --> I37["#37 Einstellungen"]\n    I37 --> I27["#27 Qualitätsgate"]
     I27 --> I28["#28 Architektur"]
     I28 --> I29["#29 Hintergrunddienste"]
-    I28 --> I30["#30 KI-Zuverlässigkeit"]
+    I29 --> I78["#78 Wiederholungen analysieren"]
+    I78 --> I77["#77 Segment wiederholen"]
+    I77 --> I73["#73 Manuelle Nachbearbeitung"]
+    I73 --> I61["#61 KI-Antwortzeiten"]
+    I61 --> I41["#41 Songmodus"]
+    I41 --> I30["#30 KI-Zuverlässigkeit"]
     I30 --> I31["#31 Original/KI-Ansicht"]
+    I31 --> I39["#39 Unterstützung"]
+    I39 --> I33["#33 Lokalisierung"]
     I28 --> I32["#32 Android-Import"]
     I31 --> I33["#33 Lokalisierung"]
     I32 --> I33
