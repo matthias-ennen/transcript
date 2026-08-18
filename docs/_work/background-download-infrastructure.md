@@ -17,3 +17,9 @@ Bei unzureichendem Speicher startet kein Download. `DownloadStorageIssueCoordina
 ## Unverändert
 
 Modelldateien verbleiben in ihren bestehenden fachlichen Ordnern (`models`, `vad-models`, `ai-models`). Downloads, Transkription, KI-Nachbearbeitung und Aufnahme bleiben lokale Foreground-Vorgänge; ihre bestehenden Service-Typen im Android-Manifest bleiben erhalten.
+
+## Abnahme
+
+Am 18.08.2026 wurden die Umsetzung und der erfolgreich durchgelaufene GitHub-
+Actions-Build #400 manuell abgenommen. Die Änderungen wurden mit PR #84 in
+`main` übernommen und Issue #29 geschlossen.
