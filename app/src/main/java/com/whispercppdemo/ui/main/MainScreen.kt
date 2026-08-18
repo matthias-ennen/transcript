@@ -597,6 +597,7 @@ private fun MainContent(
                 onPlayPauseClick = viewModel::togglePlayback,
                 onPreviousSegmentClick = viewModel::skipToPreviousTranscriptSegment,
                 onNextSegmentClick = viewModel::skipToNextTranscriptSegment,
+                onSegmentRepeatClick = viewModel::toggleSegmentRepeat,
                 onSeek = viewModel::seekPlayback
             )
 
@@ -768,11 +769,13 @@ private fun MainContent(
             ) {
                 FloatingTranscriptControls(
                     isPlaying = state.isPlaying,
+                    isSegmentRepeatEnabled = state.isSegmentRepeatEnabled,
                     playbackEnabled = hasCompletedTranscript &&
                         !state.isRecording && !state.isBusy,
                     onPreviousSegmentClick = viewModel::skipToPreviousTranscriptSegment,
                     onPlayPauseClick = viewModel::togglePlayback,
                     onNextSegmentClick = viewModel::skipToNextTranscriptSegment,
+                    onSegmentRepeatClick = viewModel::toggleSegmentRepeat,
                     onScrollToTopClick = {
                         scrollScope.launch { scrollState.animateScrollTo(0) }
                     }

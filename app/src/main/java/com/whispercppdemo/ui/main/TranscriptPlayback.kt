@@ -57,6 +57,27 @@ internal fun nextTranscriptSegmentPositionMs(
     return segments.getOrNull(low)?.startMs
 }
 
+internal fun repeatTranscriptSegmentIndex(
+    segments: List<WhisperSegment>,
+    positionMs: Long
+): Int? {
+    if (segments.isEmpty()) return null
+    val currentIndex = segments.lastStartAtOrBefore(positionMs)
+    if (currentIndex < 0) return 0
+    val current = segments[currentIndex]
+    if (positionMs <= current.endMs) return currentIndex
+    return segments.getOrNull(currentIndex + 1)?.let { currentIndex + 1 } ?: currentIndex
+}
+
+internal fun repeatTranscriptSegmentStartMs(
+    segments: List<WhisperSegment>,
+    segmentIndex: Int?,
+    positionMs: Long
+): Long? {
+    val segment = segmentIndex?.let(segments::getOrNull) ?: return null
+    return segment.startMs.takeIf { positionMs >= segment.endMs }
+}
+
 private fun List<WhisperSegment>.lastStartAtOrBefore(positionMs: Long): Int {
     var low = 0
     var high = size

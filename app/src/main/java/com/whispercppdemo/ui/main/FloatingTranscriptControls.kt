@@ -1,8 +1,8 @@
 package de.matthiasennen.transcript.ui.main
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -24,10 +24,12 @@ import de.matthiasennen.transcript.R
 @Composable
 internal fun FloatingTranscriptControls(
     isPlaying: Boolean,
+    isSegmentRepeatEnabled: Boolean,
     playbackEnabled: Boolean,
     onPreviousSegmentClick: () -> Unit,
     onPlayPauseClick: () -> Unit,
     onNextSegmentClick: () -> Unit,
+    onSegmentRepeatClick: () -> Unit,
     onScrollToTopClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -37,57 +39,67 @@ internal fun FloatingTranscriptControls(
         ),
         contentColor = MaterialTheme.colorScheme.onPrimary
     )
-    Box(modifier = modifier.fillMaxWidth()) {
-        TransportControlGrid(modifier = Modifier.padding(horizontal = 16.dp)) {
-            FloatingTransportButton(
-                onClick = onPreviousSegmentClick,
-                enabled = playbackEnabled,
-                colors = colors
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_skip_previous),
-                    contentDescription = "Zum vorherigen Textabschnitt"
-                )
-            }
-            FloatingTransportButton(
-                onClick = onPlayPauseClick,
-                enabled = playbackEnabled,
-                colors = colors
-            ) {
-                PlaybackIcon(isPlaying)
-            }
-            FloatingTransportButton(
-                onClick = onNextSegmentClick,
-                enabled = playbackEnabled,
-                colors = colors
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_skip_next),
-                    contentDescription = "Zum nächsten Textabschnitt"
-                )
-            }
-            Spacer(Modifier.width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH))
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 24.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 24.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FloatingTransportButton(
+            onClick = onPreviousSegmentClick,
+            enabled = playbackEnabled,
+            colors = colors
         ) {
-            Button(
-                onClick = onScrollToTopClick,
-                modifier = Modifier
-                    .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
-                    .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT),
-                shape = CircleShape,
-                contentPadding = PaddingValues(0.dp),
-                colors = colors
-            ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowUp,
-                    contentDescription = "Zum Anfang der App"
+            Icon(
+                painter = painterResource(R.drawable.ic_skip_previous),
+                contentDescription = "Zum vorherigen Textabschnitt"
+            )
+        }
+        FloatingTransportButton(
+            onClick = onPlayPauseClick,
+            enabled = playbackEnabled,
+            colors = colors
+        ) {
+            PlaybackIcon(isPlaying)
+        }
+        FloatingTransportButton(
+            onClick = onNextSegmentClick,
+            enabled = playbackEnabled,
+            colors = colors
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_skip_next),
+                contentDescription = "Zum nächsten Textabschnitt"
+            )
+        }
+        FloatingTransportButton(
+            onClick = onSegmentRepeatClick,
+            enabled = playbackEnabled,
+            colors = if (isSegmentRepeatEnabled) {
+                ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
+            } else {
+                colors
             }
+        ) {
+            SegmentRepeatIcon(enabled = isSegmentRepeatEnabled)
+        }
+        Button(
+            onClick = onScrollToTopClick,
+            modifier = Modifier
+                .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
+                .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT),
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            colors = colors
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowUp,
+                contentDescription = "Zum Anfang der App"
+            )
         }
     }
 }

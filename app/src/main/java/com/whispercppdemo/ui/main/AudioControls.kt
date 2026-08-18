@@ -35,6 +35,7 @@ fun AudioControls(
     onPlayPauseClick: () -> Unit,
     onPreviousSegmentClick: () -> Unit,
     onNextSegmentClick: () -> Unit,
+    onSegmentRepeatClick: () -> Unit,
     onSeek: (Float) -> Unit
 ) {
     val displayedWaveform = if (state.isRecording) state.liveWaveform else state.waveform
@@ -80,6 +81,24 @@ fun AudioControls(
                     painter = painterResource(R.drawable.ic_skip_next),
                     contentDescription = "Zum nächsten Textabschnitt"
                 )
+            }
+
+            if (state.isSegmentRepeatEnabled) {
+                FilledIconButton(
+                    onClick = onSegmentRepeatClick,
+                    enabled = segmentTransportEnabled,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    SegmentRepeatIcon(enabled = true)
+                }
+            } else {
+                OutlinedIconButton(
+                    onClick = onSegmentRepeatClick,
+                    enabled = segmentTransportEnabled,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    SegmentRepeatIcon(enabled = false)
+                }
             }
 
             FilledIconButton(
@@ -150,6 +169,18 @@ internal fun PlaybackIcon(isPlaying: Boolean) {
     Icon(
         painter = painterResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
         contentDescription = if (isPlaying) "Wiedergabe pausieren" else "Wiedergabe starten"
+    )
+}
+
+@Composable
+internal fun SegmentRepeatIcon(enabled: Boolean) {
+    Icon(
+        painter = painterResource(R.drawable.ic_repeat),
+        contentDescription = if (enabled) {
+            "Einzel-Wiederholung ausschalten"
+        } else {
+            "Einzel-Wiederholung einschalten"
+        }
     )
 }
 

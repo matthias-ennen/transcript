@@ -79,6 +79,14 @@ abgeschlossen. Downloadvorgänge besitzen nun einen gemeinsamen, prüfsummen-
 gesicherten Ablauf, eindeutige Benachrichtigungen und einen sicheren Umgang mit
 unzureichendem Speicherplatz.
 
+Der Einzel-Wiederholungsmodus für Transkriptsegmente wurde mit PR #85 und dem
+vollständig erfolgreichen GitHub-Actions-Build #429 am 18.08.2026 manuell
+abgenommen. Der aktuelle Abschnitt wird nach seinem Ende wiederholt; beide
+Schaltflächenleisten bleiben synchron. Die äußeren Tasten der eingeblendeten
+Leiste behalten ihre Position, die mittleren drei Tasten sind gleichmäßig
+verteilt. Das Wiederholen-Symbol bleibt in beiden Zuständen gleich; der aktive
+Zustand wird ausschließlich über die Button-Hervorhebung gezeigt.
+
 ## Roadmap und Reihenfolge
 
 Die operative Reihenfolge wird in [Issue #26](https://github.com/matthias-ennen/transcript/issues/26) gepflegt. Dieses Dokument übernimmt dieselbe Priorisierung.
@@ -90,50 +98,45 @@ Die operative Reihenfolge wird in [Issue #26](https://github.com/matthias-ennen/
 - #32 – Android-Import über „Teilen mit Transcript“
 - #28 – Architektur-Refactoring ohne Funktionsänderung
 - #29 – Hintergrunddienste und Download-Infrastruktur (PR #84, Build #400, manuell abgenommen)
+- #77 – Einzel-Wiederholungsmodus für Transkriptsegmente (PR #85, Build #429, manuell abgenommen)
 
 ### Direkt folgende Arbeitspakete
 
-#### 6. Wiederholungsschleifen und Halluzinationen analysieren
-
-[Issue #78](https://github.com/matthias-ennen/transcript/issues/78)
-
-Anhand langer, reproduzierbarer Audio- oder Videodateien wird technisch unterschieden, ob Wiederholungen aus Whisper, der Abschnittsbildung, Überlappungen oder der Ergebniszusammenführung stammen. Eine mögliche Gegenmaßnahme wird danach separat entschieden.
-
-#### 7. Einzel-Wiederholungsmodus für Transkriptsegmente
-
-[Issue #77](https://github.com/matthias-ennen/transcript/issues/77)
-
-Die Wiedergabe erhält einen nicht dauerhaft gespeicherten Umschalter, der das aktuelle Segment nach seinem Ende wiederholt. Beide vorhandenen Schaltflächenleisten zeigen denselben Zustand.
-
-#### 8. Manuelle Nachbearbeitung und Speicherung des Transkripts
+#### 6. Manuelle Nachbearbeitung und Speicherung des Transkripts
 
 [Issue #73](https://github.com/matthias-ennen/transcript/issues/73)
 
 Manuelle Änderungen, Übernehmen, Abbrechen, Rückkehr zum Original, Speicherung und Export des aktuellen Vorgangs werden zuverlässig abgesichert.
 
-#### 9. KI-Antwortzeiten verkürzen
+#### 7. Whisper-Original und nachbearbeitete Fassung vergleichen
 
-[Issue #61](https://github.com/matthias-ennen/transcript/issues/61)
+[Issue #31](https://github.com/matthias-ennen/transcript/issues/31)
 
-Messbare Analyse und Beschleunigung der lokalen KI-Laufzeit als Grundlage für die KI-Nachbearbeitung.
+Vergleich, Herkunftskennzeichnung und bewusste Auswahl der Fassung für Export und Teilen.
 
-#### 10. Lokalen Songmodus integrieren
-
-[Issue #41](https://github.com/matthias-ennen/transcript/issues/41)
-
-Lokale Gesangstrennung und drei Modellstufen für Songs; danach kann die KI-Nachbearbeitung beide Arbeitsarten einheitlich behandeln.
-
-#### 11. Manuelle und automatische KI-Nachbearbeitung absichern
+#### 8. Manuelle und automatische KI-Nachbearbeitung absichern
 
 [Issue #30](https://github.com/matthias-ennen/transcript/issues/30)
 
 Genau ein Zielsegment je Auftrag, kontrollierter Lesekontext und Schutzprüfungen für manuelle und automatische lokale KI-Korrektur.
 
-#### 12. Whisper-Original und nachbearbeitete Fassung vergleichen
+#### 9. Wiederholungsschleifen und Halluzinationen analysieren
 
-[Issue #31](https://github.com/matthias-ennen/transcript/issues/31)
+[Issue #78](https://github.com/matthias-ennen/transcript/issues/78)
 
-Vergleich, Herkunftskennzeichnung und bewusste Auswahl der Fassung für Export und Teilen.
+Anhand langer, reproduzierbarer Audio- oder Videodateien wird technisch unterschieden, ob Wiederholungen aus Whisper, der Abschnittsbildung, Überlappungen oder der Ergebniszusammenführung stammen. Eine mögliche Gegenmaßnahme wird danach separat entschieden.
+
+#### 10. KI-Antwortzeiten verkürzen
+
+[Issue #61](https://github.com/matthias-ennen/transcript/issues/61)
+
+Messbare Analyse und Beschleunigung der lokalen KI-Laufzeit als Grundlage für die KI-Nachbearbeitung.
+
+#### 11. Lokalen Songmodus integrieren
+
+[Issue #41](https://github.com/matthias-ennen/transcript/issues/41)
+
+Lokale Gesangstrennung und drei Modellstufen für Songs; danach kann die KI-Nachbearbeitung beide Arbeitsarten einheitlich behandeln.
 
 ### Folge bis Version 1.0
 
@@ -157,13 +160,13 @@ flowchart TD
     I25["#25 Status"] --> I37["#37 Einstellungen"]\n    I37 --> I27["#27 Qualitätsgate"]
     I27 --> I28["#28 Architektur"]
     I28 --> I29["#29 Hintergrunddienste"]
-    I29 --> I78["#78 Wiederholungen analysieren"]
-    I78 --> I77["#77 Segment wiederholen"]
+    I29 --> I77["#77 Segment wiederholen"]
     I77 --> I73["#73 Manuelle Nachbearbeitung"]
-    I73 --> I61["#61 KI-Antwortzeiten"]
+    I73 --> I31["#31 Original/KI-Ansicht"]
+    I31 --> I30["#30 KI-Zuverlässigkeit"]
+    I30 --> I78["#78 Wiederholungen analysieren"]
+    I78 --> I61["#61 KI-Antwortzeiten"]
     I61 --> I41["#41 Songmodus"]
-    I41 --> I30["#30 KI-Zuverlässigkeit"]
-    I30 --> I31["#31 Original/KI-Ansicht"]
     I31 --> I39["#39 Unterstützung"]
     I39 --> I33["#33 Lokalisierung"]
     I28 --> I32["#32 Android-Import"]

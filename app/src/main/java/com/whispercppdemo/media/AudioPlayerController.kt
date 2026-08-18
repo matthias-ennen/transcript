@@ -49,7 +49,6 @@ class AudioPlayerController(
                 if (startWhenPrepared) prepared.start()
             }
             setOnCompletionListener {
-                it.seekTo(0)
                 onCompletion()
             }
             setOnErrorListener { _, what, extra ->
@@ -63,6 +62,14 @@ class AudioPlayerController(
 
     fun seekTo(positionMs: Long) {
         if (isPrepared) player?.seekTo(positionMs.coerceIn(0L, durationMs()).toInt())
+    }
+
+    fun restartFrom(positionMs: Long): Boolean {
+        val active = player ?: return false
+        if (!isPrepared) return false
+        active.seekTo(positionMs.coerceIn(0L, durationMs()).toInt())
+        if (!active.isPlaying) active.start()
+        return true
     }
 
     fun positionMs(): Long = if (isPrepared) player?.currentPosition?.toLong() ?: 0L else 0L
