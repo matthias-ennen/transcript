@@ -93,7 +93,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val recordingFolderPreferences = RecordingFolderPreferences(application)
     private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
-    private val audioPlayer = AudioPlayerController(
+    private val audioPlayer: AudioPlayerController = AudioPlayerController(
         context = application,
         onPrepared = { durationMs ->
             uiState = uiState.copy(audioDurationMs = durationMs)
