@@ -37,6 +37,21 @@ class TranscriptPlaybackTest {
     }
 
     @Test
+    fun `repeat target follows current segment and uses adjacent segments across gaps`() {
+        assertEquals(0, repeatTranscriptSegmentIndex(segments, 1_000L))
+        assertEquals(1, repeatTranscriptSegmentIndex(segments, 3_000L))
+        assertEquals(2, repeatTranscriptSegmentIndex(segments, 5_500L))
+        assertEquals(2, repeatTranscriptSegmentIndex(segments, 9_000L))
+    }
+
+    @Test
+    fun `repeat jumps to target start only after its end`() {
+        assertNull(repeatTranscriptSegmentStartMs(segments, 1, 4_999L))
+        assertEquals(2_000L, repeatTranscriptSegmentStartMs(segments, 1, 5_000L))
+        assertNull(repeatTranscriptSegmentStartMs(segments, null, 5_000L))
+    }
+
+    @Test
     fun `floating controls use measured viewport intersections`() {
         assertTrue(
             shouldShowFloatingTranscriptControls(true, 100f, 1_100f, 1_160f, 100f, 1_000f)
