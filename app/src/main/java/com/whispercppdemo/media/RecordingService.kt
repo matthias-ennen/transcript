@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
+import de.matthiasennen.transcript.download.TranscriptNotifications
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,7 +26,6 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val RECORDING_CHANNEL_ID = "audio_recording"
-private const val RECORDING_NOTIFICATION_ID = 2110
 private const val ACTION_START_RECORDING = "de.matthiasennen.transcript.START_RECORDING"
 private const val ACTION_STOP_RECORDING = "de.matthiasennen.transcript.STOP_RECORDING"
 
@@ -56,7 +56,7 @@ class RecordingService : Service() {
     private fun startRecording(startId: Int) {
         stopStarted.set(false)
         RecordingCoordinator.update(RecordingState.Starting)
-        startForeground(RECORDING_NOTIFICATION_ID, buildNotification("Aufnahme wird gestartet …"))
+        startForeground(TranscriptNotifications.RECORDING_ID, buildNotification("Aufnahme wird gestartet …"))
         runCatching { recorder.start() }
             .onSuccess { output ->
                 startedAtEpochMs = System.currentTimeMillis()
@@ -78,7 +78,7 @@ class RecordingService : Service() {
                     }
                 }
                 getSystemService(NotificationManager::class.java).notify(
-                    RECORDING_NOTIFICATION_ID,
+                    TranscriptNotifications.RECORDING_ID,
                     buildNotification("Aufnahme läuft")
                 )
             }
@@ -146,7 +146,7 @@ class RecordingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, RECORDING_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_mic)
+            .setSmallIcon(TranscriptNotifications.SMALL_ICON)
             .setContentTitle("Simple Transcript")
             .setContentText(text)
             .setContentIntent(openApp)

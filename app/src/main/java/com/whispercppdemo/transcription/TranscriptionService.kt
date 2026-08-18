@@ -32,6 +32,7 @@ import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperSettings
 import de.matthiasennen.transcript.ui.main.WhisperVadMode
 import de.matthiasennen.transcript.download.SileroVadModel
+import de.matthiasennen.transcript.download.TranscriptNotifications
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,8 +51,8 @@ private const val RUNNING_CHANNEL_ID = "offline_transcription"
 private const val COMPLETION_CHANNEL_ID = "transcription_results_v1"
 private const val NOTIFICATION_PREFERENCES = "transcription_notifications"
 private const val LAST_COMPLETED_JOB_ID = "last_completed_job_id"
-internal const val TRANSCRIPTION_NOTIFICATION_ID = 2108
-internal const val TRANSCRIPTION_COMPLETION_NOTIFICATION_ID = 2109
+internal val TRANSCRIPTION_NOTIFICATION_ID = TranscriptNotifications.TRANSCRIPTION_ID
+internal val TRANSCRIPTION_COMPLETION_NOTIFICATION_ID = TranscriptNotifications.TRANSCRIPTION_COMPLETION_ID
 private const val ACTION_START = "de.matthiasennen.transcript.START_TRANSCRIPTION"
 internal const val ACTION_CANCEL_TRANSCRIPTION = "de.matthiasennen.transcript.CANCEL_TRANSCRIPTION"
 private const val EXTRA_URI = "uri"
@@ -871,7 +872,7 @@ class TranscriptionService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, RUNNING_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_transcript_notification)
+            .setSmallIcon(TranscriptNotifications.SMALL_ICON)
             .setContentTitle("Simple Transcript")
             .setContentText(text)
             .setContentIntent(openApp)
@@ -906,7 +907,7 @@ class TranscriptionService : Service() {
             this,
             if (isCompletion) COMPLETION_CHANNEL_ID else RUNNING_CHANNEL_ID
         )
-            .setSmallIcon(R.drawable.ic_transcript_notification)
+            .setSmallIcon(TranscriptNotifications.SMALL_ICON)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(openApp)

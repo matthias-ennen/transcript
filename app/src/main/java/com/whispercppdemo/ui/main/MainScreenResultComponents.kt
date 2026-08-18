@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
+import de.matthiasennen.transcript.download.DownloadStorageIssue
 
 @Composable
 internal fun CancelTranscriptionDialog(
@@ -116,6 +117,36 @@ internal fun RecordingFolderRequiredDialog(
             OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(50)) {
                 Text("Abbrechen")
             }
+        }
+    )
+}
+
+@Composable
+internal fun DownloadStorageRequiredDialog(
+    state: TranscriptUiState,
+    issue: DownloadStorageIssue,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onConfirm,
+        shape = RoundedCornerShape(28.dp),
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CannaBotStatusAnimation(state)
+                Text(
+                    text = "Es steht nicht genügend Speicherplatz zur Verfügung. " +
+                        "Für ${issue.modelLabel} werden ${formatDownloadSize(issue.requiredFreeBytes)} freier Speicher benötigt; " +
+                        "verfügbar sind ${formatDownloadSize(issue.availableBytes)}.",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, shape = RoundedCornerShape(50)) { Text("Okay") }
         }
     )
 }

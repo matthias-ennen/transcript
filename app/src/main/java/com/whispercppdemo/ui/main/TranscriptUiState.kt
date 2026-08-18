@@ -10,6 +10,7 @@ import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.ai.AiSelfTestMetrics
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.download.VadModelInstallation
+import de.matthiasennen.transcript.download.DownloadStorageIssue
 import de.matthiasennen.transcript.transcription.VadProcessingSummary
 
 enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
@@ -38,6 +39,7 @@ data class TranscriptUiState(
     val selectedModel: WhisperModel = WhisperModel.BASE,
     val modelInstallations: List<ModelInstallation> = emptyList(),
     val deviceStorage: DeviceStorageSnapshot = DeviceStorageSnapshot(),
+    val downloadStorageIssue: DownloadStorageIssue? = null,
     val modelReady: Boolean = false,
     val downloadingModel: WhisperModel? = null,
     val downloadedBytes: Long = 0L,

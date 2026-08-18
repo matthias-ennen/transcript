@@ -36,6 +36,8 @@ import de.matthiasennen.transcript.ai.LocalAiEngine
 import de.matthiasennen.transcript.download.ModelDownloadCoordinator
 import de.matthiasennen.transcript.download.ModelDownloadService
 import de.matthiasennen.transcript.download.ModelDownloadState
+import de.matthiasennen.transcript.download.DownloadStorageIssueCoordinator
+import de.matthiasennen.transcript.download.DownloadStoragePolicy
 import de.matthiasennen.transcript.download.SileroVadModel
 import de.matthiasennen.transcript.download.VadModelDownloadCoordinator
 import de.matthiasennen.transcript.download.VadModelDownloadService
@@ -165,6 +167,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
         viewModelScope.launch {
             AiModelDownloadCoordinator.state.collect(::handleAiModelDownloadState)
+        }
+        viewModelScope.launch {
+            DownloadStorageIssueCoordinator.issue.collect { issue ->
+                uiState = uiState.copy(downloadStorageIssue = issue)
+            }
         }
         viewModelScope.launch {
             TranscriptionCoordinator.state.collect(::handleTranscriptionState)
@@ -1372,6 +1379,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun downloadAiModel(model: AiModel = uiState.selectedAiModel) {
         if (uiState.isBusy || uiState.isAiModelPreloading) return
+        if (!hasEnoughDownloadStorage(
+                modelLabel = model.modelLabel,
+                modelBytes = model.minimumBytes,
+                partialBytes = uiState.aiModelInstallations.firstOrNull { it.model == model }?.partialBytes ?: 0L
+            )
+        ) return
         AiEngineSessionManager.releaseIfDifferent(model)
         aiPreferences.setSelectedModel(model)
         uiState = uiState.copy(
@@ -1389,6 +1402,32 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         lastDownloadAnimationBucket = -1
         cue(CannaBotCue.RUNNING_RIGHT)
         AiModelDownloadService.start(application, model)
+    }
+
+    fun dismissDownloadStorageIssue() {
+        DownloadStorageIssueCoordinator.clear()
+        refreshDeviceStorage()
+    }
+
+    private fun hasEnoughDownloadStorage(
+        modelLabel: String,
+        modelBytes: Long,
+        partialBytes: Long
+    ): Boolean {
+        val requirement = runCatching {
+            DownloadStoragePolicy.check(application.filesDir, modelLabel, modelBytes, partialBytes)
+        }.getOrNull() ?: return true
+        if (requirement.hasEnoughSpace) {
+            DownloadStorageIssueCoordinator.clear()
+            return true
+        }
+        DownloadStorageIssueCoordinator.show(requirement)
+        uiState = uiState.copy(
+            status = "Zu wenig freier Speicher für $modelLabel.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+        cue(CannaBotCue.FAILED)
+        return false
     }
 
     fun deleteAllAiModels() {
@@ -1448,6 +1487,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun downloadModel(model: WhisperModel = uiState.selectedModel) {
         if (uiState.isBusy) return
+        if (!hasEnoughDownloadStorage(
+                modelLabel = model.modelLabel,
+                modelBytes = model.minimumBytes,
+                partialBytes = uiState.modelInstallations.firstOrNull { it.model == model }?.partialBytes ?: 0L
+            )
+        ) return
         preferences.edit().putString(SELECTED_MODEL_KEY, model.id).apply()
         uiState = uiState.copy(
             isBusy = true,
@@ -1518,6 +1563,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun downloadVadModel() {
         if (uiState.isBusy) return
+        if (!hasEnoughDownloadStorage(
+                modelLabel = SileroVadModel.modelLabel,
+                modelBytes = SileroVadModel.expectedBytes,
+                partialBytes = uiState.vadModelInstallation.partialBytes
+            )
+        ) return
         uiState = uiState.copy(
             isBusy = true,
             isVadDownloading = true,
