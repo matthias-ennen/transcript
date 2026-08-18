@@ -99,20 +99,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             uiState = uiState.copy(audioDurationMs = durationMs)
                 .withRecalculatedTranscriptionEstimate()
         },
-        onCompletion = {
-            if (!restartSegmentRepeat()) {
-                playbackTimer?.cancel()
-                playbackTimer = null
-                audioPlayer.seekTo(0L)
-                uiState = uiState.copy(
-                    isPlaying = false,
-                    playbackPositionMs = uiState.audioDurationMs,
-                    status = "Wiedergabe beendet.",
-                    cannaBotMode = CannaBotMode.IDLE
-                )
-                cue(CannaBotCue.WAVING)
-            }
-        },
+        onCompletion = ::handlePlaybackCompletion,
         onError = { message ->
             playbackTimer?.cancel()
             playbackTimer = null
@@ -136,6 +123,20 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     private fun cue(cue: CannaBotCue) {
         uiState = uiState.copy(cannaBotCue = cue, cannaBotCueId = uiState.cannaBotCueId + 1L)
+    }
+
+    private fun handlePlaybackCompletion() {
+        if (restartSegmentRepeat()) return
+        playbackTimer?.cancel()
+        playbackTimer = null
+        audioPlayer.seekTo(0L)
+        uiState = uiState.copy(
+            isPlaying = false,
+            playbackPositionMs = uiState.audioDurationMs,
+            status = "Wiedergabe beendet.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+        cue(CannaBotCue.WAVING)
     }
 
     init {
