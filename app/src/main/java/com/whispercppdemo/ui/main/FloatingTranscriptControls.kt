@@ -2,7 +2,6 @@ package de.matthiasennen.transcript.ui.main
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -24,10 +23,12 @@ import de.matthiasennen.transcript.R
 @Composable
 internal fun FloatingTranscriptControls(
     isPlaying: Boolean,
+    isSegmentRepeatEnabled: Boolean,
     playbackEnabled: Boolean,
     onPreviousSegmentClick: () -> Unit,
     onPlayPauseClick: () -> Unit,
     onNextSegmentClick: () -> Unit,
+    onSegmentRepeatClick: () -> Unit,
     onScrollToTopClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -38,7 +39,12 @@ internal fun FloatingTranscriptControls(
         contentColor = MaterialTheme.colorScheme.onPrimary
     )
     Box(modifier = modifier.fillMaxWidth()) {
-        TransportControlGrid(modifier = Modifier.padding(horizontal = 16.dp)) {
+        TransportControlGrid(
+            modifier = Modifier.padding(
+                start = 16.dp,
+                end = TRANSCRIPT_NUMBER_CAPSULE_WIDTH + 24.dp
+            )
+        ) {
             FloatingTransportButton(
                 onClick = onPreviousSegmentClick,
                 enabled = playbackEnabled,
@@ -66,7 +72,20 @@ internal fun FloatingTranscriptControls(
                     contentDescription = "Zum nächsten Textabschnitt"
                 )
             }
-            Spacer(Modifier.width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH))
+            FloatingTransportButton(
+                onClick = onSegmentRepeatClick,
+                enabled = playbackEnabled,
+                colors = if (isSegmentRepeatEnabled) {
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    colors
+                }
+            ) {
+                SegmentRepeatIcon(enabled = isSegmentRepeatEnabled)
+            }
         }
 
         Box(
