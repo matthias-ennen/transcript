@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -36,6 +38,26 @@ import de.matthiasennen.transcript.export.exportTranscript
 import java.io.File
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+
+@Composable
+internal fun rememberExporter(
+    context: Context,
+    state: TranscriptUiState,
+    format: ExportFormat
+) = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(format.mimeType)) { uri: Uri? ->
+    uri?.let {
+        context.contentResolver.openOutputStream(it)?.bufferedWriter()?.use { writer ->
+            writer.write(
+                exportTranscript(
+                    segments = state.segments,
+                    format = format,
+                    metadata = state.exportMetadata(),
+                    rawWhisperSegments = state.rawWhisperSegments
+                )
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

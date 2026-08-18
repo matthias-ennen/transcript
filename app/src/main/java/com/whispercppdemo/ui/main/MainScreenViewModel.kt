@@ -18,7 +18,6 @@ import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelDownloadCoordinator
 import de.matthiasennen.transcript.ai.AiModelDownloadService
 import de.matthiasennen.transcript.ai.AiModelDownloadState
-import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
 import de.matthiasennen.transcript.ai.AiEngineSessionManager
 import de.matthiasennen.transcript.ai.AiBenchmarkResult
@@ -41,7 +40,6 @@ import de.matthiasennen.transcript.download.SileroVadModel
 import de.matthiasennen.transcript.download.VadModelDownloadCoordinator
 import de.matthiasennen.transcript.download.VadModelDownloadService
 import de.matthiasennen.transcript.download.VadModelDownloadState
-import de.matthiasennen.transcript.download.VadModelInstallation
 import de.matthiasennen.transcript.media.AudioPlayerController
 import de.matthiasennen.transcript.media.CachedWaveform
 import de.matthiasennen.transcript.media.RecordingCoordinator
@@ -78,9 +76,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     var uiState by mutableStateOf(TranscriptUiState())
         private set
 
-    private val modelsDirectory = File(application.filesDir, "models")
-    private val vadModelsDirectory = File(application.filesDir, "vad-models")
-    private val aiModelsDirectory = File(application.filesDir, "ai-models")
+    private val modelInventory = ModelInventory(application.filesDir)
     private val sharedMediaImportStore = SharedMediaImportStore(
         File(application.filesDir, "shared-media")
     )
@@ -91,6 +87,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         File(application.filesDir, "transcripts/current-transcript.bin")
     )
     private val transcriptResultPersistence = TranscriptResultPersistence(transcriptResultStore)
+    private val transcriptSession = TranscriptSession(transcriptResultPersistence)
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val recordingFolderPreferences = RecordingFolderPreferences(application)
     private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
@@ -136,9 +133,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     init {
-        modelsDirectory.mkdirs()
-        vadModelsDirectory.mkdirs()
-        aiModelsDirectory.mkdirs()
+        modelInventory.ensureDirectories()
         sharedMediaImportStore.clearPending()
         refreshDeviceStorage()
         val selectedModel = WhisperModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
@@ -848,13 +843,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun startTranscriptEditing(groupStartMs: Long) {
-        if (uiState.isBusy || uiState.segments.isEmpty()) return
-        if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
-        uiState = uiState.copy(
-            isEditingTranscript = true,
-            editingTranscriptGroupStartMs = groupStartMs,
-            draftSegments = uiState.segments
-        )
+        transcriptSession.beginEditing(uiState, groupStartMs)?.let { uiState = it }
     }
 
     fun startAiTranscriptEditing(groupStartMs: Long) {
@@ -891,7 +880,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun prepareAiDiagnostics() {
         val model = uiState.selectedAiModel
-        val modelFile = aiModelFile(model)
+        val modelFile = modelInventory.aiFile(model)
         val configuration = aiPerformancePreferences.load(model)
         val matchingSessionLoaded = AiEngineSessionManager.isLoaded(
             model,
@@ -1012,7 +1001,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 prompt = uiState.aiTestPrompt
             )
         ) return
-        val selectedModelFile = aiModelFile(uiState.selectedAiModel)
+        val selectedModelFile = modelInventory.aiFile(uiState.selectedAiModel)
         val performanceConfiguration = aiPerformancePreferences.load(uiState.selectedAiModel)
         val modelAlreadyLoaded = AiEngineSessionManager.isLoaded(
             uiState.selectedAiModel,
@@ -1165,7 +1154,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     fun startAiPerformanceBenchmark() {
         if (uiState.isBusy || aiBenchmarkJob?.isActive == true) return
         val model = uiState.performanceProfileModel
-        val modelFile = aiModelFile(model)
+        val modelFile = modelInventory.aiFile(model)
         val configuration = aiPerformancePreferences.load(model)
         if (!modelFile.isFile || modelFile.length() < model.minimumBytes) {
             uiState = uiState.copy(
@@ -1318,45 +1307,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun inspectAiModelLayers(model: AiModel): Int {
-        val file = aiModelFile(model)
+        val file = modelInventory.aiFile(model)
         if (!file.isFile || file.length() < model.minimumBytes) return 0
         return runCatching { LocalAiEngine.inspectModelLayerCount(file.absolutePath) }
             .getOrDefault(0)
     }
 
     fun updateTranscriptText(index: Int, text: String) {
-        if (!uiState.isEditingTranscript || uiState.isAiPostProcessing) return
-        val groupStartMs = uiState.editingTranscriptGroupStartMs ?: return
-        val segment = uiState.segments.getOrNull(index) ?: return
-        if (transcriptGroupStartMs(segment.startMs) != groupStartMs) return
-        uiState = uiState.copy(
-            draftSegments = uiState.draftSegments.withUpdatedTranscriptText(index, text)
-        )
+        transcriptSession.updateDraft(uiState, index, text)?.let { uiState = it }
     }
 
     fun cancelTranscriptEditing() {
-        if (!uiState.isEditingTranscript || uiState.isAiPostProcessing) return
-        uiState = uiState.copy(
-            isEditingTranscript = false,
-            editingTranscriptGroupStartMs = null,
-            draftSegments = emptyList()
-        )
+        transcriptSession.cancelEditing(uiState)?.let { uiState = it }
     }
 
     fun applyTranscriptEdits() {
-        val groupStartMs = uiState.editingTranscriptGroupStartMs
-        if (
-            !uiState.isEditingTranscript || uiState.isAiPostProcessing ||
-            groupStartMs == null ||
-            uiState.draftSegments.size != uiState.segments.size
-        ) {
-            return
-        }
-        val appliedSegments = applyTranscriptGroupEdits(
-            original = uiState.segments,
-            draft = uiState.draftSegments,
-            groupStartMs = groupStartMs
-        )
+        val appliedSegments = transcriptSession.applyEdits(uiState) ?: return
         uiState = uiState.copy(
             segments = appliedSegments,
             isEditingTranscript = false,
@@ -1439,14 +1405,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                 withContext(Dispatchers.IO) {
                     AiEngineSessionManager.release()
                     AiModel.entries.forEach { model ->
-                        val file = aiModelFile(model)
-                        check(!file.exists() || file.delete()) {
-                            "${model.modelLabel} konnte nicht gelöscht werden."
-                        }
-                        val partial = partialAiModelFile(model)
-                        check(!partial.exists() || partial.delete()) {
-                            "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
-                        }
+                        modelInventory.deleteAi(model)
                     }
                 }
             }.onSuccess {
@@ -1474,12 +1433,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             runCatching {
                 withContext(Dispatchers.IO) {
                     AiEngineSessionManager.release(model)
-                    val file = aiModelFile(model)
-                    check(!file.exists() || file.delete()) { "Das KI-Modell konnte nicht gelöscht werden." }
-                    val partial = partialAiModelFile(model)
-                    check(!partial.exists() || partial.delete()) {
-                        "Der unvollständige KI-Download konnte nicht gelöscht werden."
-                    }
+                    modelInventory.deleteAi(model, genericErrors = true)
                 }
             }.onSuccess {
                 refreshAiModelInstallations(uiState.selectedAiModel)
@@ -1522,14 +1476,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             )
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val file = modelFile(model)
-                    check(!file.exists() || file.delete()) {
-                        "Das Modell konnte nicht gelöscht werden."
-                    }
-                    val partial = partialModelFile(model)
-                    check(!partial.exists() || partial.delete()) {
-                        "Der unvollständige Download konnte nicht gelöscht werden."
-                    }
+                    modelInventory.deleteWhisper(model, genericErrors = true)
                 }
             }.onSuccess {
                 refreshModelInstallations(uiState.selectedModel)
@@ -1555,14 +1502,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             runCatching {
                 withContext(Dispatchers.IO) {
                     WhisperModel.entries.forEach { model ->
-                        val file = modelFile(model)
-                        check(!file.exists() || file.delete()) {
-                            "${model.modelLabel} konnte nicht gelöscht werden."
-                        }
-                        val partial = partialModelFile(model)
-                        check(!partial.exists() || partial.delete()) {
-                            "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
-                        }
+                        modelInventory.deleteWhisper(model)
                     }
                 }
             }.onSuccess {
@@ -1596,10 +1536,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             uiState = uiState.copy(isBusy = true, progress = null, status = "Silero VAD wird gelöscht …")
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val file = vadModelFile()
-                    check(!file.exists() || file.delete()) { "Das VAD-Modell konnte nicht gelöscht werden." }
-                    val partial = partialVadModelFile()
-                    check(!partial.exists() || partial.delete()) { "Der unvollständige VAD-Download konnte nicht gelöscht werden." }
+                    modelInventory.deleteVad()
                 }
             }.onSuccess {
                 refreshVadModelInstallation()
@@ -2157,45 +2094,18 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             TranscriptionState.Idle -> Unit
             is TranscriptionState.Starting -> {
                 lastTranscriptionAnimationSection = -1
-                uiState = uiState.copy(
-                    isBusy = true,
-                    isTranscribing = true,
-                    isCancellationRequested = false,
-                    progress = 0f,
-                    error = null,
-                    status = "Transkription wird im Hintergrund vorbereitet …",
-                    statusKind = StatusMessageKind.IMPORTANT,
-                    statusEventId = uiState.statusEventId + 1L,
-                    activityDetail = state.fileName,
-                    cannaBotMode = CannaBotMode.WAITING
-                )
+                uiState = uiState.presentStartingTranscription(state)
                 ensureTranscriptionElapsedTimer(
                     System.currentTimeMillis() - uiState.elapsedSeconds * 1_000L
                 )
             }
             is TranscriptionState.Running -> {
-                uiState = uiState.copy(
-                    isBusy = true,
-                    isTranscribing = true,
-                    isCancellationRequested = false,
-                    progress = state.progress,
+                uiState = uiState.presentRunningTranscription(
+                    state = state,
                     elapsedSeconds = maxOf(
                         state.elapsedSeconds,
                         elapsedSecondsSince(state.startedAtEpochMs, System.currentTimeMillis())
-                    ),
-                    status = state.status,
-                    statusKind = state.statusKind,
-                    statusEventId = uiState.statusEventId + 1L,
-                    activityDetail = state.activityDetail,
-                    diagnostics = state.diagnostics,
-                    rawWhisperSegments = emptyList(),
-                    segments = state.committedSegments,
-                    detectedLanguage = state.detectedLanguage,
-                    completedModel = state.model,
-                    transcriptionDurationSeconds = null,
-                    vadProcessingSummary = null,
-                    error = null,
-                    cannaBotMode = CannaBotMode.RUNNING
+                    )
                 )
                 ensureTranscriptionElapsedTimer(state.startedAtEpochMs)
                 if (state.sectionNumber != lastTranscriptionAnimationSection) {
@@ -2208,49 +2118,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is TranscriptionState.Completed -> {
                 stopTranscriptionElapsedTimer()
-                val timelineSegments = buildTranscriptTimeline(
-                    whisperSegments = state.segments,
-                    audioDurationMs = uiState.audioDurationMs
-                )
-                val canRunAutomaticAi = state.segments.isNotEmpty() &&
-                    uiState.aiPostProcessingEnabled &&
-                    uiState.automaticAiPostProcessingEnabled &&
-                    uiState.selectedAiModelInstalled
-                val automaticAiMissingModel = state.segments.isNotEmpty() &&
-                    uiState.aiPostProcessingEnabled &&
-                    uiState.automaticAiPostProcessingEnabled &&
-                    !uiState.selectedAiModelInstalled
-                uiState = uiState.copy(
-                    isBusy = canRunAutomaticAi,
-                    isTranscribing = false,
-                    isCancellationRequested = false,
-                    progress = null,
-                    activityDetail = null,
-                    rawWhisperSegments = state.segments,
-                    segments = timelineSegments,
-                    isEditingTranscript = false,
-                    editingTranscriptGroupStartMs = null,
-                    draftSegments = emptyList(),
-                    detectedLanguage = state.detectedLanguage,
-                    completedModel = state.model,
-                    transcriptionDurationSeconds = state.transcriptionDurationSeconds,
-                    vadProcessingSummary = state.vadSummary,
-                    error = null,
-                    status = if (canRunAutomaticAi) {
-                        "Transkription fertig. Texte werden jetzt mit KI überarbeitet …"
-                    } else if (state.segments.isEmpty()) {
-                        "Es wurde kein Text erkannt."
-                    } else if (automaticAiMissingModel) {
-                        "Transkription fertig. KI-Nachbearbeitung übersprungen: Modell fehlt."
-                    } else {
-                        "Fertig: ${state.segments.size} Textabschnitte erkannt."
-                    },
-                    statusKind = StatusMessageKind.COMPLETION,
-                    statusEventId = uiState.statusEventId + 1L,
-                    cannaBotMode = if (canRunAutomaticAi) CannaBotMode.REVIEW else CannaBotMode.IDLE
-                )
-                persistCurrentTranscript(timelineSegments)
-                if (canRunAutomaticAi) {
+                val presentation = uiState.presentCompletedTranscription(state)
+                uiState = presentation.state
+                persistCurrentTranscript(presentation.timelineSegments)
+                if (presentation.startsAutomaticAi) {
                     uiState = uiState.copy(
                         isAiPostProcessing = true,
                         activityDetail = "Whisper wurde entladen. Das KI-Modell wird vorbereitet.",
@@ -2262,10 +2133,10 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                         context = application,
                         model = uiState.selectedAiModel,
                         fileName = uiState.selectedFileName ?: "Transkript",
-                        segments = timelineSegments
+                        segments = presentation.timelineSegments
                     )
                 } else {
-                    if (automaticAiMissingModel) {
+                    if (presentation.automaticAiModelMissing) {
                         uiState = uiState.copy(
                             diagnostics = (uiState.diagnostics +
                                 "Automatische KI-Nachbearbeitung übersprungen: ausgewähltes Modell ist nicht installiert.")
@@ -2278,59 +2149,17 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is TranscriptionState.Cancelled -> {
                 stopTranscriptionElapsedTimer()
-                uiState = uiState.copy(
-                    isBusy = false,
-                    isTranscribing = false,
-                    isCancellationRequested = false,
-                    progress = null,
-                    activityDetail = null,
-                    rawWhisperSegments = emptyList(),
-                    segments = emptyList(),
-                    isEditingTranscript = false,
-                    editingTranscriptGroupStartMs = null,
-                    draftSegments = emptyList(),
-                    detectedLanguage = null,
-                    completedModel = null,
-                    transcriptionDurationSeconds = null,
-                    vadProcessingSummary = null,
-                    error = null,
-                    status = "Transkription angehalten · Der Zwischenstand bleibt erhalten.",
-                    statusKind = StatusMessageKind.COMPLETION,
-                    statusEventId = uiState.statusEventId + 1L,
-                    cannaBotMode = CannaBotMode.IDLE
-                )
+                uiState = uiState.presentCancelledTranscription()
                 TranscriptionCoordinator.acknowledgeTerminal(application)
             }
             is TranscriptionState.Failed -> {
                 stopTranscriptionElapsedTimer()
-                uiState = uiState.copy(
-                    isBusy = false,
-                    isTranscribing = false,
-                    isCancellationRequested = false,
-                    progress = null,
-                    activityDetail = null,
-                    rawWhisperSegments = emptyList(),
-                    segments = state.committedSegments,
-                    isEditingTranscript = false,
-                    editingTranscriptGroupStartMs = null,
-                    draftSegments = emptyList(),
-                    error = state.message,
-                    status = if (state.canResume) {
-                        "Transkription unterbrochen · Beim nächsten Start wird sie fortgesetzt."
-                    } else {
-                        "Transkription fehlgeschlagen."
-                    },
-                    statusKind = StatusMessageKind.ERROR,
-                    statusEventId = uiState.statusEventId + 1L,
-                    cannaBotMode = CannaBotMode.IDLE
-                )
+                uiState = uiState.presentFailedTranscription(state)
                 cue(CannaBotCue.FAILED)
                 TranscriptionCoordinator.acknowledgeTerminal(application)
             }
         }
     }
-
-    private fun modelFile(model: WhisperModel): File = File(modelsDirectory, model.fileName)
 
     private fun restoreStoredTranscript() {
         val stored = transcriptResultStore.read() ?: return
@@ -2354,59 +2183,17 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             )
             return
         }
-        uiState = uiState.copy(
-            selectedAudio = sourceUri,
-            selectedFileName = stored.fileName,
-            rawWhisperSegments = stored.rawWhisperSegments,
-            segments = stored.displayedSegments,
-            detectedLanguage = stored.detectedLanguage,
-            completedModel = WhisperModel.fromId(stored.modelId),
-            transcriptionDurationSeconds = stored.transcriptionDurationSeconds,
-            vadProcessingSummary = stored.vadSummary,
-            status = "Gespeichertes Transkript wiederhergestellt: " +
-                "${stored.displayedSegments.count { it.text.isNotBlank() }} Textabschnitte.",
-            cannaBotMode = CannaBotMode.IDLE
-        )
+        uiState = transcriptSession.restoreWithoutSource(uiState, stored)
     }
 
     private fun persistCurrentTranscript(displayedSegments: List<WhisperSegment>) {
-        if (displayedSegments.isEmpty()) return
-        val model = uiState.completedModel ?: return
-        transcriptResultPersistence.save(
-            StoredTranscriptResult(
-                sourceUri = uiState.selectedAudio?.toString().orEmpty(),
-                fileName = uiState.selectedFileName ?: "Transkript",
-                modelId = model.id,
-                detectedLanguage = uiState.detectedLanguage.orEmpty(),
-                transcriptionDurationSeconds = uiState.transcriptionDurationSeconds ?: 0L,
-                savedAtEpochMs = System.currentTimeMillis(),
-                rawWhisperSegments = uiState.rawWhisperSegments,
-                displayedSegments = displayedSegments,
-                vadSummary = uiState.vadProcessingSummary
-            )
-        )
+        transcriptSession.persist(uiState, displayedSegments)
     }
-
-    private fun partialModelFile(model: WhisperModel): File =
-        File(modelsDirectory, "${model.fileName}.part")
-
-    private fun vadModelFile(): File = File(vadModelsDirectory, SileroVadModel.fileName)
-    private fun partialVadModelFile(): File = File(vadModelsDirectory, "${SileroVadModel.fileName}.part")
 
     private fun refreshVadModelInstallation() {
-        val file = vadModelFile()
-        uiState = uiState.copy(vadModelInstallation = VadModelInstallation(
-            isInstalled = file.isFile && file.length() == SileroVadModel.expectedBytes,
-            installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
-            partialBytes = partialVadModelFile().takeIf(File::isFile)?.length() ?: 0L
-        ))
+        uiState = uiState.copy(vadModelInstallation = modelInventory.vadInstallation())
         refreshDeviceStorage()
     }
-
-    private fun aiModelFile(model: AiModel): File = File(aiModelsDirectory, model.fileName)
-
-    private fun partialAiModelFile(model: AiModel): File =
-        File(aiModelsDirectory, "${model.fileName}.part")
 
     fun refreshDeviceStorage() {
         val snapshot = runCatching {
@@ -2420,15 +2207,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun refreshAiModelInstallations(selectedModel: AiModel) {
-        val installations = AiModel.entries.map { model ->
-            val file = aiModelFile(model)
-            AiModelInstallation(
-                model = model,
-                isInstalled = file.isFile && file.length() >= model.minimumBytes,
-                installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
-                partialBytes = partialAiModelFile(model).takeIf(File::isFile)?.length() ?: 0L
-            )
-        }
+        val installations = modelInventory.aiInstallations()
         uiState = uiState.copy(
             selectedAiModel = selectedModel,
             aiModelInstallations = installations
@@ -2437,15 +2216,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     private fun refreshModelInstallations(selectedModel: WhisperModel) {
-        val installations = WhisperModel.entries.map { model ->
-            val file = modelFile(model)
-            ModelInstallation(
-                model = model,
-                isInstalled = file.isFile && file.length() >= model.minimumBytes,
-                installedBytes = file.takeIf { it.isFile }?.length() ?: 0L,
-                partialBytes = partialModelFile(model).takeIf { it.isFile }?.length() ?: 0L
-            )
-        }
+        val installations = modelInventory.whisperInstallations()
         val selectedInstallation = installations.first { it.model == selectedModel }
         uiState = uiState.copy(
             selectedModel = selectedModel,
