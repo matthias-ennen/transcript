@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
+import de.matthiasennen.transcript.download.TranscriptNotifications
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +30,6 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val CHANNEL_ID = "local_ai_postprocessing"
-private const val NOTIFICATION_ID = 2111
 private const val ACTION_START = "de.matthiasennen.transcript.START_AI_POSTPROCESSING"
 private const val ACTION_START_SELF_TEST = "de.matthiasennen.transcript.START_AI_SELF_TEST"
 private const val ACTION_PRELOAD_MODEL = "de.matthiasennen.transcript.PRELOAD_AI_MODEL"
@@ -60,7 +60,7 @@ class AiPostProcessingService : Service() {
             diagnostics.clear()
             AiPostProcessingCoordinator.update(AiPostProcessingState.ModelPreloadStarting(model))
             startForeground(
-                NOTIFICATION_ID,
+                TranscriptNotifications.AI_PROCESSING_ID,
                 buildNotification("KI-Modell wird geladen …", 0, true)
             )
             processingJob = serviceScope.launch {
@@ -76,7 +76,7 @@ class AiPostProcessingService : Service() {
             diagnostics.clear()
             AiPostProcessingCoordinator.update(AiPostProcessingState.SelfTestStarting(model))
             startForeground(
-                NOTIFICATION_ID,
+                TranscriptNotifications.AI_PROCESSING_ID,
                 buildNotification("KI-Test wird vorbereitet …", 0, true)
             )
             processingJob = serviceScope.launch {
@@ -95,7 +95,7 @@ class AiPostProcessingService : Service() {
         diagnostics.clear()
         AiPostProcessingCoordinator.update(AiPostProcessingState.Starting(request.mode, model))
         startForeground(
-            NOTIFICATION_ID,
+            TranscriptNotifications.AI_PROCESSING_ID,
             buildNotification("KI-Nachbearbeitung wird vorbereitet …", 0, true)
         )
         processingJob = serviceScope.launch {
@@ -524,7 +524,7 @@ class AiPostProcessingService : Service() {
             )
         )
         getSystemService(NotificationManager::class.java).notify(
-            NOTIFICATION_ID,
+            TranscriptNotifications.AI_PROCESSING_ID,
             buildNotification(activity, (progress * 100).toInt(), false)
         )
     }
@@ -594,7 +594,7 @@ class AiPostProcessingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_mic)
+            .setSmallIcon(TranscriptNotifications.SMALL_ICON)
             .setContentTitle("Lokale KI-Nachbearbeitung")
             .setContentText(text)
             .setContentIntent(openApp)
@@ -606,13 +606,13 @@ class AiPostProcessingService : Service() {
 
     private fun finishWithNotification(title: String, text: String) {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_mic)
+            .setSmallIcon(TranscriptNotifications.SMALL_ICON)
             .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
             .build()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        getSystemService(NotificationManager::class.java).notify(TranscriptNotifications.AI_PROCESSING_ID, notification)
         stopSelf()
     }
 
