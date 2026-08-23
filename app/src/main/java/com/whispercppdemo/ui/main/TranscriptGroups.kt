@@ -184,19 +184,32 @@ internal fun TranscriptList(
         groupIndices(group).forEach(::showEdited)
     }
 
-    LaunchedEffect(state.isEditingTranscript, state.editingTranscriptGroupStartMs) {
+    LaunchedEffect(
+        state.isEditingTranscript,
+        state.editingTranscriptGroupStartMs,
+        state.isAiPostProcessing
+    ) {
         if (!state.isEditingTranscript) {
             singleEditIndex = null
             editedTextByIndex.clear()
             showingOriginalByIndex.clear()
-        } else if (editedTextByIndex.isEmpty()) {
-            val source = state.draftSegments.takeIf { it.size == state.segments.size } ?: state.segments
-            source.forEachIndexed { index, segment ->
-                editedTextByIndex[index] = segment.text
-                showingOriginalByIndex[index] = segment.text == originalTranscriptText(
-                    state.segments.getOrNull(index) ?: segment,
-                    rawWhisperSegments
-                )
+        } else {
+            val aiDraftCompleted = !state.isAiPostProcessing &&
+                singleEditIndex == null &&
+                state.draftSegments.size == state.segments.size &&
+                state.draftSegments != state.segments
+            if (editedTextByIndex.isEmpty() || aiDraftCompleted) {
+                editedTextByIndex.clear()
+                showingOriginalByIndex.clear()
+                val source = state.draftSegments.takeIf { it.size == state.segments.size }
+                    ?: state.segments
+                source.forEachIndexed { index, segment ->
+                    editedTextByIndex[index] = segment.text
+                    showingOriginalByIndex[index] = segment.text == originalTranscriptText(
+                        state.segments.getOrNull(index) ?: segment,
+                        rawWhisperSegments
+                    )
+                }
             }
         }
     }
@@ -219,7 +232,7 @@ internal fun TranscriptList(
     if (confirmBlankApply) {
         TranscriptEditQuestionDialog(
             state = state,
-            message = "Der Text dieses Abschnitts ist leer. Möchtest du das wirklich übernehmen?",
+            message = "Mindestens ein Textabschnitt ist leer. Möchtest du das wirklich übernehmen?",
             confirmLabel = "Übernehmen",
             dismissLabel = "Abbrechen",
             onConfirm = ::finishEditing,
@@ -321,6 +334,7 @@ internal fun TranscriptList(
                             editControls = when {
                                 isEditingGroup -> TranscriptSegmentEditControls.Group(
                                     showingOriginal = showingOriginalByIndex[index] == true,
+                                    enabled = !state.isAiPostProcessing,
                                     onOriginal = { showOriginal(index) },
                                     onEdited = { showEdited(index) }
                                 )
@@ -391,6 +405,7 @@ private sealed interface TranscriptSegmentEditControls {
 
     data class Group(
         val showingOriginal: Boolean,
+        val enabled: Boolean,
         val onOriginal: () -> Unit,
         val onEdited: () -> Unit
     ) : TranscriptSegmentEditControls
@@ -470,26 +485,23 @@ private fun SegmentCapsules(controls: TranscriptSegmentEditControls) {
             is TranscriptSegmentEditControls.Start -> {
                 TranscriptIconCapsule(
                     onClick = controls.onEdit,
-                    enabled = controls.enabled,
-                    contentDescription = "Textabschnitt bearbeiten"
+                    enabled = controls.enabled
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null)
+                    Icon(Icons.Default.Edit, contentDescription = "Textabschnitt bearbeiten")
                 }
             }
             is TranscriptSegmentEditControls.Single -> {
                 TranscriptIconCapsule(
                     onClick = controls.onCancel,
-                    enabled = true,
-                    contentDescription = "Bearbeitung abbrechen"
+                    enabled = true
                 ) {
-                    Icon(Icons.Default.Close, contentDescription = null)
+                    Icon(Icons.Default.Close, contentDescription = "Bearbeitung abbrechen")
                 }
                 TranscriptIconCapsule(
                     onClick = controls.onApply,
-                    enabled = true,
-                    contentDescription = "Änderung übernehmen"
+                    enabled = true
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null)
+                    Icon(Icons.Default.Check, contentDescription = "Änderung übernehmen")
                 }
                 TranscriptTextCapsule(
                     text = "Original",
@@ -506,11 +518,13 @@ private fun SegmentCapsules(controls: TranscriptSegmentEditControls) {
                 TranscriptTextCapsule(
                     text = "Original",
                     selected = controls.showingOriginal,
+                    enabled = controls.enabled,
                     onClick = controls.onOriginal
                 )
                 TranscriptTextCapsule(
                     text = "Editiert",
                     selected = !controls.showingOriginal,
+                    enabled = controls.enabled,
                     onClick = controls.onEdited
                 )
             }
@@ -522,7 +536,6 @@ private fun SegmentCapsules(controls: TranscriptSegmentEditControls) {
 private fun TranscriptIconCapsule(
     onClick: () -> Unit,
     enabled: Boolean,
-    contentDescription: String,
     content: @Composable () -> Unit
 ) {
     Button(
@@ -550,10 +563,12 @@ private fun TranscriptIconCapsule(
 private fun TranscriptTextCapsule(
     text: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = Modifier.height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT),
         shape = CircleShape,
         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
@@ -684,8 +699,18 @@ private fun TranscriptGroupEditorActions(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TranscriptTextCapsule(text = "Original", selected = allOriginal, onClick = onOriginal)
-        TranscriptTextCapsule(text = "Editiert", selected = allEdited, onClick = onEdited)
+        TranscriptTextCapsule(
+            text = "Original",
+            selected = allOriginal,
+            enabled = !state.isAiPostProcessing,
+            onClick = onOriginal
+        )
+        TranscriptTextCapsule(
+            text = "Editiert",
+            selected = allEdited,
+            enabled = !state.isAiPostProcessing,
+            onClick = onEdited
+        )
     }
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
