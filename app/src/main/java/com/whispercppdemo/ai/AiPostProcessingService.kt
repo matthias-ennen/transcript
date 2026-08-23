@@ -38,6 +38,7 @@ private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_TEST_PROMPT = "test_prompt"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
 private const val MAX_DIAGNOSTIC_ENTRIES = 120
+private const val MAX_TERMINAL_DIAGNOSTIC_BLOCKS = 10
 
 class AiPostProcessingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -356,11 +357,25 @@ class AiPostProcessingService : Service() {
                 )
                 addDiagnostic("Thinking ist über die Qwen-Chatvorlage technisch deaktiviert.")
                 var correctedSegments = initialRequest.segments
-                val groups = aiPostProcessingGroups(
-                    segments = initialRequest.segments,
-                    mode = initialRequest.mode,
-                    groupStartMs = initialRequest.groupStartMs,
-                    sectionMinutes = initialRequest.sectionMinutes
+
+                addDiagnostic(
+                    "Kotlin A1 · Gruppierung startet · Modus=${initialRequest.mode} · Abschnitt=${initialRequest.sectionMinutes} min · " +
+                        "groupStartMs=${initialRequest.groupStartMs ?: -1L} · Segmente=${initialRequest.segments.size}."
+                )
+                val groups = try {
+                    aiPostProcessingGroups(
+                        segments = initialRequest.segments,
+                        mode = initialRequest.mode,
+                        groupStartMs = initialRequest.groupStartMs,
+                        sectionMinutes = initialRequest.sectionMinutes
+                    )
+                } catch (throwable: Throwable) {
+                    addThrowableDiagnostic("Kotlin A1 Gruppierung", throwable)
+                    throw throwable
+                }
+                addDiagnostic(
+                    "Kotlin A2 · Gruppierung beendet · Gruppen=${groups.size} · " +
+                        "Segmentzahlen=${groups.joinToString(prefix = "[", postfix = "]") { it.size.toString() }}."
                 )
                 check(groups.isNotEmpty()) { "Für die KI-Nachbearbeitung wurde kein Text gefunden." }
                 var checkedSegments = 0
@@ -370,17 +385,52 @@ class AiPostProcessingService : Service() {
                 var contextPreparationMs = 0L
                 val segmentDurationsMs = mutableListOf<Long>()
                 val totalSegments = groups.sumOf(List<Int>::size)
+                addDiagnostic("Kotlin A3 · Gesamtzahl Zielsegmente=$totalSegments.")
 
                 groups.forEachIndexed { groupIndex, indexes ->
                     if (groupIndex < initialRequest.nextGroupIndex) return@forEachIndexed
-                    ensureContinues()
+                    addDiagnostic(
+                        "Kotlin B1 · Gruppe ${groupIndex + 1}/${groups.size} betreten · Indizes=" +
+                            indexes.joinToString(prefix = "[", postfix = "]")
+                    )
+                    addDiagnostic("Kotlin B2 · Laufzeit-/Wärmeschutzprüfung startet.")
+                    try {
+                        ensureContinues()
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin B2 Laufzeit-/Wärmeschutz", throwable)
+                        throw throwable
+                    }
+                    addDiagnostic("Kotlin B3 · Laufzeit-/Wärmeschutzprüfung erfolgreich.")
+
+                    check(indexes.isNotEmpty()) { "AI_GROUP_EMPTY: Die ausgewählte KI-Gruppe enthält keine Segmentindizes." }
+                    check(indexes.all { it in correctedSegments.indices }) {
+                        "AI_GROUP_INDEX_INVALID: Segmentindex außerhalb 0..${correctedSegments.lastIndex}: ${indexes.joinToString()}"
+                    }
+                    addDiagnostic("Kotlin B4 · Segmentindizes validiert · Transkriptgröße=${correctedSegments.size}.")
+
                     val rangeStartMs = correctedSegments[indexes.first()].startMs
                     val rangeEndMs = correctedSegments[indexes.last()].endMs
-                    val indexed = indexes.map { index ->
-                        IndexedTranscriptSegment(index, correctedSegments[index])
+                    addDiagnostic("Kotlin B5 · Zeitbereich gelesen · $rangeStartMs–$rangeEndMs ms.")
+
+                    val indexed = try {
+                        indexes.map { index -> IndexedTranscriptSegment(index, correctedSegments[index]) }
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin B6 IndexedTranscriptSegment", throwable)
+                        throw throwable
                     }
+                    addDiagnostic("Kotlin B6 · IndexedTranscriptSegment-Liste erzeugt · ${indexed.size} Einträge.")
+
                     val label = "${formatClock(rangeStartMs)}–${formatClock(rangeEndMs)}"
-                    val correctionContext = buildCorrectionContext(indexed)
+                    addDiagnostic("Kotlin B7 · buildCorrectionContext startet · Bereich $label.")
+                    val correctionContext = try {
+                        buildCorrectionContext(indexed)
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin B7 buildCorrectionContext", throwable)
+                        throw throwable
+                    }
+                    addDiagnostic(
+                        "Kotlin B8 · buildCorrectionContext beendet · ${correctionContext.length} Zeichen."
+                    )
                     addDiagnostic(
                         "Bereich $label (${initialRequest.sectionMinutes} min): gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen."
                     )
@@ -400,9 +450,13 @@ class AiPostProcessingService : Service() {
                         rejectedCorrections = rejectedCorrections,
                         latestTrace = latestTrace
                     )
+                    addDiagnostic("Kotlin C1 · Native prepareCorrectionContext startet.")
                     val contextStartedAt = SystemClock.elapsedRealtime()
                     try {
                         engine.prepareCorrectionContext(correctionContext)
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin C1 Native prepareCorrectionContext", throwable)
+                        throw throwable
                     } finally {
                         appendNativeCorrectionDiagnostics(engine)
                     }
@@ -507,7 +561,7 @@ class AiPostProcessingService : Service() {
                         segments = correctedSegments,
                         groupStartMs = initialRequest.groupStartMs,
                         durationSeconds = durationSeconds,
-                        diagnostics = diagnostics.toList(),
+                        diagnostics = diagnosticSnapshotForUi(),
                         checkedSegments = checkedSegments,
                         appliedCorrections = appliedCorrections,
                         rejectedCorrections = rejectedCorrections,
@@ -522,8 +576,11 @@ class AiPostProcessingService : Service() {
         } catch (throwable: Throwable) {
             if (!stopRequested.get() && throwable !is CancellationException) {
                 requestStore.clear()
-                val message = throwable.localizedMessage ?: "Die KI-Nachbearbeitung ist fehlgeschlagen."
-                addDiagnostic("Fehler: $message")
+                addThrowableDiagnostic("Kotlin-Abbruch runProcessing", throwable)
+                val detail = throwable.message
+                    ?: throwable.localizedMessage
+                    ?: "<ohne Fehlermeldung>"
+                val message = "${throwable.javaClass.name}: $detail"
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.Failed(
                         mode = initialRequest.mode,
@@ -531,7 +588,7 @@ class AiPostProcessingService : Service() {
                         message = message,
                         originalSegments = originalSegments,
                         groupStartMs = initialRequest.groupStartMs,
-                        diagnostics = diagnostics.toList()
+                        diagnostics = diagnosticSnapshotForUi()
                     )
                 )
                 finishWithNotification("KI-Nachbearbeitung fehlgeschlagen", message)
@@ -543,6 +600,32 @@ class AiPostProcessingService : Service() {
         engine.consumeCorrectionDiagnostics().forEach { nativeMessage ->
             addDiagnostic("Native · $nativeMessage")
         }
+    }
+
+    private fun addThrowableDiagnostic(stage: String, throwable: Throwable) {
+        val detail = throwable.message
+            ?: throwable.localizedMessage
+            ?: "<ohne Fehlermeldung>"
+        addDiagnostic("$stage · FEHLER · Typ=${throwable.javaClass.name} · Meldung=$detail")
+        throwable.cause?.let { cause ->
+            val causeDetail = cause.message
+                ?: cause.localizedMessage
+                ?: "<ohne Fehlermeldung>"
+            addDiagnostic("$stage · Ursache · Typ=${cause.javaClass.name} · Meldung=$causeDetail")
+        }
+        throwable.stackTrace.take(5).forEachIndexed { index, frame ->
+            addDiagnostic("$stage · Stack ${index + 1} · $frame")
+        }
+    }
+
+    private fun diagnosticSnapshotForUi(): List<String> {
+        val entries = diagnostics.toList()
+        if (entries.size <= MAX_TERMINAL_DIAGNOSTIC_BLOCKS) return entries
+        val blockSize = ((entries.size + MAX_TERMINAL_DIAGNOSTIC_BLOCKS - 1) /
+            MAX_TERMINAL_DIAGNOSTIC_BLOCKS).coerceAtLeast(1)
+        return entries.chunked(blockSize)
+            .map { block -> block.joinToString(separator = "\n") }
+            .takeLast(MAX_TERMINAL_DIAGNOSTIC_BLOCKS)
     }
 
     private fun publishRunning(
