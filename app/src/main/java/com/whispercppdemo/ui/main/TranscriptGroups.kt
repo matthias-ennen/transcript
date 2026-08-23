@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,7 +25,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -46,9 +46,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.R
 import de.matthiasennen.transcript.export.formatTimestamp
 
 private sealed interface TranscriptEditTarget {
@@ -72,6 +74,7 @@ internal fun TranscriptList(
     onEditGroup: (Long) -> Unit,
     onCancelEditing: () -> Unit,
     onApplyEdits: () -> Unit,
+    onViewChanged: (TranscriptViewMode) -> Unit,
     activeSegmentIndex: Int?,
     activeSegmentProgress: Float,
     modifier: Modifier = Modifier
@@ -215,7 +218,7 @@ internal fun TranscriptList(
     }
 
     pendingEditTarget?.let { target ->
-        TranscriptEditQuestionDialog(
+        CannaBotQuestionDialog(
             state = state,
             message = "Es gibt noch nicht übernommene Änderungen. Möchtest du sie verwerfen und die andere Bearbeitung öffnen?",
             confirmLabel = "Verwerfen",
@@ -230,7 +233,7 @@ internal fun TranscriptList(
     }
 
     if (confirmBlankApply) {
-        TranscriptEditQuestionDialog(
+        CannaBotQuestionDialog(
             state = state,
             message = "Mindestens ein Textabschnitt ist leer. Möchtest du das wirklich übernehmen?",
             confirmLabel = "Übernehmen",
@@ -244,6 +247,16 @@ internal fun TranscriptList(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
+        TranscriptViewSelector(
+            view = state.transcriptView,
+            enabled = !state.isEditingTranscript && !state.isAiPostProcessing &&
+                state.rawWhisperSegments.isNotEmpty(),
+            onViewChanged = onViewChanged
+        )
+        Text(
+            text = "Export und Teilen verwenden: ${state.transcriptView.displayLabel}",
+            style = MaterialTheme.typography.bodySmall
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -322,6 +335,10 @@ internal fun TranscriptList(
                         TranscriptSegmentCard(
                             number = segmentNumbers.getOrNull(index),
                             segment = indexedSegment.segment,
+                            origin = if (
+                                state.transcriptView == TranscriptViewMode.EDITED &&
+                                !state.isAiPostProcessing
+                            ) state.acceptedTranscriptOrigin(index) else null,
                             isEditing = isEditingGroup || isEditingSingle,
                             editingEnabled = !state.isAiPostProcessing,
                             isPlaybackActive = index == activeSegmentIndex,
@@ -351,7 +368,8 @@ internal fun TranscriptList(
                                     onEdited = { showEdited(index) }
                                 )
                                 else -> TranscriptSegmentEditControls.Start(
-                                    enabled = !state.isBusy && !state.isAiPostProcessing,
+                                    enabled = state.transcriptView == TranscriptViewMode.EDITED &&
+                                        !state.isBusy && !state.isAiPostProcessing,
                                     onEdit = {
                                         requestEdit(
                                             TranscriptEditTarget.Segment(
@@ -389,6 +407,52 @@ internal fun TranscriptList(
     }
 }
 
+@Composable
+private fun TranscriptViewSelector(
+    view: TranscriptViewMode,
+    enabled: Boolean,
+    onViewChanged: (TranscriptViewMode) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        val originalModifier = Modifier.weight(1f)
+        if (view == TranscriptViewMode.ORIGINAL) {
+            Button(
+                onClick = { onViewChanged(TranscriptViewMode.ORIGINAL) },
+                enabled = enabled,
+                modifier = originalModifier,
+                shape = RoundedCornerShape(50)
+            ) { Text("Whisper-Original", maxLines = 1, softWrap = false) }
+        } else {
+            OutlinedButton(
+                onClick = { onViewChanged(TranscriptViewMode.ORIGINAL) },
+                enabled = enabled,
+                modifier = originalModifier,
+                shape = RoundedCornerShape(50)
+            ) { Text("Whisper-Original", maxLines = 1, softWrap = false) }
+        }
+
+        val editedModifier = Modifier.weight(1f)
+        if (view == TranscriptViewMode.EDITED) {
+            Button(
+                onClick = { onViewChanged(TranscriptViewMode.EDITED) },
+                enabled = enabled,
+                modifier = editedModifier,
+                shape = RoundedCornerShape(50)
+            ) { Text("Nachbearbeitet", maxLines = 1, softWrap = false) }
+        } else {
+            OutlinedButton(
+                onClick = { onViewChanged(TranscriptViewMode.EDITED) },
+                enabled = enabled,
+                modifier = editedModifier,
+                shape = RoundedCornerShape(50)
+            ) { Text("Nachbearbeitet", maxLines = 1, softWrap = false) }
+        }
+    }
+}
+
 private sealed interface TranscriptSegmentEditControls {
     data class Start(
         val enabled: Boolean,
@@ -415,6 +479,7 @@ private sealed interface TranscriptSegmentEditControls {
 private fun TranscriptSegmentCard(
     number: Int?,
     segment: WhisperSegment,
+    origin: TranscriptSegmentOrigin?,
     isEditing: Boolean,
     editingEnabled: Boolean,
     isPlaybackActive: Boolean,
@@ -448,8 +513,35 @@ private fun TranscriptSegmentCard(
                         )
                     }
                 }
-                SegmentCapsules(editControls)
+                Spacer(Modifier.height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT + 10.dp))
             }
+        }
+
+        SegmentCapsules(
+            controls = editControls,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(x = (-4).dp)
+        )
+
+        if (number != null && origin != null) {
+            val (iconRes, description) = when (origin) {
+                TranscriptSegmentOrigin.ORIGINAL ->
+                    R.drawable.ic_transcript_status_original to "Unverändertes Whisper-Original"
+                TranscriptSegmentOrigin.MANUAL ->
+                    R.drawable.ic_transcript_status_manual to "Manuell bearbeitet"
+                TranscriptSegmentOrigin.AI ->
+                    R.drawable.ic_transcript_status_ai to "Mit KI bearbeitet"
+            }
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = description,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = (-48).dp, y = (-8).dp)
+                    .size(32.dp),
+                tint = Color.Unspecified
+            )
         }
 
         if (number != null) {
@@ -475,9 +567,12 @@ private fun TranscriptSegmentCard(
 }
 
 @Composable
-private fun SegmentCapsules(controls: TranscriptSegmentEditControls) {
+private fun SegmentCapsules(
+    controls: TranscriptSegmentEditControls,
+    modifier: Modifier = Modifier
+) {
     Row(
-        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+        modifier = modifier.padding(end = 12.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -665,7 +760,9 @@ private fun TranscriptGroupEditorActions(
         ) {
             OutlinedButton(
                 onClick = onAiEdit,
-                enabled = !state.isBusy && !state.isEditingTranscript && state.completedModel != null && state.selectedAiModelInstalled,
+                enabled = state.transcriptView == TranscriptViewMode.EDITED &&
+                    !state.isBusy && !state.isEditingTranscript &&
+                    state.completedModel != null && state.selectedAiModelInstalled,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
@@ -680,7 +777,8 @@ private fun TranscriptGroupEditorActions(
             }
             OutlinedButton(
                 onClick = onEdit,
-                enabled = !state.isBusy && !state.isAiPostProcessing,
+                enabled = state.transcriptView == TranscriptViewMode.EDITED &&
+                    !state.isBusy && !state.isAiPostProcessing,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
@@ -751,44 +849,6 @@ private fun TranscriptGroupEditorActions(
             )
         }
     }
-}
-
-@Composable
-private fun TranscriptEditQuestionDialog(
-    state: TranscriptUiState,
-    message: String,
-    confirmLabel: String,
-    dismissLabel: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(28.dp),
-        text = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                CannaBotStatusAnimation(state)
-                Text(
-                    text = message,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = onConfirm, shape = RoundedCornerShape(50)) {
-                Text(confirmLabel)
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(50)) {
-                Text(dismissLabel)
-            }
-        }
-    )
 }
 
 internal val TRANSCRIPT_NUMBER_CAPSULE_WIDTH = 52.dp
