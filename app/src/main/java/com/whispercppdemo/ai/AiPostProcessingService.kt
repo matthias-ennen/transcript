@@ -37,6 +37,7 @@ private const val ACTION_PRELOAD_MODEL = "de.matthiasennen.transcript.PRELOAD_AI
 private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_TEST_PROMPT = "test_prompt"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
+private const val MAX_DIAGNOSTIC_ENTRIES = 120
 
 class AiPostProcessingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -329,6 +330,11 @@ class AiPostProcessingService : Service() {
             activeConfiguration = configuration
             addDiagnostic("Whisper-Speicher wurde freigegeben.")
             addDiagnostic(
+                "KI-Laufzeit · ctx=${configuration.contextSize} · batch=${configuration.batchSize} · " +
+                    "ubatch=${configuration.microBatchSize} · Prompt-Threads=${configuration.promptThreads} · " +
+                    "Ausgabe-Threads=${configuration.generationThreads}."
+            )
+            addDiagnostic(
                 if (AiEngineSessionManager.isLoaded(model, modelFile, configuration)) {
                     "${model.modelLabel} ist bereits im Arbeitsspeicher."
                 } else {
@@ -343,6 +349,10 @@ class AiPostProcessingService : Service() {
                     } else {
                         "${model.modelLabel} ist nach ${sessionInfo.modelLoadMs} ms bereit und bleibt im RAM."
                     }
+                )
+                val runtimeReport = engine.runtimeReport()
+                addDiagnostic(
+                    "Backend angefordert: ${runtimeReport.requestedBackend} · aktiv: ${runtimeReport.activeBackend} · ${runtimeReport.activeCpuBackend}."
                 )
                 addDiagnostic("Thinking ist über die Qwen-Chatvorlage technisch deaktiviert.")
                 var correctedSegments = initialRequest.segments
@@ -370,8 +380,12 @@ class AiPostProcessingService : Service() {
                         IndexedTranscriptSegment(index, correctedSegments[index])
                     }
                     val label = "${formatClock(rangeStartMs)}–${formatClock(rangeEndMs)}"
+                    val correctionContext = buildCorrectionContext(indexed)
                     addDiagnostic(
                         "Bereich $label (${initialRequest.sectionMinutes} min): gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen."
+                    )
+                    addDiagnostic(
+                        "Kontextauftrag erzeugt · ${correctionContext.length} Zeichen · Übergabe an Qwen/llama.cpp startet."
                     )
                     publishRunning(
                         request = initialRequest,
@@ -387,7 +401,11 @@ class AiPostProcessingService : Service() {
                         latestTrace = latestTrace
                     )
                     val contextStartedAt = SystemClock.elapsedRealtime()
-                    engine.prepareCorrectionContext(buildCorrectionContext(indexed))
+                    try {
+                        engine.prepareCorrectionContext(correctionContext)
+                    } finally {
+                        appendNativeCorrectionDiagnostics(engine)
+                    }
                     val currentContextMs =
                         (SystemClock.elapsedRealtime() - contextStartedAt).coerceAtLeast(0L)
                     contextPreparationMs += currentContextMs
@@ -398,15 +416,33 @@ class AiPostProcessingService : Service() {
                     indexes.forEach { index ->
                         ensureContinues()
                         val target = IndexedTranscriptSegment(index, correctedSegments[index])
-                        val segmentStartedAt = SystemClock.elapsedRealtime()
-                        val response = engine.correctSegment(
-                            prompt = buildCorrectionTarget(target),
-                            maximumOutputTokens = maximumCorrectionTokens(target.segment.text)
+                        val targetPrompt = buildCorrectionTarget(target)
+                        val outputLimit = maximumCorrectionTokens(target.segment.text)
+                        addDiagnostic(
+                            "Segment ${index + 1}: Zielauftrag ${targetPrompt.length} Zeichen · Antwortlimit $outputLimit Tokens."
                         )
+                        val segmentStartedAt = SystemClock.elapsedRealtime()
+                        val response = try {
+                            engine.correctSegment(
+                                prompt = targetPrompt,
+                                maximumOutputTokens = outputLimit
+                            )
+                        } finally {
+                            appendNativeCorrectionDiagnostics(engine)
+                        }
                         val parsed = parseCorrectionResult(response, target.segment.text)
                         val segmentMs =
                             (SystemClock.elapsedRealtime() - segmentStartedAt).coerceAtLeast(0L)
                         segmentDurationsMs += segmentMs
+                        addDiagnostic(
+                            "Segment ${index + 1}: rohe KI-Antwort · ${diagnosticResponse(response)}"
+                        )
+                        val parserDecision = when {
+                            parsed.retainedOriginal -> "nicht lesbar/leer → Original beibehalten"
+                            parsed.changed -> "JSON lesbar → geänderten Vorschlag erkannt"
+                            else -> "JSON lesbar → Text unverändert"
+                        }
+                        addDiagnostic("Segment ${index + 1}: Parser · $parserDecision.")
                         if (parsed.changed) {
                             correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
                             appliedCorrections++
@@ -503,6 +539,12 @@ class AiPostProcessingService : Service() {
         }
     }
 
+    private fun appendNativeCorrectionDiagnostics(engine: LocalAiEngine) {
+        engine.consumeCorrectionDiagnostics().forEach { nativeMessage ->
+            addDiagnostic("Native · $nativeMessage")
+        }
+    }
+
     private fun publishRunning(
         request: AiPostProcessingRequest,
         model: AiModel,
@@ -542,7 +584,7 @@ class AiPostProcessingService : Service() {
     }
 
     private fun addDiagnostic(message: String) {
-        if (diagnostics.size >= 10) diagnostics.removeFirst()
+        if (diagnostics.size >= MAX_DIAGNOSTIC_ENTRIES) diagnostics.removeFirst()
         diagnostics.addLast("${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())} · $message")
     }
 
@@ -707,6 +749,9 @@ class AiPostProcessingService : Service() {
         }
     }
 }
+
+private fun diagnosticResponse(response: String): String =
+    response.replace('\n', ' ').replace('\r', ' ').trim().ifEmpty { "<leer>" }
 
 private fun formatClock(milliseconds: Long): String {
     val seconds = (milliseconds / 1_000L).coerceAtLeast(0L)
