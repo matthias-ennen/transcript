@@ -513,9 +513,16 @@ private fun TranscriptSegmentCard(
                         )
                     }
                 }
-                SegmentCapsules(editControls)
+                Spacer(Modifier.height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT + 10.dp))
             }
         }
+
+        SegmentCapsules(
+            controls = editControls,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(x = (-4).dp)
+        )
 
         if (number != null && origin != null) {
             val (iconRes, description) = when (origin) {
@@ -560,9 +567,12 @@ private fun TranscriptSegmentCard(
 }
 
 @Composable
-private fun SegmentCapsules(controls: TranscriptSegmentEditControls) {
+private fun SegmentCapsules(
+    controls: TranscriptSegmentEditControls,
+    modifier: Modifier = Modifier
+) {
     Row(
-        modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+        modifier = modifier.padding(end = 12.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
