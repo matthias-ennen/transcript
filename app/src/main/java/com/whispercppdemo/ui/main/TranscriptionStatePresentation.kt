@@ -34,6 +34,9 @@ internal fun TranscriptUiState.presentRunningTranscription(
     diagnostics = state.diagnostics,
     rawWhisperSegments = emptyList(),
     segments = state.committedSegments,
+    transcriptSectionMinutes = whisperSettings.sectionMinutes.coerceIn(1, 5),
+    segmentOrigins = emptyMap(),
+    transcriptView = TranscriptViewMode.EDITED,
     detectedLanguage = state.detectedLanguage,
     completedModel = state.model,
     transcriptionDurationSeconds = null,
@@ -60,7 +63,9 @@ internal fun TranscriptUiState.presentCompletedTranscription(
         aiPostProcessingEnabled && automaticAiPostProcessingEnabled && selectedAiModelInstalled
     val automaticAiModelMissing = completed.segments.isNotEmpty() &&
         aiPostProcessingEnabled && automaticAiPostProcessingEnabled && !selectedAiModelInstalled
-    val capturedSectionMinutes = whisperSettings.sectionMinutes.coerceIn(1, 5)
+    val capturedSectionMinutes = transcriptSectionMinutes
+        ?.coerceIn(1, 5)
+        ?: whisperSettings.sectionMinutes.coerceIn(1, 5)
     TranscriptGroupingRuntime.use(capturedSectionMinutes)
     return CompletedTranscriptionPresentation(
         state = copy(
@@ -72,6 +77,11 @@ internal fun TranscriptUiState.presentCompletedTranscription(
             rawWhisperSegments = completed.segments,
             segments = timelineSegments,
             transcriptSectionMinutes = capturedSectionMinutes,
+            segmentOrigins = defaultTranscriptOrigins(timelineSegments, completed.segments),
+            transcriptView = TranscriptViewMode.EDITED,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
+            aiBaselineSegments = emptyList(),
+            aiBaselineOrigins = emptyMap(),
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
@@ -105,6 +115,11 @@ internal fun TranscriptUiState.presentCancelledTranscription(): TranscriptUiStat
     rawWhisperSegments = emptyList(),
     segments = emptyList(),
     transcriptSectionMinutes = null,
+    segmentOrigins = emptyMap(),
+    transcriptView = TranscriptViewMode.EDITED,
+    editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
+    aiBaselineSegments = emptyList(),
+    aiBaselineOrigins = emptyMap(),
     isEditingTranscript = false,
     editingTranscriptGroupStartMs = null,
     draftSegments = emptyList(),
@@ -130,6 +145,11 @@ internal fun TranscriptUiState.presentFailedTranscription(
     rawWhisperSegments = emptyList(),
     segments = failed.committedSegments,
     transcriptSectionMinutes = null,
+    segmentOrigins = emptyMap(),
+    transcriptView = TranscriptViewMode.EDITED,
+    editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
+    aiBaselineSegments = emptyList(),
+    aiBaselineOrigins = emptyMap(),
     isEditingTranscript = false,
     editingTranscriptGroupStartMs = null,
     draftSegments = emptyList(),

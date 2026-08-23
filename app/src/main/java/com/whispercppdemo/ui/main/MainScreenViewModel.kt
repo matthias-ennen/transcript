@@ -606,6 +606,15 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             waveformProgress = 0f,
             rawWhisperSegments = restoredTranscript?.rawWhisperSegments.orEmpty(),
             segments = restoredTranscript?.displayedSegments.orEmpty(),
+            transcriptSectionMinutes = restoredTranscript?.sectionMinutes,
+            segmentOrigins = restoredTranscript?.let { stored ->
+                stored.segmentOrigins.takeIf { it.isNotEmpty() }
+                    ?: defaultTranscriptOrigins(stored.displayedSegments, stored.rawWhisperSegments)
+            }.orEmpty(),
+            transcriptView = restoredTranscript?.transcriptView ?: TranscriptViewMode.EDITED,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
+            aiBaselineSegments = emptyList(),
+            aiBaselineOrigins = emptyMap(),
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
@@ -882,12 +891,21 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     }
 
     fun startAiTranscriptEditing(groupStartMs: Long) {
-        if (uiState.isBusy || uiState.completedModel == null || uiState.segments.isEmpty() || !uiState.selectedAiModelInstalled) return
-        if (uiState.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return
+        if (
+            uiState.isBusy || uiState.completedModel == null || uiState.segments.isEmpty() ||
+            !uiState.selectedAiModelInstalled || uiState.transcriptView != TranscriptViewMode.EDITED
+        ) return
+        val sectionMinutes = uiState.effectiveTranscriptSectionMinutes()
+        if (uiState.segments.none {
+                transcriptGroupStartMs(it.startMs, sectionMinutes) == groupStartMs
+            }
+        ) return
         uiState = uiState.copy(
             isEditingTranscript = true,
             editingTranscriptGroupStartMs = groupStartMs,
             draftSegments = uiState.segments,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.AI,
+            transcriptView = TranscriptViewMode.EDITED,
             isBusy = true,
             isAiPostProcessing = true,
             progress = null,
@@ -1358,8 +1376,18 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
 
     fun applyTranscriptEdits() {
         val appliedSegments = transcriptSession.applyEdits(uiState) ?: return
+        val appliedOrigins = updateTranscriptOrigins(
+            previousSegments = uiState.segments,
+            updatedSegments = appliedSegments,
+            rawWhisperSegments = uiState.rawWhisperSegments,
+            existingOrigins = uiState.segmentOrigins,
+            changedOrigin = uiState.editingTranscriptOrigin
+        )
         uiState = uiState.copy(
             segments = appliedSegments,
+            segmentOrigins = appliedOrigins,
+            transcriptView = TranscriptViewMode.EDITED,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
@@ -1368,6 +1396,15 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         )
         persistCurrentTranscript(appliedSegments)
         cue(CannaBotCue.WAVING)
+    }
+
+    fun setTranscriptView(view: TranscriptViewMode) {
+        if (
+            uiState.isEditingTranscript || uiState.isAiPostProcessing ||
+            uiState.rawWhisperSegments.isEmpty() || uiState.transcriptView == view
+        ) return
+        uiState = uiState.copy(transcriptView = view)
+        persistCurrentTranscript(uiState.segments)
     }
 
     fun setAiPostProcessingEnabled(enabled: Boolean) {
@@ -1628,6 +1665,8 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
         stopPlayback(release = false)
+        val capturedSectionMinutes = uiState.whisperSettings.sectionMinutes.coerceIn(1, 5)
+        TranscriptGroupingRuntime.use(capturedSectionMinutes)
         transcriptResultPersistence.clear()
         uiState = uiState.withRecalculatedTranscriptionEstimate()
         uiState = uiState.copy(
@@ -1643,6 +1682,12 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             isSegmentRepeatEnabled = false,
             rawWhisperSegments = emptyList(),
             segments = emptyList(),
+            transcriptSectionMinutes = capturedSectionMinutes,
+            segmentOrigins = emptyMap(),
+            transcriptView = TranscriptViewMode.EDITED,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
+            aiBaselineSegments = emptyList(),
+            aiBaselineOrigins = emptyMap(),
             detectedLanguage = null,
             completedModel = uiState.selectedModel,
             transcriptionDurationSeconds = null,
@@ -2116,6 +2161,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is AiPostProcessingState.Starting -> {
                 uiState = uiState.copy(
+                    aiBaselineSegments = uiState.segments,
+                    aiBaselineOrigins = uiState.segmentOrigins,
+                    transcriptView = TranscriptViewMode.EDITED,
                     isBusy = true,
                     isAiPostProcessing = true,
                     progress = null,
@@ -2153,13 +2201,36 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is AiPostProcessingState.Completed -> {
                 val manual = state.mode == AiPostProcessingMode.MANUAL_GROUP
+                val nextOrigins = if (manual) {
+                    uiState.segmentOrigins
+                } else {
+                    updateTranscriptOrigins(
+                        previousSegments = uiState.aiBaselineSegments.takeIf {
+                            it.size == state.segments.size
+                        } ?: uiState.segments,
+                        updatedSegments = state.segments,
+                        rawWhisperSegments = uiState.rawWhisperSegments,
+                        existingOrigins = uiState.aiBaselineOrigins.takeIf { it.isNotEmpty() }
+                            ?: uiState.segmentOrigins,
+                        changedOrigin = TranscriptSegmentOrigin.AI
+                    )
+                }
                 uiState = uiState.copy(
                     isBusy = false,
                     isAiPostProcessing = false,
                     progress = null,
                     activityDetail = null,
                     segments = if (manual) uiState.segments else state.segments,
+                    segmentOrigins = nextOrigins,
+                    transcriptView = TranscriptViewMode.EDITED,
                     draftSegments = if (manual) state.segments else emptyList(),
+                    editingTranscriptOrigin = if (manual) {
+                        TranscriptSegmentOrigin.AI
+                    } else {
+                        TranscriptSegmentOrigin.MANUAL
+                    },
+                    aiBaselineSegments = emptyList(),
+                    aiBaselineOrigins = emptyMap(),
                     isEditingTranscript = manual,
                     editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
                     diagnostics = (state.diagnostics +
@@ -2179,13 +2250,28 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             }
             is AiPostProcessingState.Failed -> {
                 val manual = state.mode == AiPostProcessingMode.MANUAL_GROUP
+                val restoredOrigins = if (manual) {
+                    uiState.segmentOrigins
+                } else {
+                    uiState.aiBaselineOrigins.takeIf { it.isNotEmpty() }
+                        ?: defaultTranscriptOrigins(state.originalSegments, uiState.rawWhisperSegments)
+                }
                 uiState = uiState.copy(
                     isBusy = false,
                     isAiPostProcessing = false,
                     progress = null,
                     activityDetail = null,
                     segments = state.originalSegments,
+                    segmentOrigins = restoredOrigins,
+                    transcriptView = TranscriptViewMode.EDITED,
                     draftSegments = if (manual) state.originalSegments else emptyList(),
+                    editingTranscriptOrigin = if (manual) {
+                        TranscriptSegmentOrigin.AI
+                    } else {
+                        TranscriptSegmentOrigin.MANUAL
+                    },
+                    aiBaselineSegments = emptyList(),
+                    aiBaselineOrigins = emptyMap(),
                     isEditingTranscript = manual,
                     editingTranscriptGroupStartMs = if (manual) state.groupStartMs else null,
                     diagnostics = state.diagnostics.takeLast(12),

@@ -9,7 +9,10 @@ internal class TranscriptSession(
     private val persistence: TranscriptResultPersistence
 ) {
     fun beginEditing(state: TranscriptUiState, groupStartMs: Long): TranscriptUiState? {
-        if (state.isBusy || state.segments.isEmpty()) return null
+        if (
+            state.isBusy || state.segments.isEmpty() ||
+            state.transcriptView != TranscriptViewMode.EDITED
+        ) return null
         val sectionMinutes = state.effectiveTranscriptSectionMinutes()
         TranscriptGroupingRuntime.use(sectionMinutes)
         if (state.segments.none {
@@ -19,7 +22,8 @@ internal class TranscriptSession(
         return state.copy(
             isEditingTranscript = true,
             editingTranscriptGroupStartMs = groupStartMs,
-            draftSegments = state.segments
+            draftSegments = state.segments,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL
         )
     }
 
@@ -37,7 +41,8 @@ internal class TranscriptSession(
         return state.copy(
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
-            draftSegments = emptyList()
+            draftSegments = emptyList(),
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL
         )
     }
 
@@ -71,19 +76,28 @@ internal class TranscriptSession(
                 rawWhisperSegments = state.rawWhisperSegments,
                 displayedSegments = displayedSegments,
                 vadSummary = state.vadProcessingSummary,
-                sectionMinutes = sectionMinutes
+                sectionMinutes = sectionMinutes,
+                segmentOrigins = state.segmentOrigins,
+                transcriptView = state.transcriptView
             )
         )
     }
 
     fun restoreWithoutSource(state: TranscriptUiState, stored: StoredTranscriptResult): TranscriptUiState {
         val sectionMinutes = TranscriptGroupingRuntime.use(stored.sectionMinutes)
+        val origins = stored.segmentOrigins.takeIf { it.isNotEmpty() }
+            ?: defaultTranscriptOrigins(stored.displayedSegments, stored.rawWhisperSegments)
         return state.copy(
             selectedAudio = null,
             selectedFileName = stored.fileName,
             rawWhisperSegments = stored.rawWhisperSegments,
             segments = stored.displayedSegments,
             transcriptSectionMinutes = sectionMinutes,
+            segmentOrigins = origins,
+            transcriptView = stored.transcriptView,
+            editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL,
+            aiBaselineSegments = emptyList(),
+            aiBaselineOrigins = emptyMap(),
             detectedLanguage = stored.detectedLanguage,
             completedModel = WhisperModel.fromId(stored.modelId),
             transcriptionDurationSeconds = stored.transcriptionDurationSeconds,

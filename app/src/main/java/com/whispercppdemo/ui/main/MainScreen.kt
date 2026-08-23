@@ -169,25 +169,13 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     }
 
     state.pendingSharedMediaImport?.let { request ->
-        AlertDialog(
-            onDismissRequest = viewModel::cancelSharedMediaImport,
-            title = { Text("Aktuellen Vorgang ersetzen?") },
-            text = {
-                Text(
-                    "Die geteilte Datei „${request.fileName}“ ersetzt die aktuell ausgewählte " +
-                        "Datei und das vorhandene Transkript. Möchtest du fortfahren?"
-                )
-            },
-            confirmButton = {
-                Button(onClick = viewModel::confirmSharedMediaImport) {
-                    Text("Ersetzen und importieren")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = viewModel::cancelSharedMediaImport) {
-                    Text("Abbrechen")
-                }
-            }
+        CannaBotQuestionDialog(
+            state = state,
+            message = "Die geteilte Datei „${request.fileName}“ ersetzt die aktuelle Datei und das vorhandene Transkript. Möchtest du fortfahren?",
+            confirmLabel = "Ersetzen",
+            dismissLabel = "Abbrechen",
+            onConfirm = viewModel::confirmSharedMediaImport,
+            onDismiss = viewModel::cancelSharedMediaImport
         )
     }
 
@@ -497,34 +485,29 @@ private fun MainContent(
         }
 
         pendingTranscriptAction?.let { pendingAction ->
-            AlertDialog(
-                onDismissRequest = { pendingTranscriptAction = null },
-                title = { Text("Änderungen noch nicht übernommen") },
-                text = {
-                    Text(
-                        "Die Textkorrekturen würden bei dieser Aktion verworfen. " +
-                            "Möchtest du trotzdem fortfahren?"
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            pendingTranscriptAction = null
-                            when (pendingAction) {
-                                PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
-                                PendingTranscriptAction.START_RECORDING -> requestRecording()
-                                PendingTranscriptAction.TRANSCRIBE -> requestTranscription()
-                            }
-                        }
-                    ) {
-                        Text("Verwerfen und fortfahren")
+            val question = when (pendingAction) {
+                PendingTranscriptAction.SELECT_AUDIO ->
+                    "Du hast Änderungen am Transkript noch nicht übernommen. Möchtest du sie verwerfen und eine andere Datei auswählen?"
+                PendingTranscriptAction.START_RECORDING ->
+                    "Du hast Änderungen am Transkript noch nicht übernommen. Möchtest du sie verwerfen und eine neue Aufnahme starten?"
+                PendingTranscriptAction.TRANSCRIBE ->
+                    "Du hast Änderungen am Transkript noch nicht übernommen. Möchtest du sie verwerfen und die Transkription neu starten?"
+            }
+            CannaBotQuestionDialog(
+                state = state,
+                message = question,
+                confirmLabel = "Verwerfen",
+                dismissLabel = "Zurück",
+                onConfirm = {
+                    pendingTranscriptAction = null
+                    viewModel.cancelTranscriptEditing()
+                    when (pendingAction) {
+                        PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
+                        PendingTranscriptAction.START_RECORDING -> requestRecording()
+                        PendingTranscriptAction.TRANSCRIBE -> requestTranscription()
                     }
                 },
-                dismissButton = {
-                    OutlinedButton(onClick = { pendingTranscriptAction = null }) {
-                        Text("Zurück")
-                    }
-                }
+                onDismiss = { pendingTranscriptAction = null }
             )
         }
 
@@ -672,11 +655,7 @@ private fun MainContent(
                         )
                         TranscriptList(
                             state = state,
-                            segments = if (state.isEditingTranscript) {
-                                state.draftSegments
-                            } else {
-                                state.segments
-                            },
+                            segments = state.transcriptSegmentsForSelectedView(),
                             rawWhisperSegments = state.rawWhisperSegments,
                             onTextChanged = viewModel::updateTranscriptText,
                             onAiEditGroup = { groupStartMs ->
@@ -689,6 +668,7 @@ private fun MainContent(
                             onEditGroup = viewModel::startTranscriptEditing,
                             onCancelEditing = viewModel::cancelTranscriptEditing,
                             onApplyEdits = viewModel::applyTranscriptEdits,
+                            onViewChanged = viewModel::setTranscriptView,
                             activeSegmentIndex = activeSegment?.index,
                             activeSegmentProgress = activeSegment?.progress ?: 0f
                         )

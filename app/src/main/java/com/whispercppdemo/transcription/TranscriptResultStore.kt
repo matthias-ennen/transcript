@@ -3,6 +3,8 @@ package de.matthiasennen.transcript.transcription
 import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.ui.main.DEFAULT_TRANSCRIPT_GROUP_MINUTES
 import de.matthiasennen.transcript.ui.main.TranscriptGroupingRuntime
+import de.matthiasennen.transcript.ui.main.TranscriptSegmentOrigin
+import de.matthiasennen.transcript.ui.main.TranscriptViewMode
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
@@ -15,7 +17,7 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
 
 private const val RESULT_MAGIC = 0x54525253
-private const val RESULT_VERSION = 3
+private const val RESULT_VERSION = 4
 private const val MAX_RESULT_STRING_BYTES = 4 * 1024 * 1024
 private const val MAX_RESULT_FILE_BYTES = 64L * 1024L * 1024L
 private const val MAX_RESULT_SEGMENTS = 100_000
@@ -30,7 +32,9 @@ data class StoredTranscriptResult(
     val rawWhisperSegments: List<WhisperSegment>,
     val displayedSegments: List<WhisperSegment>,
     val vadSummary: VadProcessingSummary? = null,
-    val sectionMinutes: Int = DEFAULT_TRANSCRIPT_GROUP_MINUTES
+    val sectionMinutes: Int = DEFAULT_TRANSCRIPT_GROUP_MINUTES,
+    val segmentOrigins: Map<Long, TranscriptSegmentOrigin> = emptyMap(),
+    val transcriptView: TranscriptViewMode = TranscriptViewMode.EDITED
 )
 
 /** Atomically stores the one transcript currently shown on the main screen. */
@@ -62,6 +66,12 @@ class TranscriptResultStore(private val resultFile: File) {
             } else {
                 DEFAULT_TRANSCRIPT_GROUP_MINUTES
             }
+            val segmentOrigins = if (version >= 4) input.readSegmentOrigins() else emptyMap()
+            val transcriptView = if (version >= 4) {
+                TranscriptViewMode.valueOf(input.readResultString())
+            } else {
+                TranscriptViewMode.EDITED
+            }
             StoredTranscriptResult(
                 sourceUri = sourceUri,
                 fileName = fileName,
@@ -72,7 +82,9 @@ class TranscriptResultStore(private val resultFile: File) {
                 rawWhisperSegments = rawWhisperSegments,
                 displayedSegments = displayedSegments,
                 vadSummary = vadSummary,
-                sectionMinutes = sectionMinutes
+                sectionMinutes = sectionMinutes,
+                segmentOrigins = segmentOrigins,
+                transcriptView = transcriptView
             )
         }
     }.getOrElse {
@@ -96,6 +108,8 @@ class TranscriptResultStore(private val resultFile: File) {
             output.writeSegments(result.displayedSegments)
             output.writeVadSummary(result.vadSummary)
             output.writeInt(result.sectionMinutes.coerceIn(1, 5))
+            output.writeSegmentOrigins(result.segmentOrigins)
+            output.writeResultString(result.transcriptView.name)
         }
         try {
             Files.move(
@@ -145,6 +159,25 @@ class TranscriptResultPersistence(private val store: TranscriptResultStore) : Au
     override fun close() {
         executor.shutdown()
     }
+}
+
+private fun DataOutputStream.writeSegmentOrigins(origins: Map<Long, TranscriptSegmentOrigin>) {
+    require(origins.size <= MAX_RESULT_SEGMENTS) { "Zu viele Herkunftseinträge." }
+    writeInt(origins.size)
+    origins.toSortedMap().forEach { (segmentId, origin) ->
+        writeLong(segmentId)
+        writeResultString(origin.name)
+    }
+}
+
+private fun DataInputStream.readSegmentOrigins(): Map<Long, TranscriptSegmentOrigin> {
+    val count = readInt()
+    check(count in 0..MAX_RESULT_SEGMENTS) { "Ungültige Herkunftsanzahl." }
+    val result = LinkedHashMap<Long, TranscriptSegmentOrigin>(count)
+    repeat(count) {
+        result[readLong()] = TranscriptSegmentOrigin.valueOf(readResultString())
+    }
+    return result
 }
 
 private fun DataOutputStream.writeSegments(segments: List<WhisperSegment>) {

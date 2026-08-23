@@ -49,7 +49,7 @@ internal fun rememberExporter(
         context.contentResolver.openOutputStream(it)?.bufferedWriter()?.use { writer ->
             writer.write(
                 exportTranscript(
-                    segments = state.segments,
+                    segments = state.exportSegmentsForSelectedView(),
                     format = format,
                     metadata = state.exportMetadata(),
                     rawWhisperSegments = state.rawWhisperSegments
@@ -175,7 +175,7 @@ internal fun shareTranscript(
         val file = File(shareDirectory, transcriptExportFileName(state, format))
         file.writeText(
             exportTranscript(
-                segments = state.segments,
+                segments = state.exportSegmentsForSelectedView(),
                 format = format,
                 metadata = metadata,
                 rawWhisperSegments = state.rawWhisperSegments
