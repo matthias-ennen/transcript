@@ -16,6 +16,7 @@ import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
 import de.matthiasennen.transcript.download.TranscriptNotifications
+import de.matthiasennen.transcript.ui.main.TranscriptGroupingRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +37,6 @@ private const val ACTION_PRELOAD_MODEL = "de.matthiasennen.transcript.PRELOAD_AI
 private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_TEST_PROMPT = "test_prompt"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
-private const val TRANSCRIPT_GROUP_DURATION_MS = 5L * 60L * 1_000L
 
 class AiPostProcessingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -346,12 +346,19 @@ class AiPostProcessingService : Service() {
                 )
                 addDiagnostic("Thinking ist über die Qwen-Chatvorlage technisch deaktiviert.")
                 var correctedSegments = initialRequest.segments
-                val groups = targetGroups(initialRequest)
+                val groups = aiPostProcessingGroups(
+                    segments = initialRequest.segments,
+                    mode = initialRequest.mode,
+                    groupStartMs = initialRequest.groupStartMs,
+                    sectionMinutes = initialRequest.sectionMinutes
+                )
                 check(groups.isNotEmpty()) { "Für die KI-Nachbearbeitung wurde kein Text gefunden." }
                 var checkedSegments = 0
                 var appliedCorrections = 0
                 var rejectedCorrections = 0
                 var latestTrace: AiCorrectionTrace? = null
+                var contextPreparationMs = 0L
+                val segmentDurationsMs = mutableListOf<Long>()
                 val totalSegments = groups.sumOf(List<Int>::size)
 
                 groups.forEachIndexed { groupIndex, indexes ->
@@ -363,7 +370,9 @@ class AiPostProcessingService : Service() {
                         IndexedTranscriptSegment(index, correctedSegments[index])
                     }
                     val label = "${formatClock(rangeStartMs)}–${formatClock(rangeEndMs)}"
-                    addDiagnostic("Bereich $label: gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen.")
+                    addDiagnostic(
+                        "Bereich $label (${initialRequest.sectionMinutes} min): gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen."
+                    )
                     publishRunning(
                         request = initialRequest,
                         model = model,
@@ -377,17 +386,27 @@ class AiPostProcessingService : Service() {
                         rejectedCorrections = rejectedCorrections,
                         latestTrace = latestTrace
                     )
+                    val contextStartedAt = SystemClock.elapsedRealtime()
                     engine.prepareCorrectionContext(buildCorrectionContext(indexed))
-                    addDiagnostic("Gemeinsamer Kontext bereit. Zielsegmente werden einzeln geprüft.")
+                    val currentContextMs =
+                        (SystemClock.elapsedRealtime() - contextStartedAt).coerceAtLeast(0L)
+                    contextPreparationMs += currentContextMs
+                    addDiagnostic(
+                        "Gemeinsamer Kontext bereit · $currentContextMs ms. Zielsegmente werden einzeln geprüft."
+                    )
 
                     indexes.forEach { index ->
                         ensureContinues()
                         val target = IndexedTranscriptSegment(index, correctedSegments[index])
+                        val segmentStartedAt = SystemClock.elapsedRealtime()
                         val response = engine.correctSegment(
                             prompt = buildCorrectionTarget(target),
                             maximumOutputTokens = maximumCorrectionTokens(target.segment.text)
                         )
                         val parsed = parseCorrectionResult(response, target.segment.text)
+                        val segmentMs =
+                            (SystemClock.elapsedRealtime() - segmentStartedAt).coerceAtLeast(0L)
+                        segmentDurationsMs += segmentMs
                         if (parsed.changed) {
                             correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
                             appliedCorrections++
@@ -406,7 +425,7 @@ class AiPostProcessingService : Service() {
                             }
                         )
                         addDiagnostic(
-                            "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag übernommen" else "unverändert"}."
+                            "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag erkannt" else "unverändert"} · $segmentMs ms."
                         )
                         publishRunning(
                             request = initialRequest,
@@ -431,8 +450,20 @@ class AiPostProcessingService : Service() {
                 }
 
                 requestStore.clear()
-                val durationSeconds = ((SystemClock.elapsedRealtime() - startedAt) / 1_000L)
-                    .coerceAtLeast(0L)
+                val durationMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+                val durationSeconds = durationMs / 1_000L
+                val averageSegmentMs = if (segmentDurationsMs.isEmpty()) {
+                    0L
+                } else {
+                    segmentDurationsMs.sum() / segmentDurationsMs.size
+                }
+                val maximumSegmentMs = segmentDurationsMs.maxOrNull() ?: 0L
+                addDiagnostic(
+                    "Machbarkeit: Kontext $contextPreparationMs ms · Segmente Ø $averageSegmentMs ms / max $maximumSegmentMs ms."
+                )
+                addDiagnostic(
+                    "Gruppe gesamt $durationMs ms · $checkedSegments Segmente · $appliedCorrections Änderungen · $rejectedCorrections verworfen."
+                )
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.Completed(
                         mode = initialRequest.mode,
@@ -449,7 +480,7 @@ class AiPostProcessingService : Service() {
                 )
                 finishWithNotification(
                     "KI-Nachbearbeitung abgeschlossen",
-                    "$checkedSegments Segmente geprüft, $appliedCorrections Korrekturen übernommen."
+                    "$checkedSegments Segmente in ${durationSeconds} s geprüft, $appliedCorrections Korrekturen erkannt."
                 )
             }
         } catch (throwable: Throwable) {
@@ -468,25 +499,6 @@ class AiPostProcessingService : Service() {
                     )
                 )
                 finishWithNotification("KI-Nachbearbeitung fehlgeschlagen", message)
-            }
-        }
-    }
-
-    private fun targetGroups(request: AiPostProcessingRequest): List<List<Int>> {
-        val all = request.segments.indices
-            .filter { request.segments[it].text.isNotBlank() }
-            .groupBy { request.segments[it].startMs / TRANSCRIPT_GROUP_DURATION_MS }
-            .toSortedMap()
-            .values
-            .map(List<Int>::toList)
-        return when (request.mode) {
-            AiPostProcessingMode.AUTOMATIC -> all
-            AiPostProcessingMode.MANUAL_GROUP -> {
-                val expected = requireNotNull(request.groupStartMs) / TRANSCRIPT_GROUP_DURATION_MS
-                all.filter { indexes ->
-                    indexes.isNotEmpty() &&
-                        request.segments[indexes.first()].startMs / TRANSCRIPT_GROUP_DURATION_MS == expected
-                }
             }
         }
     }
@@ -660,7 +672,8 @@ class AiPostProcessingService : Service() {
                     modelId = model.id,
                     fileName = fileName,
                     groupStartMs = null,
-                    segments = segments
+                    segments = segments,
+                    sectionMinutes = TranscriptGroupingRuntime.currentSectionMinutes
                 )
             )
         }
@@ -679,7 +692,8 @@ class AiPostProcessingService : Service() {
                     modelId = model.id,
                     fileName = fileName,
                     groupStartMs = groupStartMs,
-                    segments = segments
+                    segments = segments,
+                    sectionMinutes = TranscriptGroupingRuntime.currentSectionMinutes
                 )
             )
         }
