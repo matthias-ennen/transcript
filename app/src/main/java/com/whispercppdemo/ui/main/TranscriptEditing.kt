@@ -5,6 +5,9 @@ import com.whispercpp.whisper.WhisperSegment
 internal val TranscriptUiState.hasUnsavedTranscriptChanges: Boolean
     get() = isEditingTranscript && draftSegments != segments
 
+internal val TranscriptUiState.selectedAiModelInstalled: Boolean
+    get() = aiModelInstallations.firstOrNull { it.model == selectedAiModel }?.isInstalled == true
+
 internal val TranscriptUiState.hasNewlyBlankTranscriptDraft: Boolean
     get() {
         if (!isEditingTranscript || draftSegments.size != segments.size) return false
