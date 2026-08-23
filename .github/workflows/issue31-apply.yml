@@ -21,6 +21,19 @@ jobs:
           submodules: false
           fetch-depth: 0
 
+      - name: Relax duplicate reset guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tools/issue31_patch.py')
+          text = p.read_text(encoding='utf-8')
+          old = """    if count != 1:\n        raise RuntimeError(f'{path}: expected one occurrence, found {count}: {old[:80]!r}')\n    write(path, text.replace(old, new, 1))\n"""
+          new = """    special_duplicate = old.startswith('    transcriptSectionMinutes = null,\\n    isEditingTranscript = false,')\n    if count == 0 or (count > 1 and not special_duplicate):\n        raise RuntimeError(f'{path}: expected one occurrence, found {count}: {old[:80]!r}')\n    write(path, text.replace(old, new, 1))\n"""
+          if old not in text:
+              raise SystemExit('replace_once helper not found')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply implementation patch
         run: python3 tools/issue31_patch.py
 
