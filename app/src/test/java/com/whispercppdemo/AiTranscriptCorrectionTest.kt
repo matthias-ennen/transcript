@@ -19,13 +19,13 @@ class AiTranscriptCorrectionTest {
     )
 
     @Test
-    fun contextCarriesCompleteWhisperGroupAsJson() {
+    fun contextCarriesCompleteVisibleGroupAsJson() {
         val prompt = buildCorrectionContext(
             source.mapIndexed { index, segment -> IndexedTranscriptSegment(index, segment) }
         )
 
         assertTrue(prompt.contains("transcript-correction-v2"))
-        assertTrue(prompt.contains("\"source\":\"whisper_raw\""))
+        assertTrue(prompt.contains("\"source\":\"accepted_transcript\""))
         assertTrue(prompt.contains("\"id\":1,\"start_ms\":0,\"end_ms\":1000,\"text\":\"hallo wie gehts\""))
         assertTrue(prompt.contains("\"id\":2"))
         assertTrue(prompt.contains("genau ein Zielsegment"))
@@ -33,11 +33,11 @@ class AiTranscriptCorrectionTest {
     }
 
     @Test
-    fun targetContainsOnlyCurrentSegmentAndSimpleInstruction() {
+    fun targetContainsOnlyCurrentAcceptedSegmentAndSimpleInstruction() {
         val target = buildCorrectionTarget(IndexedTranscriptSegment(1, source[1]))
 
         assertTrue(target.contains("\"target_id\":2"))
-        assertTrue(target.contains("\"whisper_raw_text\":\"mir geht es gut\""))
+        assertTrue(target.contains("\"accepted_text\":\"mir geht es gut\""))
         assertFalse(target.contains("hallo wie gehts"))
         assertFalse(target.contains("/no_think"))
     }
