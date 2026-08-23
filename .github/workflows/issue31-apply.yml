@@ -1,9 +1,10 @@
 name: Apply issue 31 implementation
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
     branches:
-      - issue-31-original-status
+      - main
 
 permissions:
   contents: write
