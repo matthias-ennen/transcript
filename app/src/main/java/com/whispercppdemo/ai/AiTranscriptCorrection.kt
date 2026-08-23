@@ -83,8 +83,10 @@ internal fun applyCorrection(
 internal fun maximumCorrectionTokens(text: String): Int =
     (text.length / 2 + 48).coerceIn(64, AiTaskProfile.maximumOutputTokens)
 
+// Escape both JSON braces explicitly. Android's regex engine rejects the unescaped
+// closing brace that the desktop JVM may tolerate during local unit tests.
 private val resultEnvelope = Regex(
-    pattern = """\{\s*"result"\s*:\s*"((?:\\.|[^"\\])*)"\s*}""",
+    pattern = """\{\s*"result"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}""",
     options = setOf(RegexOption.DOT_MATCHES_ALL)
 )
 
