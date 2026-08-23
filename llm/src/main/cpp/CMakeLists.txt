@@ -69,7 +69,10 @@ if(ANDROID_ABI STREQUAL "arm64-v8a" AND TARGET ggml-vulkan)
         "${CMAKE_CURRENT_LIST_DIR}/host-vulkan-headers")
 endif()
 
-add_library(transcript_llm SHARED local_ai_jni.cpp)
+# The diagnostics translation unit includes the established JNI implementation
+# and replaces only the transcript-correction entry points with instrumented
+# variants. Free chat/model loading therefore keep the exact existing runtime.
+add_library(transcript_llm SHARED local_ai_diagnostics.cpp)
 
 if(ANDROID_ABI STREQUAL "arm64-v8a")
     target_compile_definitions(transcript_llm PRIVATE
