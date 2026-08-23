@@ -8,14 +8,27 @@ internal val TranscriptUiState.hasUnsavedTranscriptChanges: Boolean
 internal val TranscriptUiState.selectedAiModelInstalled: Boolean
     get() = aiModelInstallations.firstOrNull { it.model == selectedAiModel }?.isInstalled == true
 
+internal val TranscriptUiState.hasNewlyBlankTranscriptDraft: Boolean
+    get() {
+        if (!isEditingTranscript || draftSegments.size != segments.size) return false
+        return segments.indices.any { index ->
+            segments[index].text.isNotBlank() && draftSegments[index].text.isBlank()
+        }
+    }
+
 internal fun TranscriptUiState.hasUnsavedChangesInGroup(groupStartMs: Long): Boolean {
     if (!isEditingTranscript || editingTranscriptGroupStartMs != groupStartMs) return false
     if (draftSegments.size != segments.size) return false
+    val sectionMinutes = effectiveTranscriptSectionMinutes()
     return segments.indices.any { index ->
-        transcriptGroupStartMs(segments[index].startMs) == groupStartMs &&
+        transcriptGroupStartMs(segments[index].startMs, sectionMinutes) == groupStartMs &&
             segments[index] != draftSegments[index]
     }
 }
+
+internal fun TranscriptUiState.effectiveTranscriptSectionMinutes(): Int =
+    transcriptSectionMinutes?.coerceIn(1, 5)
+        ?: TranscriptGroupingRuntime.currentSectionMinutes.coerceIn(1, 5)
 
 internal fun List<WhisperSegment>.withUpdatedTranscriptText(
     index: Int,

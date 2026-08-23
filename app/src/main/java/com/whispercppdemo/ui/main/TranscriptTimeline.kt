@@ -55,6 +55,14 @@ internal fun isVirtualTimelineSegment(
     source.endMs > segment.startMs && source.startMs < segment.endMs
 }
 
+/** Returns the immutable Whisper text belonging to a visible timeline segment. */
+internal fun originalTranscriptText(
+    segment: WhisperSegment,
+    rawWhisperSegments: List<WhisperSegment>
+): String = rawWhisperSegments.firstOrNull { source ->
+    source.endMs > segment.startMs && source.startMs < segment.endMs
+}?.text.orEmpty()
+
 internal fun transcriptNumbers(
     timeline: List<WhisperSegment>,
     rawWhisperSegments: List<WhisperSegment>

@@ -50,16 +50,41 @@ class TranscriptEditingTest {
     }
 
     @Test
+    fun blankReplacementNeedsExplicitConfirmation() {
+        assertTrue(
+            TranscriptUiState(
+                segments = original,
+                isEditingTranscript = true,
+                draftSegments = original.withUpdatedTranscriptText(0, "  \n")
+            ).hasNewlyBlankTranscriptDraft
+        )
+        assertFalse(
+            TranscriptUiState(
+                segments = listOf(WhisperSegment(0L, 1_000L, "")),
+                isEditingTranscript = true,
+                draftSegments = listOf(WhisperSegment(0L, 1_000L, ""))
+            ).hasNewlyBlankTranscriptDraft
+        )
+    }
+
+    @Test
     fun groupChangesAreReportedOnlyForTheActiveGroup() {
         val state = TranscriptUiState(
-            segments = original,
+            segments = listOf(
+                WhisperSegment(0L, 1_000L, "A"),
+                WhisperSegment(61_000L, 62_000L, "B")
+            ),
+            transcriptSectionMinutes = 1,
             isEditingTranscript = true,
             editingTranscriptGroupStartMs = 0L,
-            draftSegments = original.withUpdatedTranscriptText(0, "Changed")
+            draftSegments = listOf(
+                WhisperSegment(0L, 1_000L, "Changed"),
+                WhisperSegment(61_000L, 62_000L, "B")
+            )
         )
 
         assertTrue(state.hasUnsavedChangesInGroup(0L))
-        assertFalse(state.hasUnsavedChangesInGroup(TRANSCRIPT_GROUP_DURATION_MS))
+        assertFalse(state.hasUnsavedChangesInGroup(60_000L))
     }
 
     @Test

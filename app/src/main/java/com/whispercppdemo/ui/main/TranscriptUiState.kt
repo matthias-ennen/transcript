@@ -90,6 +90,7 @@ data class TranscriptUiState(
     val diagnostics: List<String> = emptyList(),
     val rawWhisperSegments: List<WhisperSegment> = emptyList(),
     val segments: List<WhisperSegment> = emptyList(),
+    val transcriptSectionMinutes: Int? = null,
     val isEditingTranscript: Boolean = false,
     val editingTranscriptGroupStartMs: Long? = null,
     val draftSegments: List<WhisperSegment> = emptyList(),

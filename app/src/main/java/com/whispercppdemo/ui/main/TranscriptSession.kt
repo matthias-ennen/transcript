@@ -10,7 +10,12 @@ internal class TranscriptSession(
 ) {
     fun beginEditing(state: TranscriptUiState, groupStartMs: Long): TranscriptUiState? {
         if (state.isBusy || state.segments.isEmpty()) return null
-        if (state.segments.none { transcriptGroupStartMs(it.startMs) == groupStartMs }) return null
+        val sectionMinutes = state.effectiveTranscriptSectionMinutes()
+        TranscriptGroupingRuntime.use(sectionMinutes)
+        if (state.segments.none {
+                transcriptGroupStartMs(it.startMs, sectionMinutes) == groupStartMs
+            }
+        ) return null
         return state.copy(
             isEditingTranscript = true,
             editingTranscriptGroupStartMs = groupStartMs,
@@ -22,7 +27,8 @@ internal class TranscriptSession(
         if (!state.isEditingTranscript || state.isAiPostProcessing) return null
         val groupStartMs = state.editingTranscriptGroupStartMs ?: return null
         val segment = state.segments.getOrNull(index) ?: return null
-        if (transcriptGroupStartMs(segment.startMs) != groupStartMs) return null
+        val sectionMinutes = state.effectiveTranscriptSectionMinutes()
+        if (transcriptGroupStartMs(segment.startMs, sectionMinutes) != groupStartMs) return null
         return state.copy(draftSegments = state.draftSegments.withUpdatedTranscriptText(index, text))
     }
 
@@ -44,13 +50,16 @@ internal class TranscriptSession(
         return applyTranscriptGroupEdits(
             original = state.segments,
             draft = state.draftSegments,
-            groupStartMs = groupStartMs
+            groupStartMs = groupStartMs,
+            sectionMinutes = state.effectiveTranscriptSectionMinutes()
         )
     }
 
     fun persist(state: TranscriptUiState, displayedSegments: List<WhisperSegment>) {
         if (displayedSegments.isEmpty()) return
         val model = state.completedModel ?: return
+        val sectionMinutes = state.effectiveTranscriptSectionMinutes()
+        TranscriptGroupingRuntime.use(sectionMinutes)
         persistence.save(
             StoredTranscriptResult(
                 sourceUri = state.selectedAudio?.toString().orEmpty(),
@@ -61,17 +70,20 @@ internal class TranscriptSession(
                 savedAtEpochMs = System.currentTimeMillis(),
                 rawWhisperSegments = state.rawWhisperSegments,
                 displayedSegments = displayedSegments,
-                vadSummary = state.vadProcessingSummary
+                vadSummary = state.vadProcessingSummary,
+                sectionMinutes = sectionMinutes
             )
         )
     }
 
-    fun restoreWithoutSource(state: TranscriptUiState, stored: StoredTranscriptResult): TranscriptUiState =
-        state.copy(
+    fun restoreWithoutSource(state: TranscriptUiState, stored: StoredTranscriptResult): TranscriptUiState {
+        val sectionMinutes = TranscriptGroupingRuntime.use(stored.sectionMinutes)
+        return state.copy(
             selectedAudio = null,
             selectedFileName = stored.fileName,
             rawWhisperSegments = stored.rawWhisperSegments,
             segments = stored.displayedSegments,
+            transcriptSectionMinutes = sectionMinutes,
             detectedLanguage = stored.detectedLanguage,
             completedModel = WhisperModel.fromId(stored.modelId),
             transcriptionDurationSeconds = stored.transcriptionDurationSeconds,
@@ -80,4 +92,5 @@ internal class TranscriptSession(
                 "${stored.displayedSegments.count { it.text.isNotBlank() }} Textabschnitte.",
             cannaBotMode = CannaBotMode.IDLE
         )
+    }
 }

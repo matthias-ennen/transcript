@@ -20,6 +20,24 @@ class TranscriptionStatePresentationTest {
     }
 
     @Test
+    fun `completed state captures the Whisper section length for visible grouping`() {
+        val completed = TranscriptionState.Completed(
+            fileName = "interview.m4a",
+            model = WhisperModel.BASE,
+            segments = listOf(WhisperSegment(0L, 1_000L, "Text")),
+            detectedLanguage = "de",
+            transcriptionDurationSeconds = 2L
+        )
+
+        val presentation = TranscriptUiState(
+            whisperSettings = WhisperSettings(sectionMinutes = 2)
+        ).presentCompletedTranscription(completed)
+
+        assertEquals(2, presentation.state.transcriptSectionMinutes)
+        assertEquals(2, presentation.state.effectiveTranscriptSectionMinutes())
+    }
+
+    @Test
     fun `completed state reports missing model when automatic AI is enabled`() {
         val completed = TranscriptionState.Completed(
             fileName = "interview.m4a",

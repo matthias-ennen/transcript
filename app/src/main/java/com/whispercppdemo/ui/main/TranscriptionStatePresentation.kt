@@ -60,6 +60,8 @@ internal fun TranscriptUiState.presentCompletedTranscription(
         aiPostProcessingEnabled && automaticAiPostProcessingEnabled && selectedAiModelInstalled
     val automaticAiModelMissing = completed.segments.isNotEmpty() &&
         aiPostProcessingEnabled && automaticAiPostProcessingEnabled && !selectedAiModelInstalled
+    val capturedSectionMinutes = whisperSettings.sectionMinutes.coerceIn(1, 5)
+    TranscriptGroupingRuntime.use(capturedSectionMinutes)
     return CompletedTranscriptionPresentation(
         state = copy(
             isBusy = startsAutomaticAi,
@@ -69,6 +71,7 @@ internal fun TranscriptUiState.presentCompletedTranscription(
             activityDetail = null,
             rawWhisperSegments = completed.segments,
             segments = timelineSegments,
+            transcriptSectionMinutes = capturedSectionMinutes,
             isEditingTranscript = false,
             editingTranscriptGroupStartMs = null,
             draftSegments = emptyList(),
@@ -101,6 +104,7 @@ internal fun TranscriptUiState.presentCancelledTranscription(): TranscriptUiStat
     activityDetail = null,
     rawWhisperSegments = emptyList(),
     segments = emptyList(),
+    transcriptSectionMinutes = null,
     isEditingTranscript = false,
     editingTranscriptGroupStartMs = null,
     draftSegments = emptyList(),
@@ -125,6 +129,7 @@ internal fun TranscriptUiState.presentFailedTranscription(
     activityDetail = null,
     rawWhisperSegments = emptyList(),
     segments = failed.committedSegments,
+    transcriptSectionMinutes = null,
     isEditingTranscript = false,
     editingTranscriptGroupStartMs = null,
     draftSegments = emptyList(),

@@ -1,6 +1,8 @@
 package de.matthiasennen.transcript.transcription
 
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.ui.main.DEFAULT_TRANSCRIPT_GROUP_MINUTES
+import de.matthiasennen.transcript.ui.main.TranscriptGroupingRuntime
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
@@ -13,7 +15,7 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
 
 private const val RESULT_MAGIC = 0x54525253
-private const val RESULT_VERSION = 2
+private const val RESULT_VERSION = 3
 private const val MAX_RESULT_STRING_BYTES = 4 * 1024 * 1024
 private const val MAX_RESULT_FILE_BYTES = 64L * 1024L * 1024L
 private const val MAX_RESULT_SEGMENTS = 100_000
@@ -27,7 +29,8 @@ data class StoredTranscriptResult(
     val savedAtEpochMs: Long,
     val rawWhisperSegments: List<WhisperSegment>,
     val displayedSegments: List<WhisperSegment>,
-    val vadSummary: VadProcessingSummary? = null
+    val vadSummary: VadProcessingSummary? = null,
+    val sectionMinutes: Int = DEFAULT_TRANSCRIPT_GROUP_MINUTES
 )
 
 /** Atomically stores the one transcript currently shown on the main screen. */
@@ -53,6 +56,12 @@ class TranscriptResultStore(private val resultFile: File) {
             val savedAtEpochMs = input.readLong().coerceAtLeast(0L)
             val rawWhisperSegments = input.readSegments()
             val displayedSegments = input.readSegments()
+            val vadSummary = if (version >= 2) input.readVadSummary() else null
+            val sectionMinutes = if (version >= 3) {
+                input.readInt().coerceIn(1, 5)
+            } else {
+                DEFAULT_TRANSCRIPT_GROUP_MINUTES
+            }
             StoredTranscriptResult(
                 sourceUri = sourceUri,
                 fileName = fileName,
@@ -62,7 +71,8 @@ class TranscriptResultStore(private val resultFile: File) {
                 savedAtEpochMs = savedAtEpochMs,
                 rawWhisperSegments = rawWhisperSegments,
                 displayedSegments = displayedSegments,
-                vadSummary = if (version >= 2) input.readVadSummary() else null
+                vadSummary = vadSummary,
+                sectionMinutes = sectionMinutes
             )
         }
     }.getOrElse {
@@ -85,6 +95,7 @@ class TranscriptResultStore(private val resultFile: File) {
             output.writeSegments(result.rawWhisperSegments)
             output.writeSegments(result.displayedSegments)
             output.writeVadSummary(result.vadSummary)
+            output.writeInt(result.sectionMinutes.coerceIn(1, 5))
         }
         try {
             Files.move(
@@ -115,11 +126,19 @@ class TranscriptResultPersistence(private val store: TranscriptResultStore) : Au
         Thread(task, "transcript-result-writer").apply { isDaemon = true }
     }
 
+    init {
+        store.read()?.let { stored ->
+            TranscriptGroupingRuntime.use(stored.sectionMinutes)
+        } ?: TranscriptGroupingRuntime.reset()
+    }
+
     fun save(result: StoredTranscriptResult) {
+        TranscriptGroupingRuntime.use(result.sectionMinutes)
         executor.execute { store.write(result) }
     }
 
     fun clear() {
+        TranscriptGroupingRuntime.reset()
         executor.execute(store::clear)
     }
 
