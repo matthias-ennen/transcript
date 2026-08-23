@@ -6,7 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.io.DataOutputStream
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
 class TranscriptResultStoreTest {
@@ -47,6 +49,34 @@ class TranscriptResultStoreTest {
     }
 
     @Test
+    fun `version two result keeps legacy five minute grouping`() {
+        val directory = Files.createTempDirectory("transcript-result-v2").toFile()
+        try {
+            val file = File(directory, "current.bin")
+            DataOutputStream(file.outputStream().buffered()).use { output ->
+                output.writeInt(0x54525253)
+                output.writeInt(2)
+                output.writeLegacyString("content://audio/legacy")
+                output.writeLegacyString("alt.m4a")
+                output.writeLegacyString("base")
+                output.writeLegacyString("de")
+                output.writeLong(10L)
+                output.writeLong(123L)
+                output.writeLegacySegments(listOf(WhisperSegment(0L, 1_000L, "Original")))
+                output.writeLegacySegments(listOf(WhisperSegment(0L, 1_000L, "Bearbeitet")))
+                output.writeBoolean(false)
+            }
+
+            val restored = TranscriptResultStore(file).read()
+
+            assertEquals(5, restored?.sectionMinutes)
+            assertEquals("Bearbeitet", restored?.displayedSegments?.single()?.text)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `corrupt result is removed instead of restored`() {
         val directory = Files.createTempDirectory("transcript-result-corrupt").toFile()
         try {
@@ -70,5 +100,20 @@ class TranscriptResultStoreTest {
         } finally {
             directory.deleteRecursively()
         }
+    }
+}
+
+private fun DataOutputStream.writeLegacyString(value: String) {
+    val bytes = value.toByteArray(StandardCharsets.UTF_8)
+    writeInt(bytes.size)
+    write(bytes)
+}
+
+private fun DataOutputStream.writeLegacySegments(segments: List<WhisperSegment>) {
+    writeInt(segments.size)
+    segments.forEach { segment ->
+        writeLong(segment.startMs)
+        writeLong(segment.endMs)
+        writeLegacyString(segment.text)
     }
 }
