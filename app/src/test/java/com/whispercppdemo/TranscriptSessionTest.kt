@@ -19,6 +19,7 @@ class TranscriptSessionTest {
     fun `editing only changes the selected transcript group`() {
         val session = session()
         val state = TranscriptUiState(
+            transcriptSectionMinutes = 1,
             segments = listOf(
                 WhisperSegment(0L, 1_000L, "Erster Satz"),
                 WhisperSegment(1_000L, 2_000L, "Zweiter Satz"),
@@ -28,6 +29,7 @@ class TranscriptSessionTest {
 
         val editing = session.beginEditing(state, groupStartMs = 0L)!!
         val changed = session.updateDraft(editing, index = 1, text = "Korrigierter Satz")!!
+        assertNull(session.updateDraft(changed, index = 2, text = "Falsche Gruppe"))
         val applied = session.applyEdits(changed)!!
 
         assertEquals("Korrigierter Satz", applied[1].text)
@@ -38,6 +40,7 @@ class TranscriptSessionTest {
     fun `editing cannot start for an unknown group and cancellation clears its draft`() {
         val session = session()
         val state = TranscriptUiState(
+            transcriptSectionMinutes = 1,
             segments = listOf(WhisperSegment(0L, 1_000L, "Text"))
         )
 
