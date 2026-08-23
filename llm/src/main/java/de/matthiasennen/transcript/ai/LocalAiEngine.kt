@@ -146,6 +146,16 @@ class LocalAiEngine(
         return "{\"result\":\"\"}"
     }
 
+    /**
+     * Returns and clears the native correction trace accumulated since the
+     * previous call. The trace contains technical sizes/status only; transcript
+     * text itself is not persisted by the native layer.
+     */
+    fun consumeCorrectionDiagnostics(): List<String> {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        return LocalAiNative.consumeCorrectionDiagnostics(handle)?.toList().orEmpty()
+    }
+
     override fun close() {
         val activeHandle = handle
         handle = 0L
@@ -220,6 +230,7 @@ internal object LocalAiNative {
         prompt: String,
         maximumOutputTokens: Int
     ): String?
+    external fun consumeCorrectionDiagnostics(handle: Long): Array<String>?
     external fun runtimeReport(handle: Long): Array<String>?
     external fun runtimeCapabilities(nativeLibrarySearchPath: String): String
     external fun inspectModelLayerCount(modelPath: String, nativeLibrarySearchPath: String): Int
