@@ -32,12 +32,14 @@ class TranscriptResultStoreTest {
                     skippedDurationMs = 3_000L,
                     speechRegionCount = 3,
                     reason = "klare Pausen"
-                )
+                ),
+                sectionMinutes = 2
             )
 
             TranscriptResultStore(file).write(original)
 
             assertEquals(original, TranscriptResultStore(file).read())
+            assertEquals(2, TranscriptResultStore(file).read()?.sectionMinutes)
             assertFalse(File(directory, "current.bin.tmp").exists())
         } finally {
             directory.deleteRecursively()
