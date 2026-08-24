@@ -59,6 +59,90 @@ class TranscriptionChunkingTest {
     }
 
     @Test
+    fun `whisper timestamps are clamped to the decoded overlap window`() {
+        val first = planTranscriptionSections(
+            durationMs = 300_000L,
+            sectionDurationMs = 120_000L
+        ).first()
+
+        val absolute = selectAbsoluteSegments(
+            localSegments = listOf(
+                WhisperSegment(116_000L, 123_000L, "Grenzsatz")
+            ),
+            section = first,
+            totalDurationMs = 300_000L
+        )
+
+        assertEquals(
+            listOf(WhisperSegment(116_000L, 122_000L, "Grenzsatz")),
+            absolute
+        )
+    }
+
+    @Test
+    fun `different overlap segmentation at two minute seam is stitched once`() {
+        val sections = planTranscriptionSections(
+            durationMs = 300_000L,
+            sectionDurationMs = 120_000L
+        )
+        val first = selectAbsoluteSegments(
+            localSegments = listOf(
+                WhisperSegment(116_000L, 123_000L, "Vorheriger Grenzsatz")
+            ),
+            section = sections[0],
+            totalDurationMs = 300_000L
+        )
+        val second = selectAbsoluteSegments(
+            localSegments = listOf(
+                WhisperSegment(0L, 4_120L, "Alternative Grenzsegmentierung"),
+                WhisperSegment(4_120L, 6_120L, "Danach")
+            ),
+            section = sections[1],
+            totalDurationMs = 300_000L
+        )
+
+        val stitched = mergeCommittedSegments(first, second)
+
+        assertEquals(
+            listOf(
+                WhisperSegment(116_000L, 122_000L, "Vorheriger Grenzsatz"),
+                WhisperSegment(122_120L, 124_120L, "Danach")
+            ),
+            stitched
+        )
+        assertTrue(stitched.zipWithNext().all { (left, right) -> left.endMs <= right.startMs })
+    }
+
+    @Test
+    fun `partial cross chunk overlap is split without dropping distinct text`() {
+        val committed = listOf(
+            WhisperSegment(118_000L, 121_000L, "Linker Satz")
+        )
+        val incoming = listOf(
+            WhisperSegment(119_000L, 124_000L, "Rechter Satz")
+        )
+
+        val stitched = mergeCommittedSegments(committed, incoming)
+
+        assertEquals(2, stitched.size)
+        assertEquals("Linker Satz", stitched[0].text)
+        assertEquals("Rechter Satz", stitched[1].text)
+        assertEquals(stitched[0].endMs, stitched[1].startMs)
+        assertEquals(120_000L, stitched[0].endMs)
+    }
+
+    @Test
+    fun `real repeated text is preserved when time ranges do not overlap`() {
+        val stitched = mergeCommittedSegments(
+            committed = listOf(WhisperSegment(117_000L, 119_000L, "Noch einmal")),
+            next = listOf(WhisperSegment(121_000L, 123_000L, "Noch einmal"))
+        )
+
+        assertEquals(2, stitched.size)
+        assertEquals(listOf("Noch einmal", "Noch einmal"), stitched.map { it.text })
+    }
+
+    @Test
     fun `timestamps beyond one hour are shifted to absolute recording time`() {
         val section = planTranscriptionSections(longDurationMs)[12]
 

@@ -63,27 +63,23 @@ internal fun originalTranscriptText(
     source.endMs > segment.startMs && source.startMs < segment.endMs
 }?.text.orEmpty()
 
+/**
+ * Returns the user-visible fragment number for every card in the continuous timeline.
+ *
+ * The displayed number is deliberately independent from the raw Whisper list: generated gap
+ * cards are real editable/playable timeline fragments too and therefore participate in the same
+ * 1..N numbering. Raw Whisper segments stay separately available for provenance/original-text
+ * lookup and must not be inferred from the displayed fragment number.
+ */
 internal fun transcriptNumbers(
     timeline: List<WhisperSegment>,
     rawWhisperSegments: List<WhisperSegment>
 ): List<Int?> {
-    val raw = rawWhisperSegments.withIndex().sortedBy { it.value.startMs }
-    var firstCandidate = 0
-    return timeline.map { segment ->
-        while (firstCandidate < raw.size && raw[firstCandidate].value.endMs <= segment.startMs) {
-            firstCandidate++
-        }
-        var candidate = firstCandidate
-        var number: Int? = null
-        while (candidate < raw.size && raw[candidate].value.startMs < segment.endMs) {
-            if (raw[candidate].value.endMs > segment.startMs) {
-                number = raw[candidate].index + 1
-                break
-            }
-            candidate++
-        }
-        number
-    }
+    // Keep the raw list as an explicit parameter because callers conceptually operate on the
+    // combined timeline + raw-source pair. Its contents no longer determine display numbering.
+    @Suppress("UNUSED_VARIABLE")
+    val rawSource = rawWhisperSegments
+    return timeline.indices.map { index -> index + 1 }
 }
 
 internal fun restoreManualTimelineText(
@@ -91,17 +87,17 @@ internal fun restoreManualTimelineText(
     previouslyDisplayed: List<WhisperSegment>,
     rawWhisperSegments: List<WhisperSegment>
 ): List<WhisperSegment> {
-    val previousNumbers = transcriptNumbers(previouslyDisplayed, rawWhisperSegments)
-    val manualTextByRange = previouslyDisplayed.mapIndexedNotNull { index, previous ->
-        if (previousNumbers[index] == null && previous.text.isNotBlank()) {
+    val manualTextByRange = previouslyDisplayed.mapNotNull { previous ->
+        if (isVirtualTimelineSegment(previous, rawWhisperSegments) && previous.text.isNotBlank()) {
             (previous.startMs to previous.endMs) to previous.text
         } else {
             null
         }
     }.toMap()
-    val timelineNumbers = transcriptNumbers(timeline, rawWhisperSegments)
-    return timeline.mapIndexed { index, segment ->
-        if (timelineNumbers[index] != null) segment else {
+    return timeline.map { segment ->
+        if (!isVirtualTimelineSegment(segment, rawWhisperSegments)) {
+            segment
+        } else {
             manualTextByRange[segment.startMs to segment.endMs]
                 ?.let { segment.copy(text = it) }
                 ?: segment
