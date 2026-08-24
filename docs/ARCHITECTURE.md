@@ -1,318 +1,330 @@
-# Architektur von Simple Transcript
+# Architektur von Transcript
 
 ## Zielbild
 
-Simple Transcript ist eine lokale Android-App. Audio- und Videodateien werden
-auf dem Gerät dekodiert und mit `whisper.cpp` transkribiert. Optional glättet
-Qwen3.5 das Ergebnis lokal über `llama.cpp`. Nur Modelldownloads benötigen eine
-Internetverbindung.
+Transcript ist eine lokale Android-App. Audio- und Videodateien werden auf dem
+Gerät dekodiert und mit `whisper.cpp` transkribiert. Optional korrigiert ein
+lokales Qwen3.5-Modell das Ergebnis über `llama.cpp`. Nur Modelldownloads
+benötigen eine Internetverbindung.
+
+Die Architektur trennt bewusst vier Ebenen:
+
+1. Audioaufnahme und Medienvorbereitung,
+2. Whisper-Transkription und Chunk-Stitching,
+3. sichtbare/editierbare Transcript-Timeline,
+4. optionale lokale KI-Nachbearbeitung.
 
 ## Module
 
 - `app`: Oberfläche, Medienauswahl, Aufnahme, Wiedergabe, Modelldownload,
-  Statussteuerung und Export
+  Statussteuerung, Timeline, Bearbeitung, Export und Android-Services
 - `lib`: Kotlin-/JNI-Brücke zu `whisper.cpp` und nativer CMake-Build
-- `llm`: kleine Kotlin-/JNI-Brücke zu `llama.cpp` für lokale GGUF-Inferenz
-- `third_party/whisper.cpp`: als Git-Submodul eingebundene Inferenzbibliothek
-- `third_party/llama.cpp`: fest gepinnte lokale LLM-Inferenzbibliothek
+- `llm`: Kotlin-/JNI-Brücke zu `llama.cpp` für lokale GGUF-Inferenz
+- `third_party/whisper.cpp`: gepinnte Whisper-Inferenzbibliothek
+- `third_party/llama.cpp`: gepinnte lokale LLM-Inferenzbibliothek
 
-## Datenfluss
+## Whisper-Datenfluss
 
-1. `MainScreenViewModel` hält den zentralen `TranscriptUiState`.
-   `RecordingService` besitzt die laufende Mikrofonaufnahme unabhängig von der
-   Activity, hält dafür einen begrenzten Partial-Wakelock und veröffentlicht
-   Pegel, Laufzeit, Abschluss oder Fehler über `RecordingCoordinator`.
-2. Die Transkriptionsvorbereitung verdichtet jeden dekodierten PCM-Abschnitt
-   unmittelbar auf 180 Spitzenwerte und schreibt beides atomar. Beim bloßen
-   Wiederöffnen werden zuerst diese Cachewerte gelesen; ein aktiver Worker wird
-   niemals durch einen zweiten UI-Decoder konkurriert.
-3. `TranscriptionService` läuft im privaten Android-Prozess `:transcription`,
-   plant Ein- bis Fünf-Minuten-Hauptabschnitte mit je zwei Sekunden Kontextüberlappung
-   und arbeitet unabhängig von Activity und UI-HWUI.
-4. `AndroidAudioDecoder` dekodiert ausschließlich den aktuellen Bereich und
-   resampelt MediaCodec-Ausgabepuffer unmittelbar auf 16-kHz-Mono-PCM. PCM in
-   der ursprünglichen Abtastrate wird nicht gesammelt. Ein fester
-   Fünf-Sekunden-Sicherheitsspielraum fängt Codec-Vorlauf, Padding und
-   Zeitstempelrundungen auf; vor Whisper wird der Abschnitt wieder exakt auf
-   seine Sollgröße begrenzt. Ein monotoner Stillstandswächter begrenzt sowohl
-   Leerlaufzeit als auch Leerlaufzyklen. Bei Stillstand werden Codec und
-   Extractor vollständig freigegeben und genau einmal neu erzeugt.
-5. Decoder und Whisper-Modell werden strikt zweiphasig verwendet: Alle Abschnitte
-   werden zuerst einzeln dekodiert, als PCM16LE gesichert und aus dem RAM
-   freigegeben. Danach wird `WhisperContext` genau einmal geladen und über alle
-   vorbereiteten Abschnitte wiederverwendet. Bei automatischer Auswahl wird eine anhand
-   eines brauchbaren Textabschnitts erkannte Sprache für die folgenden
-   Abschnitte festgehalten.
-6. `TranscriptionChunking` verschiebt lokale Segmentzeiten auf die absolute
-   Audioposition und ordnet Überlappungssegmente über ihren Mittelpunkt genau
-   einem Hauptbereich zu.
-7. `TranscriptionCheckpointStore` schreibt Segmente, Sprache und nächste
-   Position nach jedem fertigen Abschnitt atomar in den privaten App-Speicher.
-8. `TranscriptResultStore` hält nach Abschluss das unveränderte Whisper-Original
-   und den zuletzt übernommenen Anzeige-/Exportstand getrennt in einer atomar
-   ersetzten Datei. `TranscriptResultPersistence` serialisiert Schreibvorgänge
-   außerhalb des Compose-Hauptthreads.
-9. `TranscriptionCoordinator` übergibt Fortschritt, Diagnose und Teilergebnisse
-   prozessübergreifend über eine atomare Statusdatei und ein paketinternes
-   Wecksignal an jedes aktive `MainScreenViewModel`. Große Audio- oder
-   Modellobjekte werden nie über Binder oder Intent transportiert. Ab Android 11
-   erkennt die UI einen nativen Worker-Absturz über `ApplicationExitInfo`, bleibt
-   selbst geöffnet und bietet einen gesicherten Zwischenstand zur Fortsetzung an.
-   Der Worker schreibt unabhängig vom nativen Fortschrittscallback alle zwei
-   Sekunden ein atomares Lebenszeichen mit Auftrags-ID, PID, Phase, Backend,
-   Abschnitt sowie letztem echten Fortschrittszeitpunkt. Ein Watchdog fordert
-   nach drei Minuten ohne echten Fortschritt über den
-   separaten Prozess `:control` genau einen CPU-Neustart an. Der gleiche Prozess
-   setzt einen Benutzerabbruch notfalls per Prozessende durch, ohne einen bereits
-   beendeten Worker durch den Benachrichtigungs-Knopf neu zu starten.
-10. `TranscriptTimeline` ergänzt aus Whisper-Original und Audiodauer einmalig
-   Anfangs-, Zwischen- und Endpausen. Lücken ab einer Sekunde erhalten leere,
-   editierbare Pausensegmente; kürzere technische Abstände werden nur für die
-   Anzeige an Nachbarsegmente angelegt. Die separaten Whisper-Rohzeitstempel
-   bleiben unverändert.
-11. Die Ergebnisansicht stellt jedes Whisper-Segment mit Zeitstempel und
-   GUI-Nummer dar. Pausenbereiche besitzen keine Whisper-Nummer.
-   Eine 52 × 32 dp große, abgerundete Nummernkapsel hält auch drei- und
-   vierstellige Nummern vollständig sichtbar.
-12. Der Korrekturmodus hält Änderungen zunächst in `draftSegments`. Erst
-   **Änderungen übernehmen** ersetzt die Ergebnis-Segmente; Zeitstempel und
-   Reihenfolge bleiben erhalten.
-13. `AiPostProcessingService` lädt nach vollständiger Freigabe des Whisper-
-    Kontexts genau ein ausgewähltes Qwen3.5-GGUF. Stabile Segmentmarker sichern
-    Anzahl, Reihenfolge und Zeitstempel. Automatische Läufe übernehmen validierte
-    Gruppen direkt; manuelle Läufe schreiben nur in `draftSegments`.
-14. `TranscriptExport` schreibt die vollständige Zeitleiste einschließlich
-    Herkunft in JSON. Leere Pausen werden aus TXT und SRT herausgefiltert;
-    manuell befüllte Pausen erscheinen regulär in allen Formaten.
-15. `TranscriptShare` schreibt die ausgewählten Formate in einen privaten
-    Cache-Unterordner. Ein nicht exportierter `FileProvider` gibt ausschließlich
-    diese Dateien mit zeitlich begrenztem Leserecht an das Android-Teilen-Menü
-    weiter. Ein Format verwendet `ACTION_SEND`, mehrere Formate verwenden
-    `ACTION_SEND_MULTIPLE`.
-16. Lange Transkripte blenden abhängig von Segmentanzahl und Scrollposition eine
-    schwebende Navigationskapsel ein. Sie verwendet denselben Scrollzustand wie
-    die gesamte Hauptansicht und führt deshalb bis an den Anfang der App zurück.
+1. `MainScreenViewModel` hält den zentralen UI-Zustand.
+2. `RecordingService` besitzt eine laufende Mikrofonaufnahme unabhängig von der
+   Activity und veröffentlicht Laufzeit, Pegel, Abschluss und Fehler.
+3. Medien werden zu 16-kHz-Mono-PCM vorbereitet. Lange Aufnahmen werden nicht als
+   vollständiger PCM-Strom im Arbeitsspeicher gehalten.
+4. `TranscriptionService` läuft in einem privaten Android-Prozess
+   `:transcription` und plant Hauptabschnitte von einer bis fünf Minuten.
+5. Jeder Hauptabschnitt erhält an seinen Grenzen zwei Sekunden zusätzlichen
+   Audiokontext. Dieser Overlap verhindert harte Schnitte in Wörtern und Sätzen.
+6. Decoder und Whisper-Modell werden zweiphasig verwendet: Zuerst werden die
+   benötigten PCM-Abschnitte vorbereitet und freigegeben, danach wird der
+   Whisper-Kontext einmal geladen und über die vorbereiteten Abschnitte
+   wiederverwendet.
+7. Bei automatischer Spracherkennung wird eine brauchbar erkannte Sprache für die
+   folgenden Abschnitte festgehalten.
+8. Nach jedem Abschnitt werden Segmentergebnis, erkannte Sprache und nächste
+   Position atomar als Wiederaufnahmepunkt gesichert.
 
-## GUI-Sprache
+## Chunk-Grenzen und Stitching
 
-`AppLanguage` hält die von der Whisper-Transkriptionssprache unabhängige
-GUI-Sprachauswahl. Der Umschalter in der Kopfleiste bietet Deutsch und Englisch
-an; `AppLanguagePreference` speichert die Auswahl dauerhaft. Die vollständige
-Umstellung aller sichtbaren Texte auf Android-Stringressourcen erfolgt in einem
-separaten Lokalisierungsschritt.
+Die zwei Sekunden Kontextüberlappung sind Teil der gewünschten Architektur und
+werden nicht entfernt. Entscheidend ist die nachgelagerte Bereinigung.
 
-Die von Whisper erkannte Transkriptionssprache bleibt davon unabhängig. Die
-Ergebnisansicht löst sämtliche Whisper-Sprachcodes über
-`WhisperLanguageNames` in vollständige deutsche Bezeichnungen auf. Unbekannte
-Codes werden weiterhin sichtbar mit ihrem Code ausgegeben.
+`TranscriptionChunking` verschiebt die lokalen Whisper-Zeitstempel auf die
+absolute Position in der vollständigen Aufnahme. Zeitstempel werden dabei auf das
+tatsächlich dekodierte Fenster begrenzt, damit Whisper keine sichtbaren Segmente
+außerhalb des verfügbaren Audios erzeugen kann.
 
-## Status- und Animationssteuerung
+Für jedes Segment entscheidet zunächst die zeitliche Mitte, welchem Hauptabschnitt
+es gehört. Danach führt `mergeCommittedSegments()` die bereits übernommenen
+Segmente mit dem Ergebnis des nächsten Chunks zusammen.
 
-Die sichtbare Statuszeile verbindet Text und CannaBot. Dauerzustände sind
-`IDLE`, `WAITING`, `REVIEW` und `RUNNING`. Kurze Ereignisse verwenden
-`RUNNING_RIGHT`, `RUNNING_LEFT`, `JUMPING`, `WAVING` und `FAILED`. Eine
-Erfolgssequenz spielt Springen und Winken nacheinander ab und kehrt anschließend
-zum Grundzustand zurück. Fortschrittsereignisse werden nur an festgelegten
-Meilensteinen ausgelöst.
+Da Whisper denselben Audiobereich im Overlap je nach Chunk-Kontext unterschiedlich
+segmentieren kann, gilt beim Stitching:
 
-`LiveStatusLine` reserviert unabhängig vom aktuellen Text mindestens zwei
-Textzeilen und richtet Sprite sowie Text oben aus. Ein optionaler Seitenstatus
-wird in derselben pulsierenden Wechselanzeige dargestellt; dadurch benötigt die
-Leistungsseite keine zweite Statusausgabe.
+- nahezu vollständig ineinander liegende grenzüberschreitende Alternativen werden
+  als zwei Darstellungen desselben Audiobereichs behandelt und bereinigt,
+- die bereits stabile Darstellung wird bevorzugt, wenn beide Varianten denselben
+  Bereich weitgehend repräsentieren,
+- verbleibende echte Teilüberlappungen werden an einer gemeinsamen zeitlichen
+  Grenze getrennt,
+- identischer Text an **nicht überlappenden** Zeitstellen bleibt erhalten und wird
+  nicht als Duplikat entfernt.
 
-Die Seite `WhisperSettingsScreen` bearbeitet eine gemeinsame, in
-`WhisperSettingsPreferences` gespeicherte Konfiguration. Die Sprachauswahl ist
-identisch mit der Hauptseite. Threads, CPU-/GPU-Wahl, Vorgabetext,
-Dekodierungsverfahren, Suchbreite, Temperatur, Kontext, Segmentierung,
-Zeitstempelberechnung und Halluzinationsschwellen werden validiert und über
-`WhisperConfiguration` bis in `whisper_full_params` durchgereicht. Die vorhandene
-sequenzielle Abschnittsplanung verwendet ausschließlich ganze Dauern von einer bis
-fünf Minuten, standardmäßig drei. VAD besitzt eine eigene Einstellungsseite; die vier erweiterten
-Einstellungsseiten sind zusätzlich über den anklickbaren Seitentitel erreichbar.
-Das optionale Silero-VAD-Modell wird getrennt unter `vad-models/` verwaltet. Nur
-ein vollständig installiertes Modell wird zusammen mit den persistierten
-VAD-Parametern bis in `whisper_full_params` durchgereicht. **Aus** deaktiviert
-VAD, **Ein** aktiviert es und **Automatisch** führt vor dem Laden von Whisper
-eine abschnittsweise Analyse der bereits vorbereiteten PCM-Dateien mit dem echten Silero-Kontext durch.
-Die vollständige Audiospur bleibt dabei bewusst die Entscheidungsgrundlage;
-eine Stichprobenanalyse wird wegen möglicher Fehlgewichtung nicht verwendet.
-Eine zweite Dekodierung für VAD findet nicht statt.
-Sie wandelt die von `whisper.cpp` gelieferten VAD-Zeitstempel an der JNI-Grenze
-explizit von Zentisekunden in Millisekunden um und verwirft ungültige Paare.
-Anschließend aggregiert sie erkannte Sprachbereiche, Sprach-/Pausenanteil, die
-längste Pause und Zerstückelung über Abschnittsgrenzen. VAD wird nur bei
-eindeutigen längeren Ruhephasen und stabilen Sprachbereichen verwendet. Ein hoher
-Pausenanteil allein ist kein Ablehnungsgrund; Grenzfälle mit zu wenig oder stark
-fragmentierter Sprache bleiben vollständig bei Whisper. Die Diagnose nennt auch
-die analysierte Samplezahl und die davon erkannten Sprach-Samples. Die
-integrierte `whisper.cpp`-Pipeline entfernt Nicht-Sprachbereiche für die
-Berechnung und bildet Segmentzeitstempel anschließend wieder auf die
-Originalaudiodatei ab. Bei fehlendem Modell oder VAD-Laufzeitfehler bleibt
-beziehungsweise wechselt die Verarbeitung auf Whisper ohne VAD; parallele
-Modellkontexte werden zum Schutz des Arbeitsspeichers nicht erzeugt.
+Die Logik arbeitet ausschließlich mit den tatsächlichen `mainStartMs`,
+`mainEndMs`, `decodeStartMs` und `decodeEndMs`. Sie ist deshalb unabhängig davon,
+ob der Benutzer beispielsweise 1-, 2-, 3-, 4- oder 5-Minuten-Abschnitte gewählt
+hat.
 
-Der Teilen-Dialog besitzt eine eigene, nur beim Öffnen gestartete Sequenz aus
-Rechtslauf, Sprung und Winken. Kurze Idle-Pausen trennen die Gesten; anschließend
-bleibt CannaBot ruhig im Idle-Zustand.
+## Persistenz
 
-Im Zustand `REVIEW` ergänzt `TranscriptionTimeEstimate` die unveränderte
-Bereitschaftsmeldung um eine kalibrierte Laufzeitschätzung. Die Statuszeile
-wechselt am 20-Prozent-Punkt der Pulsation zwischen beiden Texten. Pro
-Whisper-Modell liegt ein zentraler, anhand der Messreihen auf dem Zielgerät
-festgelegter Echtzeitfaktor vor.
+`TranscriptionCheckpointStore` hält den Zwischenstand eines aktiven oder
+unterbrochenen Whisper-Laufs.
 
-Während einer Transkription liefert `TranscriptionService` die verbindliche
-Startzeit. `MainScreenViewModel` berechnet daraus in einem eigenen Sekundentakt
-die sichtbare Laufzeit. Dieser Takt ist unabhängig von Decoder- und
-Whisper-Fortschrittsmeldungen und wird nach einem erneuten Öffnen anhand der
-Startzeit wieder aufgenommen. Neben der echten Laufzeit bleibt die vor dem Lauf
-berechnete Gesamtschätzung sichtbar.
+`TranscriptResultStore` hält nach Abschluss zwei getrennte Ebenen:
 
-Native Fortschrittscallbacks werden für Compose auf höchstens zwei Aktualisierungen
-pro Sekunde und für Android-Benachrichtigungen auf höchstens eine Aktualisierung
-in zwei Sekunden verdichtet. Identische Zustände werden nicht erneut publiziert.
-Während Whisper- oder Qwen-Inferenz bleibt das CannaBot-Sprite auf einem ruhenden
-Frame, damit UI-HWUI und Compute-Vulkan nicht fortlaufend um die Mali-GPU konkurrieren.
+- das unveränderte Whisper-Original,
+- den zuletzt übernommenen Anzeige-/Exportstand.
+
+Schreibvorgänge werden atomar ausgeführt. Eine neue Datei, Aufnahme oder bewusst
+neu gestartete Transkription ersetzt den bisherigen Ergebnisstand.
+
+## Transcript-Timeline
+
+Whisper liefert fachlich nur erkannte Segmente mit Startzeit, Endzeit und Text.
+Die in der Oberfläche sichtbare Timeline ist eine eigene App-Ebene.
+
+`TranscriptTimeline` ergänzt das Whisper-Ergebnis einmalig zu einer lückenlosen
+Zeitleiste vom Dateianfang bis Dateiende. Größere Lücken werden als leere,
+abspielbare und editierbare Pausensegmente eingefügt. Das betrifft auch eine
+mögliche Pause am Anfang oder Ende der Audiodatei.
+
+Kurze technische Zwischenräume können für die Anzeige an Nachbarsegmente angelegt
+werden; die separaten Whisper-Rohzeitstempel bleiben unverändert erhalten.
+
+### Fragmentnummern
+
+Die sichtbare Nummer einer Timeline-Karte ist **keine Whisper-ID**. Whisper liefert
+in der von der App verwendeten Segmentstruktur keine stabile fortlaufende ID.
+Frühere App-Versionen leiteten eine Anzeigezahl aus der Position des passenden
+Whisper-Rohsegments ab. Dadurch blieben künstliche Pausensegmente unnummeriert
+und mehrere sichtbare überlappende Karten konnten dieselbe Zahl erhalten.
+
+Die aktuelle Architektur trennt deshalb Herkunft und Anzeige konsequent:
+
+- jede sichtbare Timeline-Karte erhält nach ihrer Position eine fortlaufende
+  Fragmentnummer von `1` bis `N`,
+- virtuelle Pausen werden genauso nummeriert wie Whisper-basierte Karten,
+- die Nummer ist ausschließlich eine benutzerorientierte Fragmentnummer,
+- die interne Herkunft bleibt separat erhalten und wird **nicht** aus der
+  sichtbaren Nummer abgeleitet.
+
+Damit kann beispielsweise ein ursprüngliches Whisper-Rohsegment an Position 34
+in der fertigen Timeline als Fragment 40 erscheinen, wenn davor sechs virtuelle
+Pausen eingefügt wurden. Das ist beabsichtigt.
+
+## Bearbeitung und Herkunft
+
+Zeitstempel sind im Korrekturmodus schreibgeschützt. Änderungen werden zunächst
+in einem Entwurfszustand gehalten und erst nach bewusster Übernahme zum gültigen
+Anzeige-/Exportstand.
+
+Die App unterscheidet intern weiterhin mindestens folgende Herkunftssituationen:
+
+- unverändertes Whisper-Original,
+- manuell bearbeitet,
+- durch KI bearbeitet,
+- virtuelle Pause ohne Whisper-Text.
+
+Eine virtuelle Pause bleibt intern auch dann als ursprünglich künstlich erzeugter
+Timeline-Bereich erkennbar, wenn sie eine normale sichtbare Fragmentnummer besitzt.
+Diese technische Unterscheidung darf deshalb nicht von `null` oder einer
+Anzeigenummer abhängen.
+
+Leere virtuelle Pausen werden im JSON mit `origin: "virtual_pause"` erhalten,
+aber aus TXT und SRT herausgefiltert. Wird dort manuell Text eingetragen, wird der
+Bereich als manueller Inhalt behandelt und erscheint regulär in den Textformaten.
+
+## Lokale Qwen3.5-Nachbearbeitung
+
+`AiPostProcessingService` darf erst starten, nachdem der Whisper-Kontext vollständig
+freigegeben wurde. Dadurch konkurrieren Whisper und Qwen nicht gleichzeitig um
+denselben großen Arbeitsspeicherbereich.
+
+Das gewählte Qwen3.5-GGUF wird lokal über `llama.cpp` geladen. Zeitstempel,
+Fragmentreihenfolge und sichtbare IDs bleiben Eigentum der App; das Modell darf
+nur Textkorrekturen vorschlagen.
+
+Die globale Einstellung **KI-Nachbearbeitungsstrategie** bietet zwei Pfade.
+Beide verwenden dieselbe inhaltliche Kernanweisung: erkennbare
+Transkriptionsfehler sowie Rechtschreibung, Grammatik und Zeichensetzung anhand
+des Gesprächskontexts korrigieren, Bedeutung und Sprechstil bewahren, nichts
+hinzuerfinden und keine vorhandenen Informationen weglassen.
+
+### Strategie: Segmentweise
+
+Die vollständige Zeitgruppe wird einmal als gemeinsamer Gesprächskontext in die
+native Modellsitzung aufgenommen. Danach folgen die Zielsegmente nacheinander als
+kleine Aufgaben.
+
+Wichtig: Qwen3.5 besitzt eine hybride/recurrente Architektur. Der frühere Ansatz,
+den nativen Speicher nach jedem Segment auf einen gemeinsamen KV-Präfixzustand
+zurückzusetzen, ist deshalb verworfen. `llama_memory_seq_rm` kann diesen Zustand
+für Qwen3.5 nicht zuverlässig partiell zurückspulen.
+
+Der aktuelle Pfad arbeitet **append-only**:
+
+1. gemeinsamen Gruppenkontext einmal laden,
+2. Zielsegment 1 anhängen und Antwort erzeugen,
+3. Zielsegment 2 an denselben fortlaufenden Sitzungszustand anhängen,
+4. weitere Zielsegmente entsprechend fortsetzen,
+5. keinen früheren nativen Modellzustand wiederherstellen.
+
+Die App ordnet jede Antwort dem gerade bearbeiteten Zielsegment zu und prüft das
+strukturierte Ergebnis. Die native Ausgabe wird auf das erwartete Ergebnisformat
+begrenzt.
+
+### Strategie: Abschnittsweise
+
+Die vollständige Zeitgruppe wird in einer einzigen Korrekturaufgabe verarbeitet.
+Das Modell soll nur die geänderten Fragment-IDs mit dem jeweils korrigierten Text
+zurückgeben.
+
+Die App wertet die strukturierte Antwort selbst aus:
+
+- unbekannte IDs werden verworfen,
+- doppelte IDs werden nicht blind übernommen,
+- leere Ergebnisse werden verworfen,
+- nicht genannte Fragmente bleiben unverändert,
+- nur tatsächlich vom Ausgangstext abweichende gültige Ergebnisse werden als
+  Änderungen gezählt.
+
+Damit existieren zwei funktionsfähige Pfade, die unabhängig voneinander auf
+identischem Transkriptmaterial getestet werden können.
+
+## KI-Machbarkeitsstand
+
+Die Machbarkeit ist nachgewiesen: Segmentweise und abschnittsweise
+Qwen3.5-Nachbearbeitung funktionieren auf dem Android-Zielgerät end-to-end und
+können reale Korrekturen erzeugen.
+
+Die aktuell dominante Einschränkung ist die Laufzeit. Die bisherige
+Standard-CPU-Ausführung erreicht nur einen kleinen Bruchteil der Tokenraten, die
+auf vergleichbarer mobiler Hardware grundsätzlich möglich erscheinen. Deshalb
+ist die Performanceoptimierung ein eigenes Arbeitspaket und bewusst vor die
+vollständige Produktivierung der KI-Nachbearbeitung gelegt.
+
+## KI-Diagnose
+
+Die dauerhafte Seite `AiDiagnosticsScreen` stellt zwei getrennte Zwecke bereit:
+
+- freien lokalen Qwen-Testbereich,
+- vollständige technische Diagnose der App-/Modellsitzung.
+
+Die Diagnose erfasst unter anderem:
+
+- gewähltes Modell und Backend,
+- Kontextgröße, Batch und Micro-Batch,
+- Eingabe- und Ausgabetoken,
+- Modellladezeit,
+- Promptverarbeitungszeit,
+- Zeit bis zum ersten Antworttoken,
+- Generierungszeit und Gesamtdauer,
+- Parser-/Validierungsentscheidungen,
+- native Fehler und Backend-Rückfälle,
+- aktuell verwendete KI-Nachbearbeitungsstrategie.
+
+Die ausführliche Diagnose ist bewusst dauerhaft Teil der App, damit spätere
+Performance- und Qualitätsprobleme auf dem echten Gerät nachvollzogen werden
+können.
+
+## KI-Leistung und Hardware
+
+Die Unterseite **KI-Leistung und Hardware** hält für jedes Qwen-Modell ein eigenes
+Leistungsprofil. Sie ist die technische Grundlage für das nächste
+Optimierungsarbeitspaket.
+
+Untersucht werden können unter anderem:
+
+- Kontextgröße,
+- `n_batch` und `n_ubatch`,
+- getrennte Prompt- und Ausgabethreads,
+- CPU-Affinität und Priorität,
+- Standard-CPU-Kernel,
+- KleidiAI-kompatible Pfade,
+- Vulkan/GPU-Offload und gemischte Pfade,
+- Flash-Attention beziehungsweise verfügbare Backendoptionen,
+- thermischer Zustand und Speicherreserve.
+
+Entscheidend ist nicht, ob eine Option in der GUI gewählt wurde, sondern welcher
+Backendpfad von der nativen Laufzeit **tatsächlich** benutzt wurde. Benchmarks und
+Diagnose müssen diesen realen Pfad ausweisen.
+
+KleidiAI ist quantisierungsabhängig. Q4_0/Q8_0 können von passenden
+Weight-Packing-/Kernelpfaden profitieren; Q4_K_M ist nicht automatisch über
+denselben optimierten Pfad beschleunigt. Vulkan ist ebenfalls nicht pauschal
+schneller als CPU und muss deshalb real gemessen werden.
+
+## Hardware- und Speicherschutz
+
+Vor lokaler KI-Ausführung prüfen RAM-Reserve, maximale Speichernutzung und
+thermische Grenzwerte den Start. Bei hoher Wärme kann die effektive Konfiguration
+reduziert werden; an der Abbruchgrenze wird die Berechnung kontrolliert beendet.
+
+Ein Vulkan-/GPU-Laufzeitfehler wird als echter Fehler protokolliert. Ist ein
+CPU-Rückfall aktiviert, darf der Auftrag anschließend einmal vollständig über CPU
+wiederholt werden.
+
+## Status und Nebenprozesse
+
+Modelldownload, Mikrofonaufnahme und Transkription besitzen getrennte
+Foreground-Services beziehungsweise Koordinatoren. Die Transkription läuft in
+einem privaten Nebenprozess, damit ein nativer Workerfehler nicht zwangsläufig die
+sichtbare Activity beendet.
+
+Große Audio- oder Modellobjekte werden nicht über Binder/Intent transportiert.
+Fortschritt, Status und Wiederaufnahmepunkte werden über kleine persistierte oder
+prozessübergreifend geeignete Zustände vermittelt.
+
+Während rechenintensiver Whisper- oder Qwen-Inferenz bleibt die sichtbare
+CannaBot-Animation bewusst ruhig, damit UI-HWUI und Compute-Backend nicht unnötig
+um dieselbe GPU konkurrieren.
+
+## Export
+
+`TranscriptExport` verwendet den übernommenen Timeline-Zustand.
+
+- JSON enthält die vollständige Timeline einschließlich Herkunft.
+- Leere virtuelle Pausen bleiben im JSON erhalten.
+- TXT und SRT lassen leere Pausen weg.
+- manuell befüllte Pausen werden als normaler Textinhalt exportiert.
+
+`TranscriptShare` legt ausgewählte Exportdateien in einem privaten Cachebereich ab
+und gibt sie über `FileProvider` mit zeitlich begrenztem Leserecht an das
+Android-Teilen-Menü weiter.
 
 ## Modelle und Speicherung
 
-Der zentrale `WhisperModel`-Katalog enthält fünf mehrsprachige Qualitätsstufen
-von **Sehr schnell** (`ggml-tiny.bin`) bis **Maximale Qualität**. Sämtliche
-Modelle durchlaufen denselben Auswahl-, Download-, Prüfsummen-, Speicher-,
-Lösch- und Transkriptionspfad; Tiny benötigt keine Sonderbehandlung.
-
-Modelle, Aufnahmen und Transkriptionszwischenstände liegen im privaten
-App-Speicher. Modelldownload, Mikrofonaufnahme und Transkription besitzen getrennte
-Foreground-Services, getrennte Zustandskoordinatoren und getrennte
-Fehlerbehandlung. Downloads können über `.part`-Dateien fortgesetzt werden und
-werden vor der Aktivierung per SHA-256 geprüft. Modelle werden nicht in die APK
-aufgenommen. Ein bewusster Transkriptionsabbruch und eine Prozessunterbrechung
-lassen den kompatiblen Zwischenstand für die Wiederaufnahme bestehen.
+Der zentrale Whisper-Modellkatalog enthält fünf mehrsprachige Qualitätsstufen von
+Tiny bis Large V3. Modelle werden einzeln heruntergeladen, per SHA-256 geprüft und
+im privaten App-Speicher gehalten.
 
 Der getrennte `AiModel`-Katalog enthält Qwen3.5 mit 0,8B, 2B und 4B Parametern.
-Auswahl, Download, SHA-256-Prüfung und Löschen liegen ausschließlich in den
-Einstellungen. `AiPostProcessingService` speichert seinen Gruppenfortschritt
-atomar und verwendet nie gleichzeitig Speicher mit einem aktiven Whisper-Kontext.
-`android:allowBackup=false` und vollständige Ausschlussregeln deaktivieren
-Cloud-Backup sowie Gerätetransfer für alle App-Daten. Modelle, Aufnahmen,
-Zwischenstände, fertige Transkripte und Einstellungen verlassen diesen Speicher
-nicht über Android Backup.
+Auswahl, Download, Prüfung und Löschen liegen in den Einstellungen.
 
-Eine KI-Korrektursitzung dekodiert die vollständige aktive Fünf-Minuten-Gruppe
-einmal als schreibgeschützten Whisper-Rohkontext. Für jedes Segment wird der native
-KV-Kontext auf genau diesen gemeinsamen Ausgangszustand zurückgesetzt und nur die
-kleine Zielaufgabe ergänzt. So werden Kontextkosten nicht wiederholt und frühere
-Modellantworten können die nächste Prüfung nicht beeinflussen.
+Cloud-Backup und Android-Gerätetransfer sind für App-Daten deaktiviert. Modelle,
+Aufnahmen, Zwischenstände, fertige Transkripte und Einstellungen sollen den
+privaten App-Speicher nicht über das Android-Backup verlassen.
 
-Der `llama.cpp`-Grammatik-Sampler erzwingt für Korrekturen genau ein JSON-Feld
-`result`; Segmentnummern und Zeitstempel bleiben vollständig in der App. Die erste
-Erprobungsstufe verwirft inhaltlich nur leere beziehungsweise nicht auslesbare
-Ergebnisse und behält dann das Original. Längen-, Ähnlichkeits- und
-Fremdkontextprüfungen sind bewusst noch nicht aktiviert. Der freie KI-Testbereich
-verwendet einen getrennten, unbeschränkten Antwortpfad und übernimmt keine
-Korrekturregeln.
+## Aktuelle Entwicklungsreihenfolge
 
-`AiDiagnosticsScreen` ist eine dauerhafte Unterseite, die ausschließlich aus dem
-KI-Bereich der Einstellungen geöffnet wird. Sie verwendet dieselbe
-`LiveStatusLine`-Komponente wie die Hauptseite, enthält den freien KI-Testbereich
-und zeigt das allgemeine Diagnoseprotokoll am Seitenende. Testbereich und
-Protokoll sind dadurch nicht mehr Teil der Hauptseite. Der kapselförmige
-**Verlassen**-Button führt zurück zu den Einstellungen.
-Die schreibgeschützte Antwortbox ist dauerhaft oberhalb der Eingabebox sichtbar
-und begrenzt lange Antworten auf einen intern scrollbar dargestellten Bereich.
+Nach Abschluss der KI-Machbarkeit und der Reparatur der Whisper-Chunk-Grenzen ist
+die aktuelle technische Reihenfolge:
 
-`AiPerformanceScreen` ist die zweite dauerhafte KI-Unterseite. Sie verwendet
-ebenfalls `LiveStatusLine` und gliedert Modellprofil, Kontext/Speicher,
-CPU-Threadpool, KleidiAI, Vulkan, Wärmeschutz, Benchmark und Datenaustausch in
-aufklappbare Karten. `AiPerformancePreferences` persistiert genau ein
-versioniertes `LocalAiConfiguration` je `AiModel`; ältere zusätzliche
-Arbeitsprofile werden bei der Migration entfernt. Der Laufzeitschlüssel dieser Konfiguration
-ist Bestandteil des Sitzungsschlüssels. Eine Änderung an nativen Parametern
-schließt deshalb eine unpassende bestehende Sitzung, bevor sie erneut geladen
-wird.
-`AiPerformanceUiPreferences` speichert davon getrennt den Auf-/Zu-Zustand jeder
-der sechs Einstellungskarten. Die Profil-/Hardwarekarte bleibt dauerhaft offen.
+1. **KI-Antwortzeiten analysieren und deutlich verkürzen**
+2. **KI-Nachbearbeitung produktionsreif fertigstellen**
+3. **Whisper-Wiederholungs-/Halluzinationsschleifen bei langen Dateien härten**
+4. anschließend weitere Roadmap-Arbeitspakete
 
-Alle nativen Textausgaben durchlaufen vor `JNIEnv::NewString` die zentrale,
-fehlertolerante UTF-8-zu-UTF-16-Konvertierung. Gültige Mehrbytezeichen werden über
-zusammengefügte Tokenstücke hinweg dekodiert; ungültige oder unvollständige
-Sequenzen werden durch U+FFFD ersetzt und können den Android-Prozess nicht mehr
-über `NewStringUTF` abbrechen.
-
-`AiHardwareProbe` verbindet Android-Speicher-, Akku-, Lade- und Wärmedaten mit
-den von JNI gemeldeten nativen Fähigkeiten und Vulkan-Geräten. RAM- und
-Wärmegrenzen werden vor dem Modellstart im App-Prozess geprüft und während
-längerer Korrekturläufe erneut kontrolliert. `AiPerformanceBenchmark` hält die
-Messläufe getrennt vom normalen Korrekturpfad; Aufwärmläufe fließen nicht in die
-Mittelwerte ein.
-
-Für ARM64 baut das `llm`-Modul mehrere dynamisch geladene Android-CPU-Varianten:
-portables ARMv8, Dot Product, FP16/INT8 und SVE2. `llama.cpp` bewertet sie anhand
-der realen HWCAP/HWCAP2-Fähigkeiten und lädt nur die beste kompatible Variante
-aus dem Native-Verzeichnis der App. Jede beschleunigte Variante enthält die
-zugehörigen KleidiAI-Kernel; der portable Rückfallpfad bleibt erhalten. Erst
-innerhalb der ausgewählten Variante schaltet `use_extra_bufts` zwischen
-Standard-CPU und KleidiAI-Weight-Packing um. Das Vulkan-Backend wird aus
-demselben kontrollierten Suchpfad geladen. Threadzahl, Affinitätsmaske,
-Priorität und Polling werden über die Funktionsschnittstelle des tatsächlich
-geladenen CPU-Backends gesetzt; Kontext, Batchgrößen, Flash Attention, KQV- und
-Operationsauslagerung gehen direkt in die llama.cpp-Kontextparameter ein.
-x86/x86_64 bleiben portable statische CPU-Builds.
-
-`CPU` und `AUTO` werden sowohl an der Kotlin-Grenze als auch erneut in JNI
-vollständig Vulkan-frei normalisiert: keine GPU-Schichten, kein GPU-Gerät und
-keine KQV-/Operationsauslagerung. Vulkan/Hybrid sind ausdrückliche Profile.
-Native Inferenz-Exceptions werden an den JNI-Einstiegspunkten in typisierte
-Fehler übersetzt. Bei `VK_ERROR_DEVICE_LOST` verwirft der Sitzungsmanager die
-Vulkan-Sitzung und wiederholt den Auftrag höchstens einmal mit einer vollständig
-CPU-basierten Konfiguration.
-
-Die Diagnose fragt Merkmale, Variantennamen und KleidiAI-Verfügbarkeit direkt
-über die geladene Backend-Registry ab. Sie unterscheidet verpacktes Backend,
-Gerätenutzbarkeit und Sitzungsaktivierung. Native Lade- oder JNI-Fehler bleiben
-als Fehlertext sichtbar. Da der gepinnte KleidiAI-Pfad Gewichtstypen Q4_0 und
-Q8_0 unterstützt, aktiviert die Laufzeit KleidiAI nur für entsprechend
-quantisierte Modelle; Q4_K_M fällt kontrolliert auf Standard-CPU zurück.
-
-`AiEngineSessionManager` hält genau eine `LocalAiEngine` im App-Prozess. Der erste
-Auftrag lädt das in den Einstellungen ausgewählte Modell; weitere freie Tests und
-Korrekturläufe verwenden dieselbe Modellabbildung. Die KI-Diagnose hält die nicht
-sichtbaren Chatnachrichten ausschließlich im Arbeitsspeicher. Für jede neue Frage
-rendert die eingebettete Chatvorlage die vollständige Unterhaltung und die native
-Schicht baut daraus einen frischen `llama_context` auf. Nach der Antwort wird dieser
-Rechenkontext freigegeben; Modell und Nachrichten bleiben erhalten. Dadurch kann
-die Antwort frühere Aussagen berücksichtigen, ohne einen KV-Cache samt
-Tokenpositionen über mehrere Aufrufe synchronisieren zu müssen. Es wird kein
-Verlauf persistiert. Ein Modellwechsel, das Löschen des geladenen Modells,
-**Unterhaltung zurücksetzen** oder das Ende des App-Prozesses schließt die flüchtige
-Gesprächssitzung.
-
-Reicht das feste Kontextfenster nicht für eine weitere Anfrage, bleibt die bisherige
-Unterhaltung unverändert und die Oberfläche fordert zu einem bewussten Zurücksetzen
-auf. Ein unbemerkter automatischer Kontextverlust findet nicht statt. Die
-automatisierte Transkriptkorrektur behält vorerst ihren getrennten Gruppenpfad; die
-spätere abschnittsweise Unterhaltung ist in
-`docs/_work/ai-diagnostics-conversation-plan.md` festgehalten.
-
-Die JNI-Schicht rendert die im GGUF eingebettete Qwen-Chatvorlage über die offizielle
-`llama.cpp`-Jinja-Anbindung mit `enable_thinking=false`. `/no_think` wird nicht in
-Benutzer- oder Korrekturprompts geschrieben. Freie Testläufe liefern zusätzlich
-native Messwerte für Prompt-Tokens, Promptverarbeitung, erstes Antwort-Token,
-Antworterzeugung, Ausgabetokens und Beendigungsgrund. Strukturierte Korrekturen
-enden unmittelbar nach dem geschlossenen JSON-Objekt.
-
-Das `lib`-Modul baut `whisper.cpp` mit `GGML_VULKAN=ON`. Vor der Kontextanlage
-fragt JNI die registrierten GGML-Geräte ab. Nur ein tatsächlich vorhandenes GPU-
-oder iGPU-Gerät aktiviert den GPU-Pfad; ein fehlendes Gerät oder eine gescheiterte
-GPU-Initialisierung führt zu genau einem sichtbaren CPU-Rückfall. Jeder Whisper-
-und Silero-Kontext besitzt einen seriellen Executor, der beim Freigeben zusammen
-mit dem nativen Kontext idempotent geschlossen wird.
-
-## Build und Veröffentlichung
-
-`.github/workflows/build-apk.yml` führt die JVM-Unit-Tests aus und baut getrennt
-eine dauerhaft signierte Debug-APK, eine signierte Release-APK und ein signiertes
-Release-AAB. Der Workflow prüft Signaturen, nicht debuggable Release-Metadaten,
-deaktiviertes Backup sowie die KleidiAI- und Whisper-Vulkan-Native-Payloads und
-lädt Debug- und Release-Artefakte getrennt hoch. Die Signierdaten werden
-ausschließlich aus geschützten Repository-Secrets gelesen.
+Die Performancearbeit soll zuerst klären, welches reale Potenzial CPU,
+KleidiAI, Vulkan und gemischte Backends auf dem Zielgerät besitzen. Erst danach
+wird der endgültige Umfang der produktiven automatischen KI-Nachbearbeitung
+festgelegt.
