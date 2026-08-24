@@ -16,6 +16,7 @@ import com.whispercpp.whisper.WhisperSegment
 import de.matthiasennen.transcript.MainActivity
 import de.matthiasennen.transcript.R
 import de.matthiasennen.transcript.download.TranscriptNotifications
+import de.matthiasennen.transcript.ui.main.TranscriptGroupingRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +37,8 @@ private const val ACTION_PRELOAD_MODEL = "de.matthiasennen.transcript.PRELOAD_AI
 private const val EXTRA_MODEL_ID = "model_id"
 private const val EXTRA_TEST_PROMPT = "test_prompt"
 private const val REQUEST_FILE_NAME = "active-ai-postprocessing.bin"
-private const val TRANSCRIPT_GROUP_DURATION_MS = 5L * 60L * 1_000L
+private const val MAX_DIAGNOSTIC_ENTRIES = 120
+private const val MAX_TERMINAL_DIAGNOSTIC_BLOCKS = 10
 
 class AiPostProcessingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -320,6 +322,7 @@ class AiPostProcessingService : Service() {
         val startedAt = SystemClock.elapsedRealtime()
         val model = AiModel.fromId(initialRequest.modelId)
         val originalSegments = initialRequest.segments
+        val strategy = AiPostProcessingStrategyPreferences(applicationContext).load()
         try {
             val modelFile = File(File(filesDir, "ai-models"), model.fileName)
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
@@ -328,6 +331,12 @@ class AiPostProcessingService : Service() {
             val configuration = guardedConfiguration(modelFile, model)
             activeConfiguration = configuration
             addDiagnostic("Whisper-Speicher wurde freigegeben.")
+            addDiagnostic("KI-Nachbearbeitungsstrategie: ${strategy.displayLabel}.")
+            addDiagnostic(
+                "KI-Laufzeit · ctx=${configuration.contextSize} · batch=${configuration.batchSize} · " +
+                    "ubatch=${configuration.microBatchSize} · Prompt-Threads=${configuration.promptThreads} · " +
+                    "Ausgabe-Threads=${configuration.generationThreads}."
+            )
             addDiagnostic(
                 if (AiEngineSessionManager.isLoaded(model, modelFile, configuration)) {
                     "${model.modelLabel} ist bereits im Arbeitsspeicher."
@@ -344,26 +353,92 @@ class AiPostProcessingService : Service() {
                         "${model.modelLabel} ist nach ${sessionInfo.modelLoadMs} ms bereit und bleibt im RAM."
                     }
                 )
+                val runtimeReport = engine.runtimeReport()
+                addDiagnostic(
+                    "Backend angefordert: ${runtimeReport.requestedBackend} · aktiv: ${runtimeReport.activeBackend} · ${runtimeReport.activeCpuBackend}."
+                )
                 addDiagnostic("Thinking ist über die Qwen-Chatvorlage technisch deaktiviert.")
                 var correctedSegments = initialRequest.segments
-                val groups = targetGroups(initialRequest)
+
+                addDiagnostic(
+                    "Kotlin A1 · Gruppierung startet · Modus=${initialRequest.mode} · Abschnitt=${initialRequest.sectionMinutes} min · " +
+                        "groupStartMs=${initialRequest.groupStartMs ?: -1L} · Segmente=${initialRequest.segments.size}."
+                )
+                val groups = try {
+                    aiPostProcessingGroups(
+                        segments = initialRequest.segments,
+                        mode = initialRequest.mode,
+                        groupStartMs = initialRequest.groupStartMs,
+                        sectionMinutes = initialRequest.sectionMinutes
+                    )
+                } catch (throwable: Throwable) {
+                    addThrowableDiagnostic("Kotlin A1 Gruppierung", throwable)
+                    throw throwable
+                }
+                addDiagnostic(
+                    "Kotlin A2 · Gruppierung beendet · Gruppen=${groups.size} · " +
+                        "Segmentzahlen=${groups.joinToString(prefix = "[", postfix = "]") { it.size.toString() }}."
+                )
                 check(groups.isNotEmpty()) { "Für die KI-Nachbearbeitung wurde kein Text gefunden." }
                 var checkedSegments = 0
                 var appliedCorrections = 0
                 var rejectedCorrections = 0
                 var latestTrace: AiCorrectionTrace? = null
+                var contextPreparationMs = 0L
+                val segmentDurationsMs = mutableListOf<Long>()
                 val totalSegments = groups.sumOf(List<Int>::size)
+                addDiagnostic("Kotlin A3 · Gesamtzahl Zielsegmente=$totalSegments.")
 
                 groups.forEachIndexed { groupIndex, indexes ->
                     if (groupIndex < initialRequest.nextGroupIndex) return@forEachIndexed
-                    ensureContinues()
+                    addDiagnostic(
+                        "Kotlin B1 · Gruppe ${groupIndex + 1}/${groups.size} betreten · Indizes=" +
+                            indexes.joinToString(prefix = "[", postfix = "]")
+                    )
+                    addDiagnostic("Kotlin B2 · Laufzeit-/Wärmeschutzprüfung startet.")
+                    try {
+                        ensureContinues()
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin B2 Laufzeit-/Wärmeschutz", throwable)
+                        throw throwable
+                    }
+                    addDiagnostic("Kotlin B3 · Laufzeit-/Wärmeschutzprüfung erfolgreich.")
+
+                    check(indexes.isNotEmpty()) { "AI_GROUP_EMPTY: Die ausgewählte KI-Gruppe enthält keine Segmentindizes." }
+                    check(indexes.all { it in correctedSegments.indices }) {
+                        "AI_GROUP_INDEX_INVALID: Segmentindex außerhalb 0..${correctedSegments.lastIndex}: ${indexes.joinToString()}"
+                    }
+                    addDiagnostic("Kotlin B4 · Segmentindizes validiert · Transkriptgröße=${correctedSegments.size}.")
+
                     val rangeStartMs = correctedSegments[indexes.first()].startMs
                     val rangeEndMs = correctedSegments[indexes.last()].endMs
-                    val indexed = indexes.map { index ->
-                        IndexedTranscriptSegment(index, correctedSegments[index])
+                    addDiagnostic("Kotlin B5 · Zeitbereich gelesen · $rangeStartMs–$rangeEndMs ms.")
+
+                    val indexed = try {
+                        indexes.map { index -> IndexedTranscriptSegment(index, correctedSegments[index]) }
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin B6 IndexedTranscriptSegment", throwable)
+                        throw throwable
                     }
+                    addDiagnostic("Kotlin B6 · IndexedTranscriptSegment-Liste erzeugt · ${indexed.size} Einträge.")
+
                     val label = "${formatClock(rangeStartMs)}–${formatClock(rangeEndMs)}"
-                    addDiagnostic("Bereich $label: gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen.")
+                    addDiagnostic("Kotlin B7 · buildCorrectionContext startet · Bereich $label.")
+                    val correctionContext = try {
+                        buildCorrectionContext(indexed)
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin B7 buildCorrectionContext", throwable)
+                        throw throwable
+                    }
+                    addDiagnostic(
+                        "Kotlin B8 · buildCorrectionContext beendet · ${correctionContext.length} Zeichen."
+                    )
+                    addDiagnostic(
+                        "Bereich $label (${initialRequest.sectionMinutes} min): gemeinsamer Kontext mit ${indexes.size} Segmenten wird einmal geladen."
+                    )
+                    addDiagnostic(
+                        "Kontextauftrag erzeugt · ${correctionContext.length} Zeichen · Übergabe an Qwen/llama.cpp startet."
+                    )
                     publishRunning(
                         request = initialRequest,
                         model = model,
@@ -377,50 +452,152 @@ class AiPostProcessingService : Service() {
                         rejectedCorrections = rejectedCorrections,
                         latestTrace = latestTrace
                     )
-                    engine.prepareCorrectionContext(buildCorrectionContext(indexed))
-                    addDiagnostic("Gemeinsamer Kontext bereit. Zielsegmente werden einzeln geprüft.")
+                    addDiagnostic("Kotlin C1 · Native prepareCorrectionContext startet.")
+                    val contextStartedAt = SystemClock.elapsedRealtime()
+                    try {
+                        engine.prepareCorrectionContext(correctionContext)
+                    } catch (throwable: Throwable) {
+                        addThrowableDiagnostic("Kotlin C1 Native prepareCorrectionContext", throwable)
+                        throw throwable
+                    } finally {
+                        appendNativeCorrectionDiagnostics(engine)
+                    }
+                    val currentContextMs =
+                        (SystemClock.elapsedRealtime() - contextStartedAt).coerceAtLeast(0L)
+                    contextPreparationMs += currentContextMs
+                    addDiagnostic(
+                        "Gemeinsamer Kontext bereit · $currentContextMs ms. Zielsegmente werden einzeln geprüft."
+                    )
 
-                    indexes.forEach { index ->
-                        ensureContinues()
-                        val target = IndexedTranscriptSegment(index, correctedSegments[index])
-                        val response = engine.correctSegment(
-                            prompt = buildCorrectionTarget(target),
-                            maximumOutputTokens = maximumCorrectionTokens(target.segment.text)
-                        )
-                        val parsed = parseCorrectionResult(response, target.segment.text)
-                        if (parsed.changed) {
-                            correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
-                            appliedCorrections++
-                        }
-                        if (parsed.retainedOriginal) rejectedCorrections++
-                        checkedSegments++
-                        latestTrace = AiCorrectionTrace(
-                            segmentNumber = index + 1,
-                            originalText = target.segment.text,
-                            rawResponse = response,
-                            resultText = parsed.text,
-                            decision = when {
-                                parsed.retainedOriginal -> "Leeres oder nicht lesbares Ergebnis: Original beibehalten."
-                                parsed.changed -> "Nicht leeres Ergebnis ohne weitere Inhaltsprüfung als Vorschlag übernommen."
-                                else -> "Nicht leeres Ergebnis angenommen; Text blieb unverändert."
+                    when (strategy) {
+                        AiPostProcessingStrategy.SEGMENTWISE -> {
+                        indexes.forEach { index ->
+                            ensureContinues()
+                            val target = IndexedTranscriptSegment(index, correctedSegments[index])
+                            val targetPrompt = buildCorrectionTarget(target)
+                            val outputLimit = maximumCorrectionTokens(target.segment.text)
+                            addDiagnostic(
+                                "Segment ${index + 1}: Zielauftrag ${targetPrompt.length} Zeichen · Antwortlimit $outputLimit Tokens."
+                            )
+                            val segmentStartedAt = SystemClock.elapsedRealtime()
+                            val response = try {
+                                engine.correctSegment(
+                                    prompt = targetPrompt,
+                                    maximumOutputTokens = outputLimit
+                                )
+                            } finally {
+                                appendNativeCorrectionDiagnostics(engine)
                             }
-                        )
-                        addDiagnostic(
-                            "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag übernommen" else "unverändert"}."
-                        )
-                        publishRunning(
-                            request = initialRequest,
-                            model = model,
-                            groupNumber = checkedSegments,
-                            groupCount = totalSegments,
-                            correctedSegments = correctedSegments,
-                            status = "KI-Nachbearbeitung läuft …",
-                            activity = "$checkedSegments von $totalSegments Segmenten geprüft, $appliedCorrections Korrekturen erkannt.",
-                            checkedSegments = checkedSegments,
-                            proposedCorrections = appliedCorrections,
-                            rejectedCorrections = rejectedCorrections,
-                            latestTrace = latestTrace
-                        )
+                            val parsed = parseCorrectionResult(response, target.segment.text)
+                            val segmentMs =
+                                (SystemClock.elapsedRealtime() - segmentStartedAt).coerceAtLeast(0L)
+                            segmentDurationsMs += segmentMs
+                            addDiagnostic(
+                                "Segment ${index + 1}: rohe KI-Antwort · ${diagnosticResponse(response)}"
+                            )
+                            val parserDecision = when {
+                                parsed.retainedOriginal -> "nicht lesbar/leer → Original beibehalten"
+                                parsed.changed -> "JSON lesbar → geänderten Vorschlag erkannt"
+                                else -> "JSON lesbar → Text unverändert"
+                            }
+                            addDiagnostic("Segment ${index + 1}: Parser · $parserDecision.")
+                            if (parsed.changed) {
+                                correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
+                                appliedCorrections++
+                            }
+                            if (parsed.retainedOriginal) rejectedCorrections++
+                            checkedSegments++
+                            latestTrace = AiCorrectionTrace(
+                                segmentNumber = index + 1,
+                                originalText = target.segment.text,
+                                rawResponse = response,
+                                resultText = parsed.text,
+                                decision = when {
+                                    parsed.retainedOriginal -> "Leeres oder nicht lesbares Ergebnis: Original beibehalten."
+                                    parsed.changed -> "Nicht leeres Ergebnis ohne weitere Inhaltsprüfung als Vorschlag übernommen."
+                                    else -> "Nicht leeres Ergebnis angenommen; Text blieb unverändert."
+                                }
+                            )
+                            addDiagnostic(
+                                "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag erkannt" else "unverändert"} · $segmentMs ms."
+                            )
+                            publishRunning(
+                                request = initialRequest,
+                                model = model,
+                                groupNumber = checkedSegments,
+                                groupCount = totalSegments,
+                                correctedSegments = correctedSegments,
+                                status = "KI-Nachbearbeitung läuft …",
+                                activity = "$checkedSegments von $totalSegments Segmenten geprüft, $appliedCorrections Korrekturen erkannt.",
+                                checkedSegments = checkedSegments,
+                                proposedCorrections = appliedCorrections,
+                                rejectedCorrections = rejectedCorrections,
+                                latestTrace = latestTrace
+                            )
+                        }
+                        }
+                        AiPostProcessingStrategy.SECTIONWISE -> {
+                            ensureContinues()
+                            val sectionPrompt = buildSectionCorrectionTarget(indexed)
+                            val outputLimit = maximumSectionCorrectionTokens(indexed)
+                            addDiagnostic(
+                                "Abschnittsweise: ein Gruppenauftrag · ${sectionPrompt.length} Zeichen · Antwortlimit $outputLimit Tokens."
+                            )
+                            val sectionStartedAt = SystemClock.elapsedRealtime()
+                            val response = try {
+                                engine.correctSegment(
+                                    prompt = sectionPrompt,
+                                    maximumOutputTokens = outputLimit
+                                )
+                            } finally {
+                                appendNativeCorrectionDiagnostics(engine)
+                            }
+                            val sectionMs =
+                                (SystemClock.elapsedRealtime() - sectionStartedAt).coerceAtLeast(0L)
+                            segmentDurationsMs += sectionMs
+                            addDiagnostic(
+                                "Abschnittsweise: rohe KI-Antwort · ${diagnosticResponse(response)}"
+                            )
+                            val parsedSection = parseSectionCorrectionResult(response, indexed)
+                            rejectedCorrections += parsedSection.rejectedEntries
+                            checkedSegments += indexes.size
+                            var returnedChanges = 0
+                            parsedSection.changes.forEach { change ->
+                                val previousText = correctedSegments[change.index].text
+                                if (change.text != previousText) {
+                                    correctedSegments = applyCorrection(
+                                        correctedSegments,
+                                        change.index,
+                                        change.text
+                                    )
+                                    appliedCorrections++
+                                    returnedChanges++
+                                    latestTrace = AiCorrectionTrace(
+                                        segmentNumber = change.index + 1,
+                                        originalText = previousText,
+                                        rawResponse = response,
+                                        resultText = change.text,
+                                        decision = "Abschnittsweise KI-Änderung erkannt"
+                                    )
+                                }
+                            }
+                            addDiagnostic(
+                                "Abschnittsweise: ${parsedSection.changes.size} gültige Einträge · " +
+                                    "$returnedChanges tatsächliche Änderungen · ${parsedSection.rejectedEntries} verworfen · $sectionMs ms."
+                            )
+                            publishRunning(
+                                request = initialRequest,
+                                model = model,
+                                groupNumber = groupIndex + 1,
+                                groupCount = groups.size,
+                                correctedSegments = correctedSegments,
+                                checkedSegments = checkedSegments,
+                                totalSegments = totalSegments,
+                                appliedCorrections = appliedCorrections,
+                                rejectedCorrections = rejectedCorrections,
+                                latestTrace = latestTrace
+                            )
+                        }
                     }
                     requestStore.write(
                         initialRequest.copy(
@@ -431,8 +608,20 @@ class AiPostProcessingService : Service() {
                 }
 
                 requestStore.clear()
-                val durationSeconds = ((SystemClock.elapsedRealtime() - startedAt) / 1_000L)
-                    .coerceAtLeast(0L)
+                val durationMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+                val durationSeconds = durationMs / 1_000L
+                val averageSegmentMs = if (segmentDurationsMs.isEmpty()) {
+                    0L
+                } else {
+                    segmentDurationsMs.sum() / segmentDurationsMs.size
+                }
+                val maximumSegmentMs = segmentDurationsMs.maxOrNull() ?: 0L
+                addDiagnostic(
+                    "Machbarkeit: Strategie ${strategy.displayLabel} · Kontext $contextPreparationMs ms · KI-Aufrufe Ø $averageSegmentMs ms / max $maximumSegmentMs ms."
+                )
+                addDiagnostic(
+                    "Gruppe gesamt $durationMs ms · $checkedSegments Segmente · $appliedCorrections Änderungen · $rejectedCorrections verworfen."
+                )
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.Completed(
                         mode = initialRequest.mode,
@@ -440,7 +629,7 @@ class AiPostProcessingService : Service() {
                         segments = correctedSegments,
                         groupStartMs = initialRequest.groupStartMs,
                         durationSeconds = durationSeconds,
-                        diagnostics = diagnostics.toList(),
+                        diagnostics = diagnosticSnapshotForUi(),
                         checkedSegments = checkedSegments,
                         appliedCorrections = appliedCorrections,
                         rejectedCorrections = rejectedCorrections,
@@ -449,14 +638,17 @@ class AiPostProcessingService : Service() {
                 )
                 finishWithNotification(
                     "KI-Nachbearbeitung abgeschlossen",
-                    "$checkedSegments Segmente geprüft, $appliedCorrections Korrekturen übernommen."
+                    "$checkedSegments Segmente in ${durationSeconds} s geprüft, $appliedCorrections Korrekturen erkannt."
                 )
             }
         } catch (throwable: Throwable) {
             if (!stopRequested.get() && throwable !is CancellationException) {
                 requestStore.clear()
-                val message = throwable.localizedMessage ?: "Die KI-Nachbearbeitung ist fehlgeschlagen."
-                addDiagnostic("Fehler: $message")
+                addThrowableDiagnostic("Kotlin-Abbruch runProcessing", throwable)
+                val detail = throwable.message
+                    ?: throwable.localizedMessage
+                    ?: "<ohne Fehlermeldung>"
+                val message = "${throwable.javaClass.name}: $detail"
                 AiPostProcessingCoordinator.update(
                     AiPostProcessingState.Failed(
                         mode = initialRequest.mode,
@@ -464,7 +656,7 @@ class AiPostProcessingService : Service() {
                         message = message,
                         originalSegments = originalSegments,
                         groupStartMs = initialRequest.groupStartMs,
-                        diagnostics = diagnostics.toList()
+                        diagnostics = diagnosticSnapshotForUi()
                     )
                 )
                 finishWithNotification("KI-Nachbearbeitung fehlgeschlagen", message)
@@ -472,23 +664,63 @@ class AiPostProcessingService : Service() {
         }
     }
 
-    private fun targetGroups(request: AiPostProcessingRequest): List<List<Int>> {
-        val all = request.segments.indices
-            .filter { request.segments[it].text.isNotBlank() }
-            .groupBy { request.segments[it].startMs / TRANSCRIPT_GROUP_DURATION_MS }
-            .toSortedMap()
-            .values
-            .map(List<Int>::toList)
-        return when (request.mode) {
-            AiPostProcessingMode.AUTOMATIC -> all
-            AiPostProcessingMode.MANUAL_GROUP -> {
-                val expected = requireNotNull(request.groupStartMs) / TRANSCRIPT_GROUP_DURATION_MS
-                all.filter { indexes ->
-                    indexes.isNotEmpty() &&
-                        request.segments[indexes.first()].startMs / TRANSCRIPT_GROUP_DURATION_MS == expected
-                }
-            }
+    private fun appendNativeCorrectionDiagnostics(engine: LocalAiEngine) {
+        engine.consumeCorrectionDiagnostics().forEach { nativeMessage ->
+            addDiagnostic("Native · $nativeMessage")
         }
+    }
+
+    private fun addThrowableDiagnostic(stage: String, throwable: Throwable) {
+        val detail = throwable.message
+            ?: throwable.localizedMessage
+            ?: "<ohne Fehlermeldung>"
+        addDiagnostic("$stage · FEHLER · Typ=${throwable.javaClass.name} · Meldung=$detail")
+        throwable.cause?.let { cause ->
+            val causeDetail = cause.message
+                ?: cause.localizedMessage
+                ?: "<ohne Fehlermeldung>"
+            addDiagnostic("$stage · Ursache · Typ=${cause.javaClass.name} · Meldung=$causeDetail")
+        }
+        throwable.stackTrace.take(5).forEachIndexed { index, frame ->
+            addDiagnostic("$stage · Stack ${index + 1} · $frame")
+        }
+    }
+
+    private fun diagnosticSnapshotForUi(): List<String> {
+        val entries = diagnostics.toList()
+        if (entries.size <= MAX_TERMINAL_DIAGNOSTIC_BLOCKS) return entries
+        val blockSize = ((entries.size + MAX_TERMINAL_DIAGNOSTIC_BLOCKS - 1) /
+            MAX_TERMINAL_DIAGNOSTIC_BLOCKS).coerceAtLeast(1)
+        return entries.chunked(blockSize)
+            .map { block -> block.joinToString(separator = "\n") }
+            .takeLast(MAX_TERMINAL_DIAGNOSTIC_BLOCKS)
+    }
+
+    private fun publishRunning(
+        request: AiPostProcessingRequest,
+        model: AiModel,
+        groupNumber: Int,
+        groupCount: Int,
+        correctedSegments: List<WhisperSegment>,
+        checkedSegments: Int,
+        totalSegments: Int,
+        appliedCorrections: Int,
+        rejectedCorrections: Int,
+        latestTrace: AiCorrectionTrace?
+    ) {
+        publishRunning(
+            request = request,
+            model = model,
+            groupNumber = checkedSegments,
+            groupCount = totalSegments,
+            correctedSegments = correctedSegments,
+            status = "KI-Nachbearbeitung läuft …",
+            activity = "$checkedSegments von $totalSegments Segmenten abschnittsweise geprüft, $appliedCorrections Korrekturen erkannt.",
+            checkedSegments = checkedSegments,
+            proposedCorrections = appliedCorrections,
+            rejectedCorrections = rejectedCorrections,
+            latestTrace = latestTrace
+        )
     }
 
     private fun publishRunning(
@@ -530,7 +762,7 @@ class AiPostProcessingService : Service() {
     }
 
     private fun addDiagnostic(message: String) {
-        if (diagnostics.size >= 10) diagnostics.removeFirst()
+        if (diagnostics.size >= MAX_DIAGNOSTIC_ENTRIES) diagnostics.removeFirst()
         diagnostics.addLast("${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())} · $message")
     }
 
@@ -660,7 +892,8 @@ class AiPostProcessingService : Service() {
                     modelId = model.id,
                     fileName = fileName,
                     groupStartMs = null,
-                    segments = segments
+                    segments = segments,
+                    sectionMinutes = TranscriptGroupingRuntime.currentSectionMinutes
                 )
             )
         }
@@ -679,7 +912,8 @@ class AiPostProcessingService : Service() {
                     modelId = model.id,
                     fileName = fileName,
                     groupStartMs = groupStartMs,
-                    segments = segments
+                    segments = segments,
+                    sectionMinutes = TranscriptGroupingRuntime.currentSectionMinutes
                 )
             )
         }
@@ -693,6 +927,9 @@ class AiPostProcessingService : Service() {
         }
     }
 }
+
+private fun diagnosticResponse(response: String): String =
+    response.replace('\n', ' ').replace('\r', ' ').trim().ifEmpty { "<leer>" }
 
 private fun formatClock(milliseconds: Long): String {
     val seconds = (milliseconds / 1_000L).coerceAtLeast(0L)

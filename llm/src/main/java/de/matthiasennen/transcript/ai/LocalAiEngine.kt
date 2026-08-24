@@ -22,8 +22,8 @@ data class LocalAiGenerationResult(
  * Small lifecycle wrapper around llama.cpp. The model is mapped once. Free test
  * prompts share one in-memory message conversation until it is explicitly reset;
  * every chat turn receives a fresh native compute context. Transcript correction
- * keeps one group context cached and resets to that exact base before every target
- * segment.
+ * keeps one group context cached. Qwen3.5 transcript correction appends targets and
+ * answers without rolling recurrent model state backwards.
  */
 class LocalAiEngine(
     modelPath: String,
@@ -146,6 +146,16 @@ class LocalAiEngine(
         return "{\"result\":\"\"}"
     }
 
+    /**
+     * Returns and clears the native correction trace accumulated since the
+     * previous call. The trace contains technical sizes/status only; transcript
+     * text itself is not persisted by the native layer.
+     */
+    fun consumeCorrectionDiagnostics(): List<String> {
+        check(handle != 0L) { "Das lokale KI-Modell wurde bereits freigegeben." }
+        return LocalAiNative.consumeCorrectionDiagnostics(handle)?.toList().orEmpty()
+    }
+
     override fun close() {
         val activeHandle = handle
         handle = 0L
@@ -220,6 +230,7 @@ internal object LocalAiNative {
         prompt: String,
         maximumOutputTokens: Int
     ): String?
+    external fun consumeCorrectionDiagnostics(handle: Long): Array<String>?
     external fun runtimeReport(handle: Long): Array<String>?
     external fun runtimeCapabilities(nativeLibrarySearchPath: String): String
     external fun inspectModelLayerCount(modelPath: String, nativeLibrarySearchPath: String): Int

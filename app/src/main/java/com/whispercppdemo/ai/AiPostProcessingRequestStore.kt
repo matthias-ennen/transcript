@@ -7,7 +7,10 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 
-private const val FORMAT_VERSION = 1
+private const val FORMAT_VERSION = 2
+private const val MIN_SECTION_MINUTES = 1
+private const val MAX_SECTION_MINUTES = 5
+private const val LEGACY_SECTION_MINUTES = 5
 
 internal data class AiPostProcessingRequest(
     val mode: AiPostProcessingMode,
@@ -15,6 +18,7 @@ internal data class AiPostProcessingRequest(
     val fileName: String,
     val groupStartMs: Long?,
     val segments: List<WhisperSegment>,
+    val sectionMinutes: Int = LEGACY_SECTION_MINUTES,
     val nextGroupIndex: Int = 0
 )
 
@@ -29,6 +33,7 @@ internal class AiPostProcessingRequestStore(private val file: File) {
             output.writeUTF(request.fileName)
             output.writeBoolean(request.groupStartMs != null)
             request.groupStartMs?.let(output::writeLong)
+            output.writeInt(request.sectionMinutes.coerceIn(MIN_SECTION_MINUTES, MAX_SECTION_MINUTES))
             output.writeInt(request.nextGroupIndex)
             output.writeInt(request.segments.size)
             request.segments.forEach { segment ->
@@ -44,11 +49,17 @@ internal class AiPostProcessingRequestStore(private val file: File) {
     fun read(): AiPostProcessingRequest? = runCatching {
         if (!file.isFile) return null
         DataInputStream(BufferedInputStream(file.inputStream())).use { input ->
-            check(input.readInt() == FORMAT_VERSION)
+            val version = input.readInt()
+            check(version in 1..FORMAT_VERSION)
             val mode = AiPostProcessingMode.valueOf(input.readUTF())
             val modelId = input.readUTF()
             val fileName = input.readUTF()
             val groupStartMs = if (input.readBoolean()) input.readLong() else null
+            val sectionMinutes = if (version >= 2) {
+                input.readInt().coerceIn(MIN_SECTION_MINUTES, MAX_SECTION_MINUTES)
+            } else {
+                LEGACY_SECTION_MINUTES
+            }
             val nextGroupIndex = input.readInt()
             val count = input.readInt().coerceIn(0, 100_000)
             val segments = List(count) {
@@ -60,6 +71,7 @@ internal class AiPostProcessingRequestStore(private val file: File) {
                 fileName = fileName,
                 groupStartMs = groupStartMs,
                 segments = segments,
+                sectionMinutes = sectionMinutes,
                 nextGroupIndex = nextGroupIndex
             )
         }
