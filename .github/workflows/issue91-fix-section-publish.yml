@@ -1,0 +1,39 @@
+name: Fix issue 91 section progress call
+
+on:
+  push:
+    branches:
+      - agent/issue91-strategy-compare
+    paths:
+      - .github/issue91-fix-section-publish-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/issue91-strategy-compare
+          fetch-depth: 0
+      - name: Fix section progress overload
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/com/whispercppdemo/ai/AiPostProcessingService.kt')
+          text = path.read_text(encoding='utf-8')
+          marker = '''    private fun publishRunning(\n        request: AiPostProcessingRequest,\n        model: AiModel,\n        groupNumber: Int,\n        groupCount: Int,\n        correctedSegments: List<WhisperSegment>,\n        status: String,'''
+          if marker not in text:
+              raise SystemExit('publishRunning marker not found')
+          overload = '''    private fun publishRunning(\n        request: AiPostProcessingRequest,\n        model: AiModel,\n        groupNumber: Int,\n        groupCount: Int,\n        correctedSegments: List<WhisperSegment>,\n        checkedSegments: Int,\n        totalSegments: Int,\n        appliedCorrections: Int,\n        rejectedCorrections: Int,\n        latestTrace: AiCorrectionTrace?\n    ) {\n        publishRunning(\n            request = request,\n            model = model,\n            groupNumber = checkedSegments,\n            groupCount = totalSegments,\n            correctedSegments = correctedSegments,\n            status = "KI-Nachbearbeitung läuft …",\n            activity = "$checkedSegments von $totalSegments Segmenten abschnittsweise geprüft, $appliedCorrections Korrekturen erkannt.",\n            checkedSegments = checkedSegments,\n            proposedCorrections = appliedCorrections,\n            rejectedCorrections = rejectedCorrections,\n            latestTrace = latestTrace\n        )\n    }\n\n'''
+          text = text.replace(marker, overload + marker, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/whispercppdemo/ai/AiPostProcessingService.kt
+          git commit -m "fix: align sectionwise AI progress reporting"
+          git push origin HEAD:agent/issue91-strategy-compare
