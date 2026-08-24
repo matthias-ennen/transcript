@@ -12,15 +12,14 @@ der Produktname **Transcript**.
 ## Aktueller Entwicklungsstand
 
 Die App benötigt mindestens **Android 8.0 (API 26)**. Sie transkribiert lokal
-auf dem Android-Gerät und bietet inzwischen fünf Qualitätsstufen von
-**Whisper Tiny („Sehr schnell“)** bis **Whisper Large V3 („Maximale Qualität“)**.
-Die Modelle werden bei Bedarf einzeln heruntergeladen und sind nicht Bestandteil
-der APK.
+auf dem Android-Gerät und bietet fünf Qualitätsstufen von **Whisper Tiny
+(„Sehr schnell“)** bis **Whisper Large V3 („Maximale Qualität“)**. Die Modelle
+werden bei Bedarf einzeln heruntergeladen und sind nicht Bestandteil der APK.
 
-Der Schalter mit deutscher und britischer Flagge ist bereits in der Kopfzeile
-vorbereitet und speichert die Auswahl dauerhaft. Die vollständige Übersetzung
-der Bedienoberfläche, Statusmeldungen, Dialoge und Systembenachrichtigungen ist
-noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
+Die lokale KI-Nachbearbeitung mit Qwen3.5 ist technisch funktionsfähig. Zwei
+Strategien stehen zur Verfügung: **Segmentweise** und **Abschnittsweise**. Die
+aktuelle Hauptbaustelle ist nicht mehr die grundsätzliche Machbarkeit, sondern
+die Laufzeitoptimierung der lokalen Qwen-Inferenz auf Android.
 
 ## Funktionsumfang
 
@@ -28,269 +27,161 @@ noch nicht umgesetzt; die sichtbare GUI bleibt derzeit deutsch.
 - Video-Bildspur wird ignoriert; verarbeitet wird ausschließlich die Audiospur
 - Offline-Dekodierung zu 16 kHz Mono-PCM
 - abschnittsweise Transkription langer Aufnahmen mit konstant begrenztem Speicherbedarf
-- frei wählbare Ein- bis Fünf-Minuten-Abschnitte mit zwei Sekunden
-  Kontextüberlappung und absoluten Zeitstempeln; Standard sind drei Minuten
+- frei wählbare Ein- bis Fünf-Minuten-Abschnitte mit zwei Sekunden Kontextüberlappung
+- robuste Zusammenführung der Whisper-Segmente an Chunk-Grenzen
+- absolute Zeitstempel über die gesamte Aufnahme hinweg
 - Hintergrundtranskription mit Systemmeldung, Abbruch und gesichertem Wiederaufnahmepunkt
-- atomare Wiederherstellung des fertigen Whisper-Originals und des zuletzt
-  übernommenen Bearbeitungsstands nach einem Prozessneustart
-- lokale Modellverwaltung mit fünf Qualitätsstufen
-- optionales Silero VAD 6.2.0 zur echten lokalen Sprachanalyse; die konservative
-  Automatik aktiviert VAD nur bei klaren längeren Pausen und stabilen Sprachbereichen
-- optionale lokale KI-Nachbearbeitung mit drei auswählbaren Qwen3.5-Größen
-- automatische KI-Korrektur nach dem Entladen von Whisper
-- gruppenweise KI-Korrektur als kontrollierbarer Entwurf vor der Übernahme
+- atomare Wiederherstellung des fertigen Whisper-Originals und des zuletzt übernommenen Bearbeitungsstands
+- lokale Modellverwaltung mit fünf Whisper-Qualitätsstufen
+- optionales Silero VAD 6.2.0 zur lokalen Sprachanalyse
+- optionale lokale KI-Nachbearbeitung mit Qwen3.5 in drei Modellgrößen
+- globale KI-Nachbearbeitungsstrategie **Segmentweise** oder **Abschnittsweise**
 - dauerhafte KI-Diagnose-Seite für eigene Fragen, Modellvergleich und App-Protokoll
-- eigene Seite **KI-Leistung und Hardware** mit getrennten Profilen je KI-Modell,
-  CPU-/KleidiAI-/Vulkan-Steuerung, Hardwarediagnose, Wärme- und Speicherschutz
-  sowie reproduzierbarem Benchmark
-- robuste Modellauswahl, die nach einer fertigen Transkription wieder direkt bedienbar ist
-- eigene Einstellungsseite mit Speicherübersicht sowie einzelnem und gemeinsamem Löschen der Modelle
-- stabiler Hintergrunddownload mit Fortschrittsmeldung, Fortsetzung und Prüfsummenprüfung
+- eigene Seite **KI-Leistung und Hardware** mit CPU-/KleidiAI-/Vulkan-Steuerung,
+  Hardwarediagnose, Wärme- und Speicherschutz sowie reproduzierbarem Benchmark
 - Transkriptionssprache wahlweise automatisch erkannt, Deutsch oder Englisch
-- dauerhaft gespeicherte Whisper- und eigene VAD-Einstellungen für Vorgabetext,
-  Threads, CPU/GPU, konservative VAD-Automatik, Dekodierung, Segmentierung,
-  Zeitstempel und Halluzinationsschutz
 - Ausgabe mit Segmentzeitstempeln
-- fortlaufend nummerierte Textabschnitte in Anzeige- und Bearbeitungsmodus;
-  die abgerundete Nummernkapsel ist auch für drei- und vierstellige Nummern ausgelegt
-- gemeinsamer Korrekturmodus für alle Textsegmente bei schreibgeschützten Zeitstempeln
+- lückenlose, bearbeitbare Timeline vom Dateianfang bis Dateiende
+- fortlaufende sichtbare Fragmentnummerierung für **jede** Timeline-Karte,
+  einschließlich künstlich erzeugter leerer Pausen
+- gemeinsamer Korrekturmodus bei schreibgeschützten Zeitstempeln
 - Export als TXT, SRT und JSON
 - Teilen von TXT, SRT und JSON einzeln oder gemeinsam über das Android-Teilen-Menü
-- ruhige CannaBot-Hinweissequenz im Teilen-Dialog
+- direkte Mikrofonaufnahme mit Speicherung im App-Bereich
+- Play/Pause, Wellenform und positionsgenaue Wiedergabe
 - halbtransparente Pfeilkapsel zum schnellen Sprung an den App-Anfang bei langen Transkripten
-- Whisper-Modell, erkannte Sprache, Transkriptionsdauer und Erstellungszeitpunkt
-  als Metadaten in TXT- und JSON-Exporten
-- automatischer Debug-APK-Build mit GitHub Actions
-- getrennte signierte Release-APK und Release-AAB mit Signatur-, Datenschutz-
-  und Native-Backend-Prüfung
+- automatischer Debug-/Release-Build mit GitHub Actions
 - dauerhafte APK-Signierung für installierbare Updates
-- automatisch steigende Versionsnummer bei jedem GitHub-Build
-- sichtbare Diagnosekette für Decoder, Modellladung und native Whisper-Engine
-- laufende Zeit- und Whisper-Fortschrittsanzeige mit Stillstandshinweis
-- nur bei aktiven Vorgängen pulsierende Statusanzeige mit CannaBot
-- vollständig umbrechende Statusmeldungen neben CannaBot ohne abgeschnittenen Text
-- gezielte Dauer- und Einmalanimationen über alle neun Sprite-Sheet-Zustände
-- laufende Transkription direkt über die Hauptschaltfläche abbrechen
-- direkte Mikrofonaufnahme mit automatischer Speicherung im App-Bereich
-- Play/Pause für ausgewählte Dateien und eigene Aufnahmen
-- speicherschonend gestreamte Wellenform mit mitlaufender und per Finger
-  verschiebbarer Positionsmarke
-- Anzeige der aktuellen Wiedergabezeit und Gesamtdauer
-- Anzeige des verwendeten Modells, der erkannten Sprache und der Transkriptionszeit
-- vollständige deutsche Bezeichnung aller von Whisper erkannten Sprachen
-- kalibrierte, modellabhängige Laufzeitschätzung für eine bereitstehende Datei
-- kompakte Kopfzeile mit vorbereitetem Deutsch-/Englisch-Umschalter,
-  Einstellungen und App-Informationen
-- App-Informationen zu Entwickler, Kontakt, Datenschutz, Impressum und Open-Source-Lizenz
-- sichtbarer, noch nicht aktiver Bereich „Entwickler unterstützen“ für einen späteren Store-Ausbau
-- modernes adaptives Transcript-App-Symbol mit klassischen, runden und Android-13-Themenvarianten
 
 ## Aufnahme und Vorhören
 
-Unter der Dateiauswahl kann eine Aufnahme direkt über die Mikrofontaste
-gestartet werden. Während der Aufnahme wird dieselbe Taste zum Stopp-Symbol.
-Die fertige AAC-/M4A-Datei wird unter `files/recordings` im privaten
-App-Speicher abgelegt und sofort als aktuelle Audiodatei ausgewählt. Ihr Name
-enthält Datum und Uhrzeit.
+Unter der Dateiauswahl kann eine Aufnahme direkt über die Mikrofontaste gestartet
+werden. Während der Aufnahme wird dieselbe Taste zum Stopp-Symbol. Die fertige
+AAC-/M4A-Datei wird im privaten App-Speicher abgelegt und sofort als aktuelle
+Audiodatei ausgewählt.
 
-Die Aufnahme selbst läuft in einem Mikrofon-Foreground-Service mit sichtbarer
+Die Aufnahme läuft in einem Mikrofon-Foreground-Service mit sichtbarer
 Android-Systemmeldung und Beenden-Aktion. Dadurch bleibt sie bei ausgeschaltetem
-Bildschirm, Gerätesperre und einem Wechsel zu einer anderen App aktiv. Nach der
-Rückkehr übernimmt die Oberfläche Laufzeit und Aufnahmezustand wieder.
+Bildschirm, Gerätesperre und einem Wechsel zu einer anderen App aktiv.
 
-Ausgewählte oder aufgenommene Audiodateien lassen sich vor der Transkription
-abspielen und pausieren. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
-durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden. Eine
-Live-Anzeige visualisiert während der Aufnahme den Mikrofonpegel. Für die
-Wellenform wird die Audiospur blockweise dekodiert und sofort auf 180 Werte
-verdichtet; vollständige PCM-Daten werden dafür nicht im Arbeitsspeicher
-gehalten. Nach spätestens 60 Sekunden wird nur diese optionale Vorschau
-übersprungen. Wiedergabe und Transkription bleiben weiterhin verfügbar.
+Ausgewählte oder aufgenommene Audiodateien lassen sich vor und nach der
+Transkription abspielen. Eine verdichtete Wellenform zeigt die Wiedergabeposition;
+durch Tippen oder Ziehen kann zu einer anderen Stelle gesprungen werden.
+
+## Whisper-Abschnitte und Chunk-Grenzen
+
+Längere Aufnahmen werden in einstellbaren Hauptabschnitten von einer bis fünf
+Minuten verarbeitet. Jeder Abschnitt enthält an seinen Grenzen zusätzlich zwei
+Sekunden Audiokontext. Dieser Overlap ist gewollt, damit Wörter oder Sätze nicht
+an einer harten Chunk-Grenze verloren gehen.
+
+Die App verschiebt die lokalen Whisper-Zeitstempel anschließend auf die absolute
+Audioposition. Segmente werden einem Hauptabschnitt zugeordnet und beim
+Zusammenführen benachbarter Chunks zusätzlich gegeneinander abgeglichen. Wenn
+Whisper denselben Overlap in zwei Chunks unterschiedlich segmentiert, werden die
+Alternativen bereinigt. Verbleibende echte Teilüberschneidungen werden zeitlich
+sauber getrennt. Die Logik arbeitet mit den tatsächlichen Abschnittsgrenzen und
+ist deshalb nicht auf eine bestimmte Einstellung wie zwei oder drei Minuten
+festgelegt.
+
+## Timeline und Fragmentnummern
+
+Die sichtbare Zeitleiste reicht vom Anfang bis zum Ende der Audiodatei. Größere
+Lücken zwischen Whisper-Segmenten werden als eigene leere, abspielbare und
+bearbeitbare Timeline-Karten ergänzt. Dasselbe gilt gegebenenfalls für eine
+Pause am Anfang oder Ende der Aufnahme.
+
+Die sichtbare Nummer rechts an einer Karte ist **keine von Whisper gelieferte
+stabile ID**. Sie bezeichnet die Position des Fragments in der fertigen Timeline.
+Deshalb werden alle sichtbaren Karten konsequent von `1` bis `N` durchnummeriert,
+auch virtuelle Pausen. Die interne Herkunft bleibt davon getrennt erhalten:
+Whisper-Rohsegmente, virtuelle Pausen sowie manuell oder per KI veränderte Inhalte
+werden weiterhin technisch unterschieden.
+
+Leere virtuelle Pausen werden nur im JSON exportiert und mit
+`origin: "virtual_pause"` gekennzeichnet. Wird eine solche Pause manuell mit Text
+gefüllt, erhält sie `origin: "manual"` und erscheint zusätzlich in TXT und SRT.
 
 ## Transkript korrigieren
 
-Nach einer Transkription stehen unter jeder Fünf-Minuten-Gruppe links
-**KI-Nachbearbeitung** und rechts **Bearbeiten**. **Bearbeiten** öffnet die Gruppe
-direkt zur manuellen Korrektur. **KI-Nachbearbeitung** öffnet denselben Entwurf,
-überarbeitet aber zunächst nur diese Gruppe mit dem in den Einstellungen gewählten
-lokalen Modell. Danach lässt sich der Vorschlag weiter manuell ändern. Die
-Zeitstempel bleiben sichtbar und unveränderbar. **Abbrechen** verwirft den Entwurf;
-**Änderungen übernehmen**
-aktualisiert das Ergebnis, das anschließend einheitlich für TXT, SRT und JSON
-verwendet wird. Solange Änderungen noch nicht übernommen wurden, sind die
-Exporte gesperrt. Vor einer neuen Datei, Aufnahme oder Transkription warnt die
-App, wenn dadurch ein geänderter Entwurf verloren ginge.
-
-Whisper-Original und übernommener Bearbeitungsstand werden getrennt und atomar
-im privaten App-Speicher gehalten. Nach einem Prozessneustart stellt die App das
-zuletzt fertige Ergebnis wieder her; eine neue Datei, Aufnahme oder Transkription
+Whisper-Original und übernommener Bearbeitungsstand werden getrennt und atomar im
+privaten App-Speicher gehalten. Nach einem Prozessneustart stellt die App das
+zuletzt fertige Ergebnis wieder her. Eine neue Datei, Aufnahme oder Transkription
 ersetzt diesen Stand bewusst.
 
-Beim Wiederherstellen wird auch die zugehörige Audiodatei vorbereitet und ihre
-Wellenform aus dem geprüften Cache geladen oder erneut erzeugt. Die sichtbare
-Zeitleiste reicht von Dateibeginn bis Dateiende: größere Lücken erscheinen als
-leere, bearbeitbare Pausenboxen ohne Whisper-Nummer. Leere Pausen werden nur im
-JSON mit `origin: "virtual_pause"` exportiert. Manuell befüllte Pausen erhalten
-`origin: "manual"` und erscheinen zusätzlich in TXT und SRT.
+Einzelne Fragmente können direkt geöffnet, während der Wiedergabe kontrolliert
+und manuell korrigiert werden. Zusätzlich können komplette Zeitgruppen zur
+KI-Nachbearbeitung übergeben werden. Zeitstempel und Reihenfolge bleiben dabei in
+der App unter Kontrolle.
 
-Die vollständige Fünf-Minuten-Gruppe wird einmal als gemeinsamer, schreibgeschützter
-Whisper-Rohkontext an das lokale Modell übergeben. Danach prüft die KI jedes
-Zielsegment einzeln gegen denselben Ausgangskontext. Vorherige Antworten wirken
-nicht auf das nächste Segment ein. `llama.cpp` begrenzt die Antwort technisch auf
-ein einziges Ergebnisfeld. In der aktuellen Erprobungsstufe behält die App nur bei
-einem leeren oder nicht lesbaren Ergebnis das Original; weitere inhaltliche
-Plausibilitätsprüfungen werden erst nach den Praxistests ergänzt.
+## Lokale KI-Nachbearbeitung
 
-Die dauerhafte Seite **KI-Diagnose** ist über den Link **KI-Diagnose** im
-KI-Bereich der Einstellungen erreichbar. Sie zeigt zuerst dieselbe gemeinsame
-CannaBot-Statuszeile wie die Hauptseite, danach den freien **KI-Testbereich** und
-ganz unten das allgemeine App-Diagnoseprotokoll. **Verlassen** führt zurück zu den
-Einstellungen. Hauptseite und Diagnoseseite verwenden dieselbe Statuskomponente;
-der Testbereich und das Diagnoseprotokoll werden nicht zusätzlich auf der
-Hauptseite angezeigt.
+Für Qwen3.5 existieren zwei globale Verarbeitungsstrategien, die mit derselben
+inhaltlichen Korrekturanweisung arbeiten:
 
-Der KI-Testbereich zeigt oben dauerhaft die schreibgeschützte, scrollbar begrenzte
-Box **KI-Antwort** und direkt darunter das mehrzeilige Eingabefeld. Eigene Fragen
-oder Aufgaben lassen sich unverändert an das ausgewählte Qwen-Modell senden; die
-vollständige Antwort bleibt ohne zusätzliche Ein-/Ausblendfunktion sichtbar. Beim
-ersten Auftrag wird das ausgewählte Modell geladen und
-bleibt anschließend im Arbeitsspeicher. Weitere Anfragen verwenden dasselbe Modell
-und führen außerdem dieselbe flüchtige Unterhaltung fort. Die unsichtbaren
-Nachrichten bleiben im Arbeitsspeicher; für jeden neuen Chat-Turn wird daraus ein
-frischer nativer Rechenkontext aufgebaut. Dadurch kann die KI auf vorherige
-Aussagen Bezug nehmen, ohne dass die App einen Chatverlauf anzeigt oder dauerhaft
-speichert. **Unterhaltung zurücksetzen** beginnt bewusst einen neuen Kontext. Auch
-ein Modellwechsel, das Löschen des Modells oder das Beenden des App-Prozesses
-beendet die Unterhaltung.
+### Segmentweise
 
-Ist das Kontextfenster gefüllt, fordert die App zum Zurücksetzen auf, anstatt die
-Unterhaltung unbemerkt zu vergessen. Die Messwerte zeigen zusätzlich, ob eine neue
-Unterhaltung begonnen oder ein vorhandener Kontext fortgeführt wurde.
+Die vollständige Zeitgruppe wird einmal als gemeinsamer, schreibgeschützter
+Kontext in die Modellsitzung aufgenommen. Danach werden die Zielsegmente
+nacheinander als kleine Aufgaben **append-only** ergänzt. Wegen der hybriden
+Qwen3.5-Architektur wird der native Modellzustand zwischen den Segmenten nicht
+auf einen früheren KV-Zustand zurückgespult. Jedes Ergebnis wird von der App dem
+jeweiligen Zielsegment zugeordnet und validiert.
 
-Die Qwen-Chatvorlage wird für freie Tests und Transkriptkorrekturen technisch mit
-`enable_thinking=false` angewendet. Die Korrektur verwendet zusätzlich eine native
-JSON-Grammatik und beendet die Ausgabe, sobald das vollständige Ergebnisobjekt
-vorliegt. Der Testbereich zeigt getrennt Modellladezeit, Promptverarbeitung, Zeit
-bis zum ersten Antwort-Token, Antwortdauer, Gesamtdauer, Tokenzahlen und
-Beendigungsgrund an. So lässt sich insbesondere der zweite Aufruf eines Modells
-ohne erneut eingerechnete Ladezeit beurteilen.
+### Abschnittsweise
 
-Direkt unter der KI-Diagnose liegt in den Einstellungen der Link
-**KI-Leistung und Hardware**. Die gleichnamige Unterseite speichert für jedes
-Qwen-Modell ein eigenes Leistungsprofil. Einstellbar sind Kontext, Batchgrößen,
-Ausgabelimit, getrennte Prompt- und Ausgabethreads, CPU-Affinität und -Priorität,
-Standard- oder KleidiAI-Kernel, Memory Mapping/Locking sowie CPU, Vulkan oder
-gemischte GPU-Auslagerung. Die Seite zeigt nur Fähigkeiten, die von Android und
-der gebauten nativen Laufzeit tatsächlich gemeldet werden.
+Die gesamte Zeitgruppe wird als eine Korrekturaufgabe verarbeitet. Das Modell
+soll nur die tatsächlich geänderten Fragment-IDs samt korrigiertem Text
+zurückgeben. Fehlende IDs gelten als unverändert. Die App prüft unbekannte oder
+doppelte IDs und übernimmt nur gültige Ergebnisse.
 
-Jedes der drei Modelle besitzt genau ein eigenes Profil. **Nur CPU** und
-**Automatisch (CPU/KleidiAI)** sind garantiert Vulkan-frei; GPU-Schichten sowie
-KQV-/Operationsauslagerung sind ausschließlich in Vulkan- und Hybridprofilen
-wirksam. Verliert der Vulkan-Treiber während der Berechnung das Gerät, wird der
-native Fehler kontrolliert zurückgegeben und der Auftrag bei aktiviertem
-CPU-Rückfall einmal vollständig über CPU wiederholt.
+Beide Strategien funktionieren technisch. Die derzeitige Herausforderung ist die
+noch zu hohe Laufzeit auf dem mobilen Gerät. Die systematische Optimierung von
+CPU-Konfiguration, Threads, Batchgrößen, Kontext, KleidiAI und Vulkan/GPU ist das
+nächste eigene Arbeitspaket.
 
-Auf ARM64 enthält die APK getrennte, zur Laufzeit bewertete CPU-Varianten für
-portables ARMv8, Dot Product, INT8-Matrixoperationen und SVE2. Dadurch bleibt der
-Standard-CPU-Pfad auf älteren Geräten sicher, während ein passendes Gerät echte
-KleidiAI-Kernel erhält. Die Diagnose unterscheidet **eingebaut**, **auf diesem
-Gerät nutzbar** und den für die aktuelle Modellsitzung aktivierten Pfad; ein
-Native-Ladefehler wird als Fehler angezeigt und nicht als Reihe falscher
-„Nein“-Werte verborgen. KleidiAI-Weight-Packing unterstützt im gepinnten
-`llama.cpp` Q4_0/Q8_0. Von den derzeit angebotenen Modellen ist deshalb das
-Qwen3.5-0,8B-Q4_0-Modell direkt KleidiAI-kompatibel; Q4_K_M läuft kontrolliert
-über den ausgewählten Standard-CPU-Pfad.
+Die Qwen-Chatvorlage wird für freie Tests und Transkriptkorrekturen mit
+`enable_thinking=false` verwendet. Korrekturantworten werden strukturiert
+zurückgegeben und die Diagnose protokolliert Modellladezeit, Promptverarbeitung,
+Zeit bis zum ersten Token, Antwortdauer, Gesamtdauer und Tokenzahlen.
 
-Vor jeder lokalen KI-Ausführung prüfen RAM-Reserve, maximale Speichernutzung und
-thermische Grenzwerte den Start. Bei hoher Wärme reduziert die App die wirksame
-Konfiguration; an der Abbruchgrenze beendet sie die Berechnung kontrolliert. Der
-eingebaute Benchmark trennt Aufwärm- und Messläufe und erfasst Modellladezeit,
-Prompt- und Ausgabetempo, Zeit bis zum ersten Token, Gesamtdauer, App-Speicher,
-Wärmestatus und den real verwendeten Backendpfad. Profile können kopiert,
-zurückgesetzt und als versioniertes JSON importiert oder exportiert werden.
-Die erste Profil-/Hardwarekarte bleibt dauerhaft geöffnet. Die sechs folgenden
-Einstellungskarten sind beim ersten Öffnen geschlossen, speichern danach aber
-ihren jeweiligen Auf-/Zu-Zustand dauerhaft. Ihre Überschriften sind linksbündig.
-Leistungsstatus erscheint ausschließlich in der gemeinsamen CannaBot-Statuszeile.
+## KI-Diagnose und Leistung
 
-## Status und Diagnose während der Transkription
+Die dauerhafte Seite **KI-Diagnose** enthält einen freien KI-Testbereich und das
+App-Diagnoseprotokoll. Ein geladenes Modell kann für mehrere Anfragen im Speicher
+bleiben. Die freie Unterhaltung ist von der Transkriptkorrektur getrennt.
 
-Die App zeigt, welchen Verarbeitungsschritt sie gerade ausführt. Die native
-Whisper-Engine meldet ihren tatsächlichen Fortschritt in Prozent an die
-Oberfläche zurück. Bleibt eine Rückmeldung länger aus, zeigt die App außerdem
-an, seit wann kein neuer Fortschrittswert empfangen wurde.
+Die Seite **KI-Leistung und Hardware** verwaltet modellbezogene Leistungsprofile.
+Dort können unter anderem Kontext, Batchgrößen, Prompt- und Ausgabethreads,
+CPU-Affinität, Standard-/KleidiAI-Kernel und CPU-/Vulkan-/Hybridpfade untersucht
+werden. Diagnose und Benchmark sollen ausdrücklich nachweisen, welcher native
+Backendpfad bei einem Lauf tatsächlich aktiv war.
 
-Whisper enthält ein echtes Vulkan-Backend. Wird GPU-Nutzung gewünscht, prüft die
-App das von der nativen Laufzeit gemeldete Gerät und nennt das tatsächlich aktive
-Backend in der Diagnose. Fehlt ein nutzbares Vulkan-Gerät oder scheitert dessen
-Initialisierung, wird einmal kontrolliert auf CPU zurückgefallen.
-
-CannaBot nutzt alle neun Zeilen des Sprite-Sheets. Dauerzustände laufen ruhig
-weiter; kurze Ereignisse wie Springen, Winken, Richtungswechsel oder ein Fehler
-werden einmal abgespielt und kehren anschließend automatisch zum passenden
-Grundzustand zurück. Der Statustext pulsiert, solange die App arbeitet,
-aufnimmt oder wiedergibt, und blendet dabei deutlich zwischen 20 und 100
-Prozent Deckkraft. Ist eine Datei bereit, wechselt die pulsierende Statuszeile
-am schwächsten Punkt zwischen der Bereitschaftsmeldung und einer
-modellabhängigen Schätzung der Transkriptionsdauer. Die Schätzfaktoren wurden
-anhand praktischer Laufzeitmessungen auf dem Zielgerät festgelegt.
-
-Die Statuszeile reserviert stets mindestens die Höhe von zwei Textzeilen; CannaBot
-und Text beginnen oben. Der Wechsel zwischen ein- und zweizeiligen Meldungen
-verschiebt deshalb die nachfolgenden Bedienelemente nicht. Längere Status- und Fehlermeldungen
-werden neben CannaBot vollständig auf mehrere Zeilen umgebrochen und nicht mit
-Auslassungspunkten abgeschnitten. Bei der Wiedergabe verwendet die Oberfläche
-bewusst den allgemeinen Text **Audio wird wiedergegeben …**.
+Vor lokaler KI-Ausführung prüfen Schutzmechanismen verfügbare Speicherreserve und
+thermischen Zustand. Fehler eines GPU-Pfades können kontrolliert auf CPU
+zurückfallen.
 
 ## Lange Aufnahmen und Hintergrundbetrieb
 
-Die Transkription lädt nicht mehr die vollständige Aufnahme als PCM in den
-Arbeitsspeicher. `TranscriptionService` läuft in einem privaten Android-
-Nebenprozess und verarbeitet nacheinander einstellbare Hauptabschnitte. Dadurch
-bleibt die Oberfläche auch bei einem nativen Fehler des Transkriptions-Workers
-geöffnet. Jeder Abschnitt enthält an den Grenzen zwei
-Sekunden zusätzlichen Audiokontext, damit Wörter und Sätze nicht abgeschnitten
-werden. Die Überlappung wird anschließend anhand der zeitlichen Mitte jedes
-Whisper-Segments genau einem Hauptabschnitt zugeordnet. Auf die lokalen
-Whisper-Zeitstempel wird die absolute Startposition des Decoderabschnitts
-addiert; dadurch bleiben auch Zeitstempel über einer Stunde korrekt.
+`TranscriptionService` läuft in einem privaten Android-Nebenprozess. Audio wird
+nicht vollständig als PCM im Arbeitsspeicher gehalten. Die benötigten Abschnitte
+werden einzeln dekodiert und als 16-kHz-Mono-PCM vorbereitet; anschließend wird
+das Whisper-Modell einmal geladen und über die vorbereiteten Abschnitte
+wiederverwendet.
 
-Der Decoder toleriert einen kleinen, fest begrenzten Codec-Überhang und schneidet
-das Ergebnis vor Whisper wieder auf die angeforderte Abschnittslänge zu.
-Decoder und Whisper-Modell sind dabei niemals gleichzeitig aktiv: Zuerst werden
-alle Abschnitte einzeln zu PCM 16 kHz Mono dekodiert und atomar im privaten
-Temporärspeicher abgelegt. Derselbe PCM-Strom liefert ohne zweite Dekodierung
-die Wellenform und die optionale VAD-Analyse. Erst nach vollständiger Freigabe
-des Decoders wird das gewählte Whisper-Modell einmal geladen und für alle
-Abschnitte wiederverwendet. Nach jedem fertigen Abschnitt
-werden Textsegmente, erkannte Sprache und nächste Audioposition atomar im
-privaten App-Speicher gesichert. Eine erneute Transkription derselben Datei mit
-demselben Modell und derselben Sprache setzt dort fort. Ein bewusster Abbruch
-hält den Lauf an und bewahrt den Zwischenstand sowie noch benötigte PCM-Dateien.
-Ein unabhängiger Kontrollprozess beendet bei Bedarf auch einen festgefahrenen
-nativen Worker; ein GPU-/Vulkan-Fehler erhält genau einen CPU-Sicherheitsversuch.
+Nach jedem fertigen Abschnitt werden Textsegmente, erkannte Sprache und nächste
+Audioposition atomar gesichert. Ein bewusster Abbruch hält den Lauf an und
+bewahrt einen kompatiblen Zwischenstand. Die Foreground-Systemmeldung zeigt den
+Fortschritt und bietet einen Abbruchknopf.
 
-Der Foreground-Service läuft auch bei ausgeschaltetem Bildschirm oder
-geschlossener Oberfläche weiter. Seine Systemmeldung zeigt Gesamtfortschritt
-und Abschnittsnummer und bietet einen Abbruchknopf. Bei automatischer
-Spracherkennung wird die Sprache erst nach einem Abschnitt mit erkanntem Text
-festgehalten und für alle folgenden Abschnitte wiederverwendet.
-
-Fertige Transkripte, Modelle, Aufnahmen und Einstellungen bleiben ausschließlich
-im privaten App-Speicher. Android-Cloud-Backup und Geräteübertragung sind für die
-gesamte App deaktiviert.
-
-Die Debug-APK baut den rechenintensiven nativen Whisper-Code mit
-Release-Optimierungen. Die Optimierung muss im `lib`-Modul gesetzt sein, weil
-dort der CMake-/NDK-Build stattfindet.
-
-Gesangstrennung, Wortzeitstempel und die Synchronisierung eines bereits
-bekannten Songtexts gehören nicht zum aktuellen Funktionsumfang.
+Fertige Transkripte, Modelle, Aufnahmen und Einstellungen bleiben im privaten
+App-Speicher. Android-Cloud-Backup und Geräteübertragung sind für die App
+deaktiviert.
 
 ## APK bauen
 
-Das Repository bindet `whisper.cpp` und `llama.cpp` als Git-Submodule ein. Beim lokalen Klonen
-daher die Submodule mit abrufen:
+Das Repository bindet `whisper.cpp` und `llama.cpp` als Git-Submodule ein. Beim
+lokalen Klonen daher die Submodule mit abrufen:
 
 ```bash
 git clone --recurse-submodules https://github.com/matthias-ennen/transcript.git
@@ -298,56 +189,19 @@ cd transcript
 ./gradlew assembleDebug
 ```
 
-Die APK liegt anschließend unter
-`app/build/outputs/apk/debug/app-debug.apk`.
-
 Für einen vollständigen lokalen Produktbuild:
 
 ```bash
 ./gradlew testDebugUnitTest assembleDebug assembleRelease bundleRelease
 ```
 
-Alternativ baut der Workflow **Build Android APK** bei jedem Push und Pull
-Request eine Debug-APK sowie eine signierte Release-APK und ein Release-AAB.
-Zum Herunterladen auf GitHub:
-
-1. Im Repository den Bereich **Actions** öffnen.
-2. Den neuesten erfolgreichen Lauf **Build Android APK** auswählen.
-3. Für die Produktversion `transcript-signed-release-…` herunterladen.
-4. Das ZIP entpacken und `app-release.apk` auf dem Android-Gerät installieren;
-   `app-release.aab` ist das getrennte Store-Artefakt.
-
-Das zusätzliche Artefakt `transcript-signed-debug-apk-…` ist ausschließlich für
-Entwicklung und Fehlersuche bestimmt.
-
-## APK-Updates und Signierung
-
-GitHub Actions signiert jede APK mit demselben privaten Schlüssel. Die dazu
-gehörenden Signierdaten liegen ausschließlich in geschützten Repository-Secrets
-und werden nicht eingecheckt. Der Workflow vergibt außerdem bei jedem Lauf eine
-höhere `versionCode`-Nummer. Dadurch kann Android eine neuere APK über eine
-ältere, dauerhaft signierte APK installieren, ohne App-Daten oder das bereits
-geladene Whisper-Modell zu löschen.
-
-Eine APK, die noch mit einem früheren Debug-Schlüssel signiert wurde, muss vor
-der ersten dauerhaft signierten Version einmalig deinstalliert werden. Danach
-lassen sich weitere GitHub-APKs direkt als Update darüberinstallieren.
-
-Benötigte GitHub-Actions-Secrets:
-
-- `ANDROID_SIGNING_KEYSTORE_BASE64`
-- `ANDROID_SIGNING_STORE_PASSWORD`
-- `ANDROID_SIGNING_KEY_ALIAS`
-- `ANDROID_SIGNING_KEY_PASSWORD`
-
-Der Workflow führt vor dem Build die JVM-Unit-Tests aus und prüft vor dem Upload
-die Signaturen, die Release-/Debug-Trennung, die deaktivierte Backup-Fähigkeit
-sowie die eingebauten KleidiAI- und Whisper-Vulkan-Laufzeitpfade.
+Der Workflow **Build Android APK** erstellt bei Pushes und Pull Requests die
+entsprechenden Android-Artefakte. GitHub Actions verwendet eine dauerhaft
+hinterlegte Signierung und eine steigende `versionCode`-Nummer, sodass neuere
+signierte APKs als Update über eine bestehende Installation eingespielt werden
+können.
 
 ## Modelle und Speicherbedarf
-
-Die App bietet fünf mehrsprachige Modelle für automatische, deutsche und
-englische Transkriptionen:
 
 | Qualitätsstufe | Whisper-Modell | Modelldatei | Downloadgröße |
 | --- | --- | --- | ---: |
@@ -357,42 +211,29 @@ englische Transkriptionen:
 | Sehr genau | Whisper Large V3 Turbo Q5_0 | `ggml-large-v3-turbo-q5_0.bin` | ca. 574 MB |
 | Maximale Qualität | Whisper Large V3 Q5_0 | `ggml-large-v3-q5_0.bin` | ca. 1,08 GB |
 
-Jedes Modell kann einzeln heruntergeladen, ausgewählt und gelöscht werden. Die
-App merkt sich die zuletzt verwendete Qualitätsstufe. Nach dem Download wird
-die SHA-256-Prüfsumme kontrolliert, damit unvollständige oder beschädigte
-Modelldateien nicht verwendet werden. Die Modelle liegen im privaten
-App-Speicher und werden nicht in das Git-Repository oder die APK eingecheckt.
-
-Der Modelldownload läuft als Android-Foreground-Dienst weiter, wenn die App in
-den Hintergrund wechselt. Eine Systembenachrichtigung zeigt den Fortschritt.
-Unterbrochene `.part`-Downloads bleiben erhalten und werden beim nächsten
-Versuch per HTTP-Range fortgesetzt, sofern der Downloadserver dies unterstützt.
+Jedes Modell kann einzeln heruntergeladen, ausgewählt und gelöscht werden. Nach
+dem Download wird die SHA-256-Prüfsumme kontrolliert. Die Modelle liegen im
+privaten App-Speicher und werden nicht in das Git-Repository oder die APK
+eingecheckt.
 
 ## Sprachen
 
 Die App unterscheidet zwei voneinander unabhängige Spracheinstellungen:
 
 - **Transkriptionssprache:** automatische Erkennung, Deutsch oder Englisch.
-  Bei automatischer Erkennung zeigt die App den von Whisper gelieferten
-  Sprachcode als vollständige deutsche Sprachbezeichnung an, zum Beispiel
-  **Dänisch** statt `da`.
-- **GUI-Sprache:** Deutsch oder Englisch über den Flaggenumschalter. Die Auswahl
-  wird bereits gespeichert; die vollständige englische Oberfläche folgt in
-  einem späteren Arbeitsschritt.
-
-Die angezeigte voraussichtliche Transkriptionsdauer wird aus Mediendauer und
-gewähltem Whisper-Modell berechnet. Sie ist eine bewusst grobe Erstschätzung
-und soll anhand praktischer Messwerte auf dem Zielgerät kalibriert werden.
+- **GUI-Sprache:** Deutsch oder Englisch über den vorbereiteten Flaggenumschalter;
+  die vollständige englische Oberfläche ist noch ein eigener späterer Schritt.
 
 ## Datenschutz
 
-Die Transkription läuft vollständig auf dem Android-Gerät. Nur der einmalige
-Modelldownload benötigt Internetzugriff.
+Die Transkription und die optionale KI-Nachbearbeitung laufen lokal auf dem
+Android-Gerät. Nur Modelldownloads benötigen Internetzugriff.
 
 ## Drittanbieter
 
-`whisper.cpp` steht unter der MIT-Lizenz. Der vollständige Lizenztext befindet
-sich unter [`licenses/whisper.cpp-MIT.txt`](licenses/whisper.cpp-MIT.txt).
+`whisper.cpp` und `llama.cpp` sind als lokale Open-Source-Komponenten eingebunden.
+Die Lizenzhinweise befinden sich im Repository unter `licenses/` und
+`THIRD_PARTY_NOTICES.md`.
 
 Die technische Struktur und der Datenfluss sind in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) beschrieben.
