@@ -702,6 +702,33 @@ class AiPostProcessingService : Service() {
         groupNumber: Int,
         groupCount: Int,
         correctedSegments: List<WhisperSegment>,
+        checkedSegments: Int,
+        totalSegments: Int,
+        appliedCorrections: Int,
+        rejectedCorrections: Int,
+        latestTrace: AiCorrectionTrace?
+    ) {
+        publishRunning(
+            request = request,
+            model = model,
+            groupNumber = checkedSegments,
+            groupCount = totalSegments,
+            correctedSegments = correctedSegments,
+            status = "KI-Nachbearbeitung läuft …",
+            activity = "$checkedSegments von $totalSegments Segmenten abschnittsweise geprüft, $appliedCorrections Korrekturen erkannt.",
+            checkedSegments = checkedSegments,
+            proposedCorrections = appliedCorrections,
+            rejectedCorrections = rejectedCorrections,
+            latestTrace = latestTrace
+        )
+    }
+
+    private fun publishRunning(
+        request: AiPostProcessingRequest,
+        model: AiModel,
+        groupNumber: Int,
+        groupCount: Int,
+        correctedSegments: List<WhisperSegment>,
         status: String,
         activity: String,
         checkedSegments: Int,
