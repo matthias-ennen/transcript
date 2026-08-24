@@ -50,6 +50,7 @@ class TranscriptTimelineTest {
         val timeline = buildTranscriptTimeline(emptyList(), 12_000L)
 
         assertEquals(listOf(WhisperSegment(0L, 12_000L, "")), timeline)
+        assertEquals(listOf(1), transcriptNumbers(timeline, emptyList()))
     }
 
     @Test
@@ -67,13 +68,16 @@ class TranscriptTimelineTest {
     }
 
     @Test
-    fun numbersOnlyWhisperCardsInTheContinuousTimeline() {
+    fun numbersEveryVisibleTimelineFragmentIncludingGaps() {
         val raw = listOf(
             WhisperSegment(2_000L, 4_000L, "Hallo"),
             WhisperSegment(6_000L, 8_000L, "Welt")
         )
         val timeline = buildTranscriptTimeline(raw, 10_000L)
 
-        assertEquals(listOf(null, 1, null, 2, null), transcriptNumbers(timeline, raw))
+        assertEquals(listOf(1, 2, 3, 4, 5), transcriptNumbers(timeline, raw))
+        assertTrue(isVirtualTimelineSegment(timeline[0], raw))
+        assertTrue(isVirtualTimelineSegment(timeline[2], raw))
+        assertTrue(isVirtualTimelineSegment(timeline[4], raw))
     }
 }
