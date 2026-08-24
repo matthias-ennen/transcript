@@ -322,6 +322,7 @@ class AiPostProcessingService : Service() {
         val startedAt = SystemClock.elapsedRealtime()
         val model = AiModel.fromId(initialRequest.modelId)
         val originalSegments = initialRequest.segments
+        val strategy = AiPostProcessingStrategyPreferences(applicationContext).load()
         try {
             val modelFile = File(File(filesDir, "ai-models"), model.fileName)
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
@@ -330,6 +331,7 @@ class AiPostProcessingService : Service() {
             val configuration = guardedConfiguration(modelFile, model)
             activeConfiguration = configuration
             addDiagnostic("Whisper-Speicher wurde freigegeben.")
+            addDiagnostic("KI-Nachbearbeitungsstrategie: ${strategy.displayLabel}.")
             addDiagnostic(
                 "KI-Laufzeit · ctx=${configuration.contextSize} · batch=${configuration.batchSize} · " +
                     "ubatch=${configuration.microBatchSize} · Prompt-Threads=${configuration.promptThreads} · " +
@@ -467,69 +469,135 @@ class AiPostProcessingService : Service() {
                         "Gemeinsamer Kontext bereit · $currentContextMs ms. Zielsegmente werden einzeln geprüft."
                     )
 
-                    indexes.forEach { index ->
-                        ensureContinues()
-                        val target = IndexedTranscriptSegment(index, correctedSegments[index])
-                        val targetPrompt = buildCorrectionTarget(target)
-                        val outputLimit = maximumCorrectionTokens(target.segment.text)
-                        addDiagnostic(
-                            "Segment ${index + 1}: Zielauftrag ${targetPrompt.length} Zeichen · Antwortlimit $outputLimit Tokens."
-                        )
-                        val segmentStartedAt = SystemClock.elapsedRealtime()
-                        val response = try {
-                            engine.correctSegment(
-                                prompt = targetPrompt,
-                                maximumOutputTokens = outputLimit
+                    when (strategy) {
+                        AiPostProcessingStrategy.SEGMENTWISE -> {
+                        indexes.forEach { index ->
+                            ensureContinues()
+                            val target = IndexedTranscriptSegment(index, correctedSegments[index])
+                            val targetPrompt = buildCorrectionTarget(target)
+                            val outputLimit = maximumCorrectionTokens(target.segment.text)
+                            addDiagnostic(
+                                "Segment ${index + 1}: Zielauftrag ${targetPrompt.length} Zeichen · Antwortlimit $outputLimit Tokens."
                             )
-                        } finally {
-                            appendNativeCorrectionDiagnostics(engine)
-                        }
-                        val parsed = parseCorrectionResult(response, target.segment.text)
-                        val segmentMs =
-                            (SystemClock.elapsedRealtime() - segmentStartedAt).coerceAtLeast(0L)
-                        segmentDurationsMs += segmentMs
-                        addDiagnostic(
-                            "Segment ${index + 1}: rohe KI-Antwort · ${diagnosticResponse(response)}"
-                        )
-                        val parserDecision = when {
-                            parsed.retainedOriginal -> "nicht lesbar/leer → Original beibehalten"
-                            parsed.changed -> "JSON lesbar → geänderten Vorschlag erkannt"
-                            else -> "JSON lesbar → Text unverändert"
-                        }
-                        addDiagnostic("Segment ${index + 1}: Parser · $parserDecision.")
-                        if (parsed.changed) {
-                            correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
-                            appliedCorrections++
-                        }
-                        if (parsed.retainedOriginal) rejectedCorrections++
-                        checkedSegments++
-                        latestTrace = AiCorrectionTrace(
-                            segmentNumber = index + 1,
-                            originalText = target.segment.text,
-                            rawResponse = response,
-                            resultText = parsed.text,
-                            decision = when {
-                                parsed.retainedOriginal -> "Leeres oder nicht lesbares Ergebnis: Original beibehalten."
-                                parsed.changed -> "Nicht leeres Ergebnis ohne weitere Inhaltsprüfung als Vorschlag übernommen."
-                                else -> "Nicht leeres Ergebnis angenommen; Text blieb unverändert."
+                            val segmentStartedAt = SystemClock.elapsedRealtime()
+                            val response = try {
+                                engine.correctSegment(
+                                    prompt = targetPrompt,
+                                    maximumOutputTokens = outputLimit
+                                )
+                            } finally {
+                                appendNativeCorrectionDiagnostics(engine)
                             }
-                        )
-                        addDiagnostic(
-                            "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag erkannt" else "unverändert"} · $segmentMs ms."
-                        )
-                        publishRunning(
-                            request = initialRequest,
-                            model = model,
-                            groupNumber = checkedSegments,
-                            groupCount = totalSegments,
-                            correctedSegments = correctedSegments,
-                            status = "KI-Nachbearbeitung läuft …",
-                            activity = "$checkedSegments von $totalSegments Segmenten geprüft, $appliedCorrections Korrekturen erkannt.",
-                            checkedSegments = checkedSegments,
-                            proposedCorrections = appliedCorrections,
-                            rejectedCorrections = rejectedCorrections,
-                            latestTrace = latestTrace
-                        )
+                            val parsed = parseCorrectionResult(response, target.segment.text)
+                            val segmentMs =
+                                (SystemClock.elapsedRealtime() - segmentStartedAt).coerceAtLeast(0L)
+                            segmentDurationsMs += segmentMs
+                            addDiagnostic(
+                                "Segment ${index + 1}: rohe KI-Antwort · ${diagnosticResponse(response)}"
+                            )
+                            val parserDecision = when {
+                                parsed.retainedOriginal -> "nicht lesbar/leer → Original beibehalten"
+                                parsed.changed -> "JSON lesbar → geänderten Vorschlag erkannt"
+                                else -> "JSON lesbar → Text unverändert"
+                            }
+                            addDiagnostic("Segment ${index + 1}: Parser · $parserDecision.")
+                            if (parsed.changed) {
+                                correctedSegments = applyCorrection(correctedSegments, index, parsed.text)
+                                appliedCorrections++
+                            }
+                            if (parsed.retainedOriginal) rejectedCorrections++
+                            checkedSegments++
+                            latestTrace = AiCorrectionTrace(
+                                segmentNumber = index + 1,
+                                originalText = target.segment.text,
+                                rawResponse = response,
+                                resultText = parsed.text,
+                                decision = when {
+                                    parsed.retainedOriginal -> "Leeres oder nicht lesbares Ergebnis: Original beibehalten."
+                                    parsed.changed -> "Nicht leeres Ergebnis ohne weitere Inhaltsprüfung als Vorschlag übernommen."
+                                    else -> "Nicht leeres Ergebnis angenommen; Text blieb unverändert."
+                                }
+                            )
+                            addDiagnostic(
+                                "Segment ${index + 1}: ${if (parsed.retainedOriginal) "Original beibehalten" else if (parsed.changed) "KI-Vorschlag erkannt" else "unverändert"} · $segmentMs ms."
+                            )
+                            publishRunning(
+                                request = initialRequest,
+                                model = model,
+                                groupNumber = checkedSegments,
+                                groupCount = totalSegments,
+                                correctedSegments = correctedSegments,
+                                status = "KI-Nachbearbeitung läuft …",
+                                activity = "$checkedSegments von $totalSegments Segmenten geprüft, $appliedCorrections Korrekturen erkannt.",
+                                checkedSegments = checkedSegments,
+                                proposedCorrections = appliedCorrections,
+                                rejectedCorrections = rejectedCorrections,
+                                latestTrace = latestTrace
+                            )
+                        }
+                        }
+                        AiPostProcessingStrategy.SECTIONWISE -> {
+                            ensureContinues()
+                            val sectionPrompt = buildSectionCorrectionTarget(indexed)
+                            val outputLimit = maximumSectionCorrectionTokens(indexed)
+                            addDiagnostic(
+                                "Abschnittsweise: ein Gruppenauftrag · ${sectionPrompt.length} Zeichen · Antwortlimit $outputLimit Tokens."
+                            )
+                            val sectionStartedAt = SystemClock.elapsedRealtime()
+                            val response = try {
+                                engine.correctSegment(
+                                    prompt = sectionPrompt,
+                                    maximumOutputTokens = outputLimit
+                                )
+                            } finally {
+                                appendNativeCorrectionDiagnostics(engine)
+                            }
+                            val sectionMs =
+                                (SystemClock.elapsedRealtime() - sectionStartedAt).coerceAtLeast(0L)
+                            segmentDurationsMs += sectionMs
+                            addDiagnostic(
+                                "Abschnittsweise: rohe KI-Antwort · ${diagnosticResponse(response)}"
+                            )
+                            val parsedSection = parseSectionCorrectionResult(response, indexed)
+                            rejectedCorrections += parsedSection.rejectedEntries
+                            checkedSegments += indexes.size
+                            var returnedChanges = 0
+                            parsedSection.changes.forEach { change ->
+                                val previousText = correctedSegments[change.index].text
+                                if (change.text != previousText) {
+                                    correctedSegments = applyCorrection(
+                                        correctedSegments,
+                                        change.index,
+                                        change.text
+                                    )
+                                    appliedCorrections++
+                                    returnedChanges++
+                                    latestTrace = AiCorrectionTrace(
+                                        segmentNumber = change.index + 1,
+                                        originalText = previousText,
+                                        rawResponse = response,
+                                        resultText = change.text,
+                                        decision = "Abschnittsweise KI-Änderung erkannt"
+                                    )
+                                }
+                            }
+                            addDiagnostic(
+                                "Abschnittsweise: ${parsedSection.changes.size} gültige Einträge · " +
+                                    "$returnedChanges tatsächliche Änderungen · ${parsedSection.rejectedEntries} verworfen · $sectionMs ms."
+                            )
+                            publishRunning(
+                                request = initialRequest,
+                                model = model,
+                                groupNumber = groupIndex + 1,
+                                groupCount = groups.size,
+                                correctedSegments = correctedSegments,
+                                checkedSegments = checkedSegments,
+                                totalSegments = totalSegments,
+                                appliedCorrections = appliedCorrections,
+                                rejectedCorrections = rejectedCorrections,
+                                latestTrace = latestTrace
+                            )
+                        }
                     }
                     requestStore.write(
                         initialRequest.copy(
@@ -549,7 +617,7 @@ class AiPostProcessingService : Service() {
                 }
                 val maximumSegmentMs = segmentDurationsMs.maxOrNull() ?: 0L
                 addDiagnostic(
-                    "Machbarkeit: Kontext $contextPreparationMs ms · Segmente Ø $averageSegmentMs ms / max $maximumSegmentMs ms."
+                    "Machbarkeit: Strategie ${strategy.displayLabel} · Kontext $contextPreparationMs ms · KI-Aufrufe Ø $averageSegmentMs ms / max $maximumSegmentMs ms."
                 )
                 addDiagnostic(
                     "Gruppe gesamt $durationMs ms · $checkedSegments Segmente · $appliedCorrections Änderungen · $rejectedCorrections verworfen."
@@ -626,6 +694,33 @@ class AiPostProcessingService : Service() {
         return entries.chunked(blockSize)
             .map { block -> block.joinToString(separator = "\n") }
             .takeLast(MAX_TERMINAL_DIAGNOSTIC_BLOCKS)
+    }
+
+    private fun publishRunning(
+        request: AiPostProcessingRequest,
+        model: AiModel,
+        groupNumber: Int,
+        groupCount: Int,
+        correctedSegments: List<WhisperSegment>,
+        checkedSegments: Int,
+        totalSegments: Int,
+        appliedCorrections: Int,
+        rejectedCorrections: Int,
+        latestTrace: AiCorrectionTrace?
+    ) {
+        publishRunning(
+            request = request,
+            model = model,
+            groupNumber = checkedSegments,
+            groupCount = totalSegments,
+            correctedSegments = correctedSegments,
+            status = "KI-Nachbearbeitung läuft …",
+            activity = "$checkedSegments von $totalSegments Segmenten abschnittsweise geprüft, $appliedCorrections Korrekturen erkannt.",
+            checkedSegments = checkedSegments,
+            proposedCorrections = appliedCorrections,
+            rejectedCorrections = rejectedCorrections,
+            latestTrace = latestTrace
+        )
     }
 
     private fun publishRunning(
