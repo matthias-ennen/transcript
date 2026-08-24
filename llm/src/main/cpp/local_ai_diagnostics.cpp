@@ -265,30 +265,85 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
             engine,
             engine->correction_common_prompt,
             target_prompt);
-        if (full_prompt.rfind(engine->correction_base_rendered, 0) != 0) {
+        if (full_prompt.empty()) {
             set_correction_error(
                 engine,
                 handle,
-                "TARGET_TEMPLATE_PREFIX_FAILED",
-                "Die Qwen-Chatvorlage hat keinen wiederverwendbaren Basisprefix erzeugt.");
+                "TARGET_TEMPLATE_FAILED",
+                "Die Qwen-Chatvorlage hat keinen Zielprompt erzeugt.");
             return nullptr;
         }
-        const std::string target_delta = full_prompt.substr(engine->correction_base_rendered.size());
-        add_correction_diagnostic(
-            handle,
-            "TARGET_TEMPLATE · Delta " + std::to_string(target_delta.size()) + " Zeichen");
 
         const llama_vocab * vocab = llama_model_get_vocab(engine->model);
-        std::vector<llama_token> target_tokens = tokenize(vocab, target_delta, false);
-        if (target_tokens.empty()) {
+        std::vector<llama_token> base_prompt_tokens = tokenize(
+            vocab,
+            engine->correction_base_rendered,
+            true);
+        std::vector<llama_token> full_prompt_tokens = tokenize(vocab, full_prompt, true);
+        if (base_prompt_tokens.empty() || full_prompt_tokens.empty()) {
             set_correction_error(
                 engine,
                 handle,
                 "TARGET_TOKENIZE_FAILED",
-                "Der Zielauftrag konnte nicht tokenisiert werden.");
+                "Basis- oder Zielprompt konnte nicht tokenisiert werden.");
             return nullptr;
         }
 
+        size_t common_prefix_tokens = 0;
+        const size_t prefix_limit = std::min(base_prompt_tokens.size(), full_prompt_tokens.size());
+        while (common_prefix_tokens < prefix_limit &&
+               base_prompt_tokens[common_prefix_tokens] == full_prompt_tokens[common_prefix_tokens]) {
+            ++common_prefix_tokens;
+        }
+        if (common_prefix_tokens == 0) {
+            set_correction_error(
+                engine,
+                handle,
+                "TARGET_TEMPLATE_PREFIX_FAILED",
+                "Die Qwen-Chatvorlage erzeugt keinen gemeinsamen Token-Prefix.");
+            return nullptr;
+        }
+
+        add_correction_diagnostic(
+            handle,
+            "TARGET_TEMPLATE · Vollprompt " + std::to_string(full_prompt.size()) +
+                " Zeichen · gemeinsamer Prefix " + std::to_string(common_prefix_tokens) +
+                "/" + std::to_string(base_prompt_tokens.size()) + " Tokens");
+
+        if (common_prefix_tokens < static_cast<size_t>(engine->correction_base_tokens)) {
+            const int previous_base_tokens = engine->correction_base_tokens;
+            if (!llama_memory_seq_rm(
+                    memory,
+                    0,
+                    static_cast<llama_pos>(common_prefix_tokens),
+                    -1)) {
+                set_correction_error(
+                    engine,
+                    handle,
+                    "TARGET_CACHE_PREFIX_ADJUST_FAILED",
+                    "Der KV-Cache konnte nicht auf den gemeinsamen Token-Prefix gekürzt werden.");
+                return nullptr;
+            }
+            engine->correction_base_tokens = static_cast<int>(common_prefix_tokens);
+            add_correction_diagnostic(
+                handle,
+                "TARGET_CACHE_PREFIX · Basis von " + std::to_string(previous_base_tokens) +
+                    " auf " + std::to_string(engine->correction_base_tokens) +
+                    " Tokens gekürzt");
+        }
+
+        if (full_prompt_tokens.size() <= static_cast<size_t>(engine->correction_base_tokens)) {
+            set_correction_error(
+                engine,
+                handle,
+                "TARGET_DELTA_EMPTY",
+                "Nach dem gemeinsamen Token-Prefix bleibt kein Zielauftrag übrig.");
+            return nullptr;
+        }
+
+        std::vector<llama_token> target_tokens(
+            full_prompt_tokens.begin() + engine->correction_base_tokens,
+            full_prompt_tokens.end());
         const int remaining_context = engine->context_size - engine->correction_base_tokens -
             static_cast<int>(target_tokens.size()) - 1;
         if (remaining_context < 32) {
