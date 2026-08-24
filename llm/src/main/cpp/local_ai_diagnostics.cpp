@@ -17,6 +17,7 @@ namespace {
 
 struct CorrectionDiagnosticState {
     std::vector<std::string> pending;
+    bool generated_any_segment = false;
 };
 
 std::mutex correction_diagnostics_mutex;
@@ -24,12 +25,24 @@ std::unordered_map<jlong, CorrectionDiagnosticState> correction_diagnostics;
 
 void clear_correction_diagnostics(jlong handle) {
     std::lock_guard<std::mutex> lock(correction_diagnostics_mutex);
-    correction_diagnostics[handle].pending.clear();
+    auto & state = correction_diagnostics[handle];
+    state.pending.clear();
+    state.generated_any_segment = false;
 }
 
 void add_correction_diagnostic(jlong handle, const std::string & message) {
     std::lock_guard<std::mutex> lock(correction_diagnostics_mutex);
     correction_diagnostics[handle].pending.push_back(message);
+}
+
+bool correction_has_generated_segment(jlong handle) {
+    std::lock_guard<std::mutex> lock(correction_diagnostics_mutex);
+    return correction_diagnostics[handle].generated_any_segment;
+}
+
+void mark_correction_segment_generated(jlong handle) {
+    std::lock_guard<std::mutex> lock(correction_diagnostics_mutex);
+    correction_diagnostics[handle].generated_any_segment = true;
 }
 
 void erase_correction_diagnostics(jlong handle) {
@@ -54,6 +67,28 @@ std::vector<std::string> take_correction_diagnostics(jlong handle) {
     if (iterator == correction_diagnostics.end()) return {};
     std::vector<std::string> result = std::move(iterator->second.pending);
     iterator->second.pending.clear();
+    return result;
+}
+
+std::string qwen_target_turn(
+    LocalEngine * engine,
+    const std::string & target_prompt,
+    bool close_previous_assistant) {
+    if (!engine || !engine->chat_template) return {};
+    if (engine->chat_template->source.find("<|im_start|>") == std::string::npos ||
+        engine->chat_template->source.find("<|im_end|>") == std::string::npos) {
+        return {};
+    }
+
+    std::string result;
+    if (close_previous_assistant) {
+        result += "<|im_end|>\n";
+    }
+    result += "<|im_start|>user\n";
+    result += target_prompt;
+    result += "<|im_end|>\n";
+    result += "<|im_start|>assistant\n";
+    result += "<think>\n\n</think>\n\n";
     return result;
 }
 
@@ -202,7 +237,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_prepareCorrectionContext(
         add_correction_diagnostic(
             handle,
             "CONTEXT_READY · " + std::to_string(engine->correction_base_tokens) +
-                " Basis-Tokens im KV-Cache");
+                " Basis-Tokens im KV-Cache · Append-only-Modus aktiv");
         return JNI_TRUE;
     } catch (const std::exception & exception) {
         const std::string detail = exception.what() ? exception.what() : "Unbekannter nativer Fehler";
@@ -242,16 +277,6 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
     engine->last_error.clear();
 
     try {
-        llama_memory_t memory = llama_get_memory(engine->correction_context);
-        if (!llama_memory_seq_rm(memory, 0, engine->correction_base_tokens, -1)) {
-            set_correction_error(
-                engine,
-                handle,
-                "TARGET_RESET_FAILED",
-                "Der KV-Cache konnte nicht auf den gemeinsamen Basiskontext zurückgesetzt werden.");
-            return nullptr;
-        }
-
         const std::string target_prompt = from_java(env, target_prompt_value);
         if (target_prompt.empty()) {
             set_correction_error(engine, handle, "TARGET_INPUT_EMPTY", "Der Zielauftrag ist leer.");
@@ -261,97 +286,55 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
             handle,
             "TARGET_INPUT · " + std::to_string(target_prompt.size()) + " Zeichen");
 
-        const std::string full_prompt = format_correction_with_target(
+        const bool close_previous_assistant = correction_has_generated_segment(handle);
+        const std::string target_append = qwen_target_turn(
             engine,
-            engine->correction_common_prompt,
-            target_prompt);
-        if (full_prompt.empty()) {
+            target_prompt,
+            close_previous_assistant);
+        if (target_append.empty()) {
             set_correction_error(
                 engine,
                 handle,
-                "TARGET_TEMPLATE_FAILED",
-                "Die Qwen-Chatvorlage hat keinen Zielprompt erzeugt.");
+                "TARGET_TEMPLATE_UNSUPPORTED",
+                "Die aktive Chatvorlage verwendet nicht das erwartete Qwen3.5-ChatML-Format.");
             return nullptr;
         }
+        add_correction_diagnostic(
+            handle,
+            std::string("TARGET_APPEND · ") +
+                (close_previous_assistant ? "vorherige KI-Antwort geschlossen · " : "erstes Zielsegment · ") +
+                std::to_string(target_append.size()) + " Zeichen");
 
         const llama_vocab * vocab = llama_model_get_vocab(engine->model);
-        std::vector<llama_token> base_prompt_tokens = tokenize(
-            vocab,
-            engine->correction_base_rendered,
-            true);
-        std::vector<llama_token> full_prompt_tokens = tokenize(vocab, full_prompt, true);
-        if (base_prompt_tokens.empty() || full_prompt_tokens.empty()) {
+        std::vector<llama_token> target_tokens = tokenize(vocab, target_append, false);
+        if (target_tokens.empty()) {
             set_correction_error(
                 engine,
                 handle,
                 "TARGET_TOKENIZE_FAILED",
-                "Basis- oder Zielprompt konnte nicht tokenisiert werden.");
+                "Der append-only Zielauftrag konnte nicht tokenisiert werden.");
             return nullptr;
         }
 
-        size_t common_prefix_tokens = 0;
-        const size_t prefix_limit = std::min(base_prompt_tokens.size(), full_prompt_tokens.size());
-        while (common_prefix_tokens < prefix_limit &&
-               base_prompt_tokens[common_prefix_tokens] == full_prompt_tokens[common_prefix_tokens]) {
-            ++common_prefix_tokens;
-        }
-        if (common_prefix_tokens == 0) {
+        llama_memory_t memory = llama_get_memory(engine->correction_context);
+        const int occupied_tokens = llama_memory_seq_pos_max(memory, 0) + 1;
+        if (occupied_tokens <= 0) {
             set_correction_error(
                 engine,
                 handle,
-                "TARGET_TEMPLATE_PREFIX_FAILED",
-                "Die Qwen-Chatvorlage erzeugt keinen gemeinsamen Token-Prefix.");
+                "TARGET_CACHE_EMPTY",
+                "Der fortlaufende Qwen-Kontext besitzt keine gültige aktuelle Position.");
             return nullptr;
         }
 
-        add_correction_diagnostic(
-            handle,
-            "TARGET_TEMPLATE · Vollprompt " + std::to_string(full_prompt.size()) +
-                " Zeichen · gemeinsamer Prefix " + std::to_string(common_prefix_tokens) +
-                "/" + std::to_string(base_prompt_tokens.size()) + " Tokens");
-
-        if (common_prefix_tokens < static_cast<size_t>(engine->correction_base_tokens)) {
-            const int previous_base_tokens = engine->correction_base_tokens;
-            if (!llama_memory_seq_rm(
-                    memory,
-                    0,
-                    static_cast<llama_pos>(common_prefix_tokens),
-                    -1)) {
-                set_correction_error(
-                    engine,
-                    handle,
-                    "TARGET_CACHE_PREFIX_ADJUST_FAILED",
-                    "Der KV-Cache konnte nicht auf den gemeinsamen Token-Prefix gekürzt werden.");
-                return nullptr;
-            }
-            engine->correction_base_tokens = static_cast<int>(common_prefix_tokens);
-            add_correction_diagnostic(
-                handle,
-                "TARGET_CACHE_PREFIX · Basis von " + std::to_string(previous_base_tokens) +
-                    " auf " + std::to_string(engine->correction_base_tokens) +
-                    " Tokens gekürzt");
-        }
-
-        if (full_prompt_tokens.size() <= static_cast<size_t>(engine->correction_base_tokens)) {
-            set_correction_error(
-                engine,
-                handle,
-                "TARGET_DELTA_EMPTY",
-                "Nach dem gemeinsamen Token-Prefix bleibt kein Zielauftrag übrig.");
-            return nullptr;
-        }
-
-        std::vector<llama_token> target_tokens(
-            full_prompt_tokens.begin() + engine->correction_base_tokens,
-            full_prompt_tokens.end());
-        const int remaining_context = engine->context_size - engine->correction_base_tokens -
+        const int remaining_context = engine->context_size - occupied_tokens -
             static_cast<int>(target_tokens.size()) - 1;
         if (remaining_context < 32) {
             set_correction_error(
                 engine,
                 handle,
                 "TARGET_CONTEXT_TOO_SMALL",
-                "Basis=" + std::to_string(engine->correction_base_tokens) +
+                "Belegt=" + std::to_string(occupied_tokens) +
                     " · Ziel=" + std::to_string(target_tokens.size()) +
                     " · n_ctx=" + std::to_string(engine->context_size));
             return nullptr;
@@ -361,7 +344,8 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
             remaining_context);
         add_correction_diagnostic(
             handle,
-            "TARGET_TOKENS · " + std::to_string(target_tokens.size()) +
+            "TARGET_TOKENS · belegt " + std::to_string(occupied_tokens) +
+                " · append " + std::to_string(target_tokens.size()) +
                 " Tokens · Antwortlimit " + std::to_string(output_limit));
 
         size_t offset = 0;
@@ -415,9 +399,11 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generateCorrection(
                     " · Ende=" + output.finish_reason);
             return nullptr;
         }
+        mark_correction_segment_generated(handle);
         add_correction_diagnostic(
             handle,
-            "GENERATION_RESULT · " + std::to_string(output.text.size()) + " Zeichen empfangen");
+            "GENERATION_RESULT · " + std::to_string(output.text.size()) +
+                " Zeichen empfangen · Append-only-Zustand bleibt erhalten");
         return to_java(env, output.text);
     } catch (const std::exception & exception) {
         const std::string detail = exception.what() ? exception.what() : "Unbekannter nativer Fehler";
