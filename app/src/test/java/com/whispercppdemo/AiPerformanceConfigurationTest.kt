@@ -80,11 +80,24 @@ class AiPerformanceConfigurationTest {
     }
 
     @Test
-    fun onlyTheCurrentQ4_0ModelCanUseKleidiAiWeightPacking() {
-        assertEquals(3, AiModel.entries.size)
+    fun modelCatalogExposesSixVariantsWithExpectedKleidiCompatibility() {
+        assertEquals(6, AiModel.entries.size)
+        assertEquals(6, AiModel.entries.map { it.id }.toSet().size)
+        assertEquals(6, AiModel.entries.map { it.fileName }.toSet().size)
+
         assertEquals(true, AiModel.QUICK.kleidiAiCompatible)
+        assertEquals(true, AiModel.QUICK_Q8.kleidiAiCompatible)
         assertEquals(false, AiModel.BALANCED.kleidiAiCompatible)
+        assertEquals(true, AiModel.BALANCED_Q4.kleidiAiCompatible)
         assertEquals(false, AiModel.PRECISE.kleidiAiCompatible)
+        assertEquals(true, AiModel.PRECISE_Q4.kleidiAiCompatible)
+    }
+
+    @Test
+    fun legacyModelIdsStillResolveToTheSameVariants() {
+        assertEquals(AiModel.QUICK, AiModel.fromId("qwen35-08b-q4"))
+        assertEquals(AiModel.BALANCED, AiModel.fromId("qwen35-2b-q4km"))
+        assertEquals(AiModel.PRECISE, AiModel.fromId("qwen35-4b-q4km"))
     }
 
     @Test
