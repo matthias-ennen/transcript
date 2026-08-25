@@ -77,23 +77,22 @@ class LocalAiEngine(
         }
         val text = values[0].trim().takeIf(String::isNotEmpty)
             ?: error("Das lokale KI-Modell hat keinen verwertbaren Text erzeugt.")
-        return LocalAiGenerationResult(
-            text = text,
-            metrics = LocalAiGenerationMetrics(
-                promptTokens = values[1].toIntOrNull() ?: 0,
-                generatedTokens = values[2].toIntOrNull() ?: 0,
-                chatTemplateMs = values[3].toLongOrNull() ?: 0L,
-                tokenizationMs = values[4].toLongOrNull() ?: 0L,
-                contextCreationMs = values[5].toLongOrNull() ?: 0L,
-                promptDecodeMs = values[6].toLongOrNull() ?: 0L,
-                promptProcessingMs = values[7].toLongOrNull() ?: 0L,
-                timeToFirstTokenMs = values[8].toLongOrNull() ?: 0L,
-                answerGenerationMs = values[9].toLongOrNull() ?: 0L,
-                totalInferenceMs = values[10].toLongOrNull() ?: 0L,
-                finishReason = values[11],
-                thinkingDisabled = values[12].toBooleanStrictOrNull() ?: false
-            )
+        val metrics = LocalAiGenerationMetrics(
+            promptTokens = values[1].toIntOrNull() ?: 0,
+            generatedTokens = values[2].toIntOrNull() ?: 0,
+            chatTemplateMs = values[3].toLongOrNull() ?: 0L,
+            tokenizationMs = values[4].toLongOrNull() ?: 0L,
+            contextCreationMs = values[5].toLongOrNull() ?: 0L,
+            promptDecodeMs = values[6].toLongOrNull() ?: 0L,
+            promptProcessingMs = values[7].toLongOrNull() ?: 0L,
+            timeToFirstTokenMs = values[8].toLongOrNull() ?: 0L,
+            answerGenerationMs = values[9].toLongOrNull() ?: 0L,
+            totalInferenceMs = values[10].toLongOrNull() ?: 0L,
+            finishReason = values[11],
+            thinkingDisabled = values[12].toBooleanStrictOrNull() ?: false
         )
+        lastGenerationMetrics = metrics
+        return LocalAiGenerationResult(text = text, metrics = metrics)
     }
 
     fun generateTest(
@@ -177,10 +176,15 @@ class LocalAiEngine(
         @Volatile
         private var configuredNativeLibraryDirectory: String = ""
 
+        @Volatile
+        private var lastGenerationMetrics: LocalAiGenerationMetrics? = null
+
         fun configureNativeLibraryDirectory(directory: String?) {
             val normalized = directory?.trim().orEmpty()
             if (normalized.isNotEmpty()) configuredNativeLibraryDirectory = normalized
         }
+
+        fun lastGenerationMetricsSnapshot(): LocalAiGenerationMetrics? = lastGenerationMetrics
 
         private fun nativeLibrarySearchPath(): String = linkedSetOf(
             configuredNativeLibraryDirectory,
