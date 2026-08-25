@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript.ui.main
 
+import de.matthiasennen.transcript.ai.AiSelfTestMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -93,5 +94,25 @@ class AiDiagnosticsStateTest {
             )
         )
         assertFalse(canSendAiDiagnosticsRequest(true, true, false, false, "   "))
+    }
+
+    @Test
+    fun `timing breakdown does not double count first token time`() {
+        val metrics = AiSelfTestMetrics(
+            modelAlreadyLoaded = true,
+            conversationContinued = false,
+            modelLoadMs = 0,
+            promptTokens = 335,
+            generatedTokens = 62,
+            promptProcessingMs = 93_680,
+            timeToFirstTokenMs = 93_688,
+            answerGenerationMs = 42_867,
+            totalMs = 299_197,
+            finishReason = "eog",
+            thinkingDisabled = true
+        )
+
+        assertEquals(136_547L, metrics.accountedInferenceMs)
+        assertEquals(162_650L, metrics.outsideAccountedInferenceMs)
     }
 }
