@@ -281,14 +281,25 @@ class AiPostProcessingService : Service() {
                 modelAlreadyLoaded = sessionResult.info.modelAlreadyLoaded,
                 conversationContinued = conversationContinued,
                 modelLoadMs = sessionResult.info.modelLoadMs,
+                cpuFallbackUsed = sessionResult.info.cpuFallbackUsed,
                 promptTokens = generation.metrics.promptTokens,
                 generatedTokens = generation.metrics.generatedTokens,
                 promptProcessingMs = generation.metrics.promptProcessingMs,
                 timeToFirstTokenMs = generation.metrics.timeToFirstTokenMs,
                 answerGenerationMs = generation.metrics.answerGenerationMs,
+                nativeInferenceMs = generation.metrics.totalInferenceMs,
                 totalMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
                 finishReason = generation.metrics.finishReason,
                 thinkingDisabled = generation.metrics.thinkingDisabled
+            )
+            addDiagnostic(
+                "Zeitbilanz: native Inferenz ${metrics.nativeInferenceMs} ms · " +
+                    "davon Prompt+Antwort ${metrics.accountedNativeComputeMs} ms · " +
+                    "nativ zusätzlich ${metrics.insideNativeUnaccountedMs} ms."
+            )
+            addDiagnostic(
+                "Zeitbilanz: außerhalb der erfolgreichen nativen Inferenz ${metrics.outsideNativeMs} ms · " +
+                    "Ende-zu-Ende ${metrics.totalMs} ms."
             )
             AiPostProcessingCoordinator.update(
                 AiPostProcessingState.SelfTestCompleted(

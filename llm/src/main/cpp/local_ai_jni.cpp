@@ -880,7 +880,9 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         };
     }
 
+    const SteadyClock::time_point template_started_at = SteadyClock::now();
     const RenderedChat rendered = render_chat(engine, request_messages, true);
+    const SteadyClock::time_point template_finished_at = SteadyClock::now();
     if (rendered.prompt.empty()) {
         return fail_free_generation(
             env,
@@ -892,6 +894,7 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         vocab,
         rendered.prompt,
         true);
+    const SteadyClock::time_point tokenization_finished_at = SteadyClock::now();
     if (prompt_tokens.empty()) {
         return fail_free_generation(
             env,
@@ -911,8 +914,10 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         std::clamp(static_cast<int>(maximum_output_tokens), 64, 4096),
         remaining_context);
 
+    const SteadyClock::time_point context_started_at = SteadyClock::now();
     std::unique_ptr<llama_context, decltype(&llama_free)> context(
         create_context(engine), llama_free);
+    const SteadyClock::time_point context_created_at = SteadyClock::now();
     if (!context) {
         return fail_free_generation(
             env,
@@ -949,6 +954,10 @@ Java_de_matthiasennen_transcript_ai_LocalAiNative_generate(
         output.text,
         std::to_string(prompt_tokens.size()),
         std::to_string(output.generated_tokens),
+        std::to_string(elapsed_ms(template_started_at, template_finished_at)),
+        std::to_string(elapsed_ms(template_finished_at, tokenization_finished_at)),
+        std::to_string(elapsed_ms(context_started_at, context_created_at)),
+        std::to_string(elapsed_ms(context_created_at, prompt_processed_at)),
         std::to_string(elapsed_ms(request_started, prompt_processed_at)),
         std::to_string(output.time_to_first_token_ms),
         std::to_string(output.answer_generation_ms),

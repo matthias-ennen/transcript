@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript.ui.main
 
+import android.os.SystemClock
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -38,8 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.CircleShape
-import android.os.SystemClock
+import de.matthiasennen.transcript.ai.LocalAiEngine
 import de.matthiasennen.transcript.ai.thermalStatusLabel
 import kotlinx.coroutines.delay
 
@@ -80,7 +81,6 @@ fun AiDiagnosticsScreen(
         }
     }
 }
-
 
 @Composable
 private fun ThermalStatusIndicator(rawStatus: Int?) {
@@ -350,6 +350,11 @@ private fun AiSelfTestCard(
     onResetConversation: () -> Unit
 ) {
     val modelInstalled = state.selectedAiModelInstalled
+    val nativeDetail = if (state.aiSelfTestResponse != null) {
+        LocalAiEngine.lastGenerationMetricsSnapshot()
+    } else {
+        null
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -432,6 +437,7 @@ private fun AiSelfTestCard(
                                 }
                             )
                             append("\nModellladezeit: ${metrics.modelLoadMs} ms")
+                            append("\nCPU-Fallback: ${if (metrics.cpuFallbackUsed) "ja" else "nein"}")
                             append(
                                 if (metrics.conversationContinued) {
                                     "\nUnterhaltung: vorhandenen Kontext fortgeführt"
@@ -439,10 +445,20 @@ private fun AiSelfTestCard(
                                     "\nUnterhaltung: neu begonnen"
                                 }
                             )
-                            append("\nPromptverarbeitung: ${metrics.promptProcessingMs} ms")
+                            nativeDetail?.let { detail ->
+                                append("\nChat-Template: ${detail.chatTemplateMs} ms")
+                                append("\nTokenisierung: ${detail.tokenizationMs} ms")
+                                append("\nContext-Erzeugung: ${detail.contextCreationMs} ms")
+                                append("\nPrompt-Decode/Prefill: ${detail.promptDecodeMs} ms")
+                            }
+                            append("\nPromptverarbeitung gesamt: ${metrics.promptProcessingMs} ms")
                             append("\nZeit bis zum ersten Token: ${metrics.timeToFirstTokenMs} ms")
                             append("\nAntworterzeugung: ${metrics.answerGenerationMs} ms")
-                            append("\nGesamtdauer: ${metrics.totalMs} ms")
+                            append("\nNative Inferenz gesamt: ${metrics.nativeInferenceMs} ms")
+                            append("\nPrompt + Antwort (nicht überlappend): ${metrics.accountedNativeComputeMs} ms")
+                            append("\nWeitere Zeit innerhalb Native: ${metrics.insideNativeUnaccountedMs} ms")
+                            append("\nZeit außerhalb erfolgreicher Native-Inferenz: ${metrics.outsideNativeMs} ms")
+                            append("\nEnde-zu-Ende-Gesamtdauer: ${metrics.totalMs} ms")
                             append("\nTokens: ${metrics.promptTokens} Eingabe · ${metrics.generatedTokens} Antwort")
                             append("\nBeendigung: ${aiFinishReasonLabel(metrics.finishReason)}")
                             append(

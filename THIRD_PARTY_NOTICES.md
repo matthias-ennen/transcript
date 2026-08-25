@@ -39,7 +39,11 @@ Der vollständige Lizenztext ist in
 - Copyright: Alibaba Cloud
 - Lizenz: Apache License 2.0
 - Verwendung: Optional herunterladbare lokale Textmodelle (0,8B, 2B und 4B)
+- GGUF-Quantisierungen: Q4_0, Q4_K_M und Q8_0 je nach Modellvariante
+- GGUF-Quellen: `ggml-org/Qwen3.5-0.8B-GGUF` sowie `unsloth/Qwen3.5-2B-GGUF` und `unsloth/Qwen3.5-4B-GGUF`, jeweils über im Modellkatalog gepinnte Revisionen und SHA-256-Prüfsummen
 
-Die Modelle werden nicht mit der APK ausgeliefert. Der vollständige Lizenztext
+Die Modelle werden nicht mit der APK ausgeliefert. Jede auswählbare GGUF-Datei
+wird erst auf Wunsch des Nutzers geladen und nach dem Download gegen die im
+Modellkatalog hinterlegte SHA-256-Prüfsumme geprüft. Der vollständige Lizenztext
 ist in [`licenses/Qwen3.5-Apache-2.0.txt`](licenses/Qwen3.5-Apache-2.0.txt)
 enthalten.

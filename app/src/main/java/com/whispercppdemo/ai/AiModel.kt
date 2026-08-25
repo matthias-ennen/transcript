@@ -13,9 +13,9 @@ enum class AiModel(
 ) {
     QUICK(
         id = "qwen35-08b-q4",
-        qualityLabel = "Schnell",
-        modelLabel = "Qwen3.5 0,8B Q4",
-        description = "Schlankes Modell für schnelle, vorsichtige Grundkorrekturen",
+        qualityLabel = "Schnell (Q4_0)",
+        modelLabel = "Qwen3.5 0,8B Q4_0",
+        description = "Schlankes 4-Bit-Modell für schnelle, vorsichtige Grundkorrekturen",
         fileName = "Qwen3.5-0.8B-Q4_0.gguf",
         downloadSizeLabel = "563 MB",
         minimumBytes = 540_000_000L,
@@ -24,9 +24,22 @@ enum class AiModel(
             "8fea620810c4afa23dd6443f999a48574c1611a3/" +
             "Qwen3.5-0.8B-Q4_0.gguf?download=true"
     ),
+    QUICK_Q8(
+        id = "qwen35-08b-q8",
+        qualityLabel = "Schnell (Q8_0)",
+        modelLabel = "Qwen3.5 0,8B Q8_0",
+        description = "Kleines Q8-Modell mit höherer Quantisierungspräzision bei moderatem Speicherbedarf",
+        fileName = "Qwen3.5-0.8B-Q8_0.gguf",
+        downloadSizeLabel = "834 MB",
+        minimumBytes = 800_000_000L,
+        sha256 = "37ae482d336108d23516fa35e8e0c4126688d81018b87178a18d752a1357814f",
+        downloadUrl = "https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/" +
+            "8fea620810c4afa23dd6443f999a48574c1611a3/" +
+            "Qwen3.5-0.8B-Q8_0.gguf?download=true"
+    ),
     BALANCED(
         id = "qwen35-2b-q4km",
-        qualityLabel = "Ausgewogen",
+        qualityLabel = "Ausgewogen (Q4_K_M)",
         modelLabel = "Qwen3.5 2B Q4_K_M",
         description = "Empfohlener Kompromiss aus Genauigkeit, Tempo und Speicherbedarf",
         fileName = "Qwen3.5-2B-Q4_K_M.gguf",
@@ -37,9 +50,22 @@ enum class AiModel(
             "1c466474d208da1a7c4b8cb87ebcdac78f160e34/" +
             "Qwen3.5-2B-Q4_K_M.gguf?download=true"
     ),
+    BALANCED_Q4(
+        id = "qwen35-2b-q4",
+        qualityLabel = "Ausgewogen (Q4_0)",
+        modelLabel = "Qwen3.5 2B Q4_0",
+        description = "Alternative 4-Bit-Quantisierung für optimierte ARM- und KleidiAI-Pfade",
+        fileName = "Qwen3.5-2B-Q4_0.gguf",
+        downloadSizeLabel = "1,21 GB",
+        minimumBytes = 1_150_000_000L,
+        sha256 = "cd70221bebaee0503e0f6717e174250cd7825aa88438b3aabec9ad55731d9bb1",
+        downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/" +
+            "31e04817b38d226cdd13454bcc3982ebaa5a386b/" +
+            "Qwen3.5-2B-Q4_0.gguf?download=true"
+    ),
     PRECISE(
         id = "qwen35-4b-q4km",
-        qualityLabel = "Sehr genau",
+        qualityLabel = "Sehr genau (Q4_K_M)",
         modelLabel = "Qwen3.5 4B Q4_K_M",
         description = "Größtes Modell für anspruchsvolle Texte und bestmögliche lokale Korrektur",
         fileName = "Qwen3.5-4B-Q4_K_M.gguf",
@@ -49,6 +75,19 @@ enum class AiModel(
         downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/" +
             "9b57f22a6a894e8db976ae8cc55f794b3ad18b94/" +
             "Qwen3.5-4B-Q4_K_M.gguf?download=true"
+    ),
+    PRECISE_Q4(
+        id = "qwen35-4b-q4",
+        qualityLabel = "Sehr genau (Q4_0)",
+        modelLabel = "Qwen3.5 4B Q4_0",
+        description = "Große Q4_0-Variante für hohe Korrekturqualität mit optimiertem ARM-Pfad",
+        fileName = "Qwen3.5-4B-Q4_0.gguf",
+        downloadSizeLabel = "2,58 GB",
+        minimumBytes = 2_450_000_000L,
+        sha256 = "298fcb5fe7a77ccc79745ae24751560c5ac56874caff4bb39b1f2055bd72b8bb",
+        downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/" +
+            "1a02dbed1cdfe73efc3fa519c54126befb4faf68/" +
+            "Qwen3.5-4B-Q4_0.gguf?download=true"
     );
 
     val kleidiAiCompatible: Boolean

@@ -18,15 +18,43 @@ data class AiSelfTestMetrics(
     val modelAlreadyLoaded: Boolean,
     val conversationContinued: Boolean,
     val modelLoadMs: Long,
+    val cpuFallbackUsed: Boolean,
     val promptTokens: Int,
     val generatedTokens: Int,
     val promptProcessingMs: Long,
     val timeToFirstTokenMs: Long,
     val answerGenerationMs: Long,
+    val nativeInferenceMs: Long,
     val totalMs: Long,
     val finishReason: String,
-    val thinkingDisabled: Boolean
-)
+    val thinkingDisabled: Boolean,
+    val chatTemplateMs: Long = 0L,
+    val tokenizationMs: Long = 0L,
+    val contextCreationMs: Long = 0L,
+    val promptDecodeMs: Long = 0L
+) {
+    /** TTFT overlaps prompt processing and must never be added a second time. */
+    val accountedNativeComputeMs: Long
+        get() = (promptProcessingMs + answerGenerationMs).coerceAtLeast(0L)
+
+    val firstTokenAfterPromptMs: Long
+        get() = (timeToFirstTokenMs - promptProcessingMs).coerceAtLeast(0L)
+
+    val promptPhaseDetailMs: Long
+        get() = (chatTemplateMs + tokenizationMs + contextCreationMs + promptDecodeMs)
+            .coerceAtLeast(0L)
+
+    val promptPhaseOtherMs: Long
+        get() = (promptProcessingMs - promptPhaseDetailMs).coerceAtLeast(0L)
+
+    /** Native time not explained by the two historical non-overlapping UI phases. */
+    val insideNativeUnaccountedMs: Long
+        get() = (nativeInferenceMs - accountedNativeComputeMs).coerceAtLeast(0L)
+
+    /** Queue/service/session/fallback/UI time outside the successful native generate call. */
+    val outsideNativeMs: Long
+        get() = (totalMs - modelLoadMs - nativeInferenceMs).coerceAtLeast(0L)
+}
 
 data class AiModelPreloadMetrics(
     val modelAlreadyLoaded: Boolean,
