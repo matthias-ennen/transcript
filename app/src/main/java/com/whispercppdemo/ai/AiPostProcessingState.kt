@@ -18,29 +18,28 @@ data class AiSelfTestMetrics(
     val modelAlreadyLoaded: Boolean,
     val conversationContinued: Boolean,
     val modelLoadMs: Long,
+    val cpuFallbackUsed: Boolean,
     val promptTokens: Int,
     val generatedTokens: Int,
     val promptProcessingMs: Long,
     val timeToFirstTokenMs: Long,
     val answerGenerationMs: Long,
+    val nativeInferenceMs: Long,
     val totalMs: Long,
     val finishReason: String,
     val thinkingDisabled: Boolean
 ) {
-    /**
-     * The two non-overlapping native phases that were historically shown in the UI.
-     * TTFT is deliberately excluded because it already contains prompt processing.
-     */
-    val accountedInferenceMs: Long
+    /** TTFT overlaps prompt processing and must never be added a second time. */
+    val accountedNativeComputeMs: Long
         get() = (promptProcessingMs + answerGenerationMs).coerceAtLeast(0L)
 
-    /**
-     * Wall-clock time spent outside model loading and the two historically visible
-     * native compute phases. This makes queue/session/JNI/UI overhead explicit instead
-     * of presenting an apparently contradictory total duration.
-     */
-    val outsideAccountedInferenceMs: Long
-        get() = (totalMs - modelLoadMs - accountedInferenceMs).coerceAtLeast(0L)
+    /** Native time not explained by the two historical non-overlapping UI phases. */
+    val insideNativeUnaccountedMs: Long
+        get() = (nativeInferenceMs - accountedNativeComputeMs).coerceAtLeast(0L)
+
+    /** Queue/service/session/fallback/UI time outside the successful native generate call. */
+    val outsideNativeMs: Long
+        get() = (totalMs - modelLoadMs - nativeInferenceMs).coerceAtLeast(0L)
 }
 
 data class AiModelPreloadMetrics(
