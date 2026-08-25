@@ -5,6 +5,10 @@ import java.io.Closeable
 data class LocalAiGenerationMetrics(
     val promptTokens: Int,
     val generatedTokens: Int,
+    val chatTemplateMs: Long,
+    val tokenizationMs: Long,
+    val contextCreationMs: Long,
+    val promptDecodeMs: Long,
     val promptProcessingMs: Long,
     val timeToFirstTokenMs: Long,
     val answerGenerationMs: Long,
@@ -78,12 +82,16 @@ class LocalAiEngine(
             metrics = LocalAiGenerationMetrics(
                 promptTokens = values[1].toIntOrNull() ?: 0,
                 generatedTokens = values[2].toIntOrNull() ?: 0,
-                promptProcessingMs = values[3].toLongOrNull() ?: 0L,
-                timeToFirstTokenMs = values[4].toLongOrNull() ?: 0L,
-                answerGenerationMs = values[5].toLongOrNull() ?: 0L,
-                totalInferenceMs = values[6].toLongOrNull() ?: 0L,
-                finishReason = values[7],
-                thinkingDisabled = values[8].toBooleanStrictOrNull() ?: false
+                chatTemplateMs = values[3].toLongOrNull() ?: 0L,
+                tokenizationMs = values[4].toLongOrNull() ?: 0L,
+                contextCreationMs = values[5].toLongOrNull() ?: 0L,
+                promptDecodeMs = values[6].toLongOrNull() ?: 0L,
+                promptProcessingMs = values[7].toLongOrNull() ?: 0L,
+                timeToFirstTokenMs = values[8].toLongOrNull() ?: 0L,
+                answerGenerationMs = values[9].toLongOrNull() ?: 0L,
+                totalInferenceMs = values[10].toLongOrNull() ?: 0L,
+                finishReason = values[11],
+                thinkingDisabled = values[12].toBooleanStrictOrNull() ?: false
             )
         )
     }
@@ -163,7 +171,7 @@ class LocalAiEngine(
     }
 
     companion object {
-        private const val GENERATION_RESULT_FIELD_COUNT = 9
+        private const val GENERATION_RESULT_FIELD_COUNT = 13
         private const val RUNTIME_REPORT_FIELD_COUNT = 8
 
         @Volatile
