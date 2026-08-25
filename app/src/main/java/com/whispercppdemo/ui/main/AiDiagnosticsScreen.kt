@@ -431,6 +431,7 @@ private fun AiSelfTestCard(
                                 }
                             )
                             append("\nModellladezeit: ${metrics.modelLoadMs} ms")
+                            append("\nCPU-Fallback: ${if (metrics.cpuFallbackUsed) "ja" else "nein"}")
                             append(
                                 if (metrics.conversationContinued) {
                                     "\nUnterhaltung: vorhandenen Kontext fortgeführt"
@@ -441,8 +442,10 @@ private fun AiSelfTestCard(
                             append("\nPromptverarbeitung: ${metrics.promptProcessingMs} ms")
                             append("\nZeit bis zum ersten Token: ${metrics.timeToFirstTokenMs} ms")
                             append("\nAntworterzeugung: ${metrics.answerGenerationMs} ms")
-                            append("\nErfasste native Rechenphasen: ${metrics.accountedInferenceMs} ms")
-                            append("\nAußerhalb dieser Rechenphasen: ${metrics.outsideAccountedInferenceMs} ms")
+                            append("\nNative Inferenz gesamt: ${metrics.nativeInferenceMs} ms")
+                            append("\nPrompt + Antwort (nicht überlappend): ${metrics.accountedNativeComputeMs} ms")
+                            append("\nWeitere Zeit innerhalb Native: ${metrics.insideNativeUnaccountedMs} ms")
+                            append("\nZeit außerhalb erfolgreicher Native-Inferenz: ${metrics.outsideNativeMs} ms")
                             append("\nEnde-zu-Ende-Gesamtdauer: ${metrics.totalMs} ms")
                             append("\nTokens: ${metrics.promptTokens} Eingabe · ${metrics.generatedTokens} Antwort")
                             append("\nBeendigung: ${aiFinishReasonLabel(metrics.finishReason)}")
