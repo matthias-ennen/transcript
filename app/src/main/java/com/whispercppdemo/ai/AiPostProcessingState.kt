@@ -21,6 +21,10 @@ data class AiSelfTestMetrics(
     val cpuFallbackUsed: Boolean,
     val promptTokens: Int,
     val generatedTokens: Int,
+    val chatTemplateMs: Long,
+    val tokenizationMs: Long,
+    val contextCreationMs: Long,
+    val promptDecodeMs: Long,
     val promptProcessingMs: Long,
     val timeToFirstTokenMs: Long,
     val answerGenerationMs: Long,
@@ -32,6 +36,16 @@ data class AiSelfTestMetrics(
     /** TTFT overlaps prompt processing and must never be added a second time. */
     val accountedNativeComputeMs: Long
         get() = (promptProcessingMs + answerGenerationMs).coerceAtLeast(0L)
+
+    val firstTokenAfterPromptMs: Long
+        get() = (timeToFirstTokenMs - promptProcessingMs).coerceAtLeast(0L)
+
+    val promptPhaseDetailMs: Long
+        get() = (chatTemplateMs + tokenizationMs + contextCreationMs + promptDecodeMs)
+            .coerceAtLeast(0L)
+
+    val promptPhaseOtherMs: Long
+        get() = (promptProcessingMs - promptPhaseDetailMs).coerceAtLeast(0L)
 
     /** Native time not explained by the two historical non-overlapping UI phases. */
     val insideNativeUnaccountedMs: Long
