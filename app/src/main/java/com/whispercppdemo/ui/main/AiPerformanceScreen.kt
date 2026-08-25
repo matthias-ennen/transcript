@@ -22,20 +22,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.ai.AiBenchmarkResult
 import de.matthiasennen.transcript.ai.AiHardwareSnapshot
@@ -51,7 +46,6 @@ import de.matthiasennen.transcript.ai.LocalAiLoadMode
 import de.matthiasennen.transcript.ai.LocalAiThreadPriority
 import de.matthiasennen.transcript.ai.thermalStatusLabel
 import java.util.Locale
-import kotlin.math.ceil
 
 @Composable
 fun AiPerformanceScreen(
@@ -79,8 +73,13 @@ fun AiPerformanceScreen(
     var postProcessingStrategy by remember {
         mutableStateOf(postProcessingStrategyPreferences.load())
     }
+    val processorCount = (state.aiHardwareSnapshot?.processorCount
+        ?: Runtime.getRuntime().availableProcessors()).coerceIn(1, 64)
     val gpuSettingsEnabled = configuration.backend == LocalAiBackend.VULKAN ||
         configuration.backend == LocalAiBackend.HYBRID
+    val modelLayerCount = state.performanceModelLayerCount
+    val gpuLayerSelectionEnabled = gpuSettingsEnabled && modelLayerCount > 0
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -109,28 +108,77 @@ fun AiPerformanceScreen(
             onSelectProfileModel = onSelectProfileModel,
             onRefreshHardware = onRefreshHardware
         )
+
         ExpandableSettingsCard("context", "Kontext, Threads und Laden", uiPreferences, onReset = {
             val d = LocalAiConfiguration()
-            onConfigurationChanged(configuration.copy(contextSize=d.contextSize, generationThreads=d.generationThreads, promptThreads=d.promptThreads, batchSize=d.batchSize, microBatchSize=d.microBatchSize, maximumOutputTokens=d.maximumOutputTokens, flashAttention=d.flashAttention, loadMode=d.loadMode))
+            onConfigurationChanged(
+                configuration.copy(
+                    contextSize = d.contextSize,
+                    generationThreads = d.generationThreads,
+                    promptThreads = d.promptThreads,
+                    batchSize = d.batchSize,
+                    microBatchSize = d.microBatchSize,
+                    maximumOutputTokens = d.maximumOutputTokens,
+                    flashAttention = d.flashAttention,
+                    loadMode = d.loadMode
+                )
+            )
         }) {
-            NumberSetting("Kontextgröße", configuration.contextSize, "1.024–32.768 Tokens") {
-                onConfigurationChanged(configuration.copy(contextSize = it))
+            NumberChoiceSetting(
+                title = "Kontextgröße",
+                value = configuration.contextSize,
+                description = "1.024–32.768 Tokens; Standard 4.096",
+                regularOptions = SettingsOptionCatalogs.aiContextSize
+            ) { selected ->
+                val batch = configuration.batchSize.coerceIn(32, selected)
+                val microBatch = configuration.microBatchSize.coerceIn(16, batch)
+                val output = configuration.maximumOutputTokens.coerceIn(32, selected / 2)
+                onConfigurationChanged(
+                    configuration.copy(
+                        contextSize = selected,
+                        batchSize = batch,
+                        microBatchSize = microBatch,
+                        maximumOutputTokens = output
+                    )
+                )
             }
-            NumberSetting("Threads für Textausgabe", configuration.generationThreads, "1 bis erkannte CPU-Kerne") {
-                onConfigurationChanged(configuration.copy(generationThreads = it))
+            NumberChoiceSetting(
+                title = "Threads für Textausgabe",
+                value = configuration.generationThreads,
+                description = "1 bis erkannte CPU-Kerne",
+                regularOptions = SettingsOptionCatalogs.processorThreads(processorCount)
+            ) { onConfigurationChanged(configuration.copy(generationThreads = it)) }
+            NumberChoiceSetting(
+                title = "Threads für Texteingabe",
+                value = configuration.promptThreads,
+                description = "1 bis erkannte CPU-Kerne",
+                regularOptions = SettingsOptionCatalogs.processorThreads(processorCount)
+            ) { onConfigurationChanged(configuration.copy(promptThreads = it)) }
+            NumberChoiceSetting(
+                title = "Prompt-Batchgröße",
+                value = configuration.batchSize,
+                description = "32 bis aktuelle Kontextgröße",
+                regularOptions = SettingsOptionCatalogs.aiBatchSize(configuration.contextSize)
+            ) { selected ->
+                onConfigurationChanged(
+                    configuration.copy(
+                        batchSize = selected,
+                        microBatchSize = configuration.microBatchSize.coerceIn(16, selected)
+                    )
+                )
             }
-            NumberSetting("Threads für Texteingabe", configuration.promptThreads, "1 bis erkannte CPU-Kerne") {
-                onConfigurationChanged(configuration.copy(promptThreads = it))
-            }
-            NumberSetting("Prompt-Batchgröße", configuration.batchSize, "32 bis Kontextgröße") {
-                onConfigurationChanged(configuration.copy(batchSize = it))
-            }
-            NumberSetting("Physische Micro-Batchgröße", configuration.microBatchSize, "16 bis Prompt-Batchgröße") {
-                onConfigurationChanged(configuration.copy(microBatchSize = it))
-            }
-            NumberSetting("Maximale Ausgabetokens", configuration.maximumOutputTokens, "32 bis halbe Kontextgröße") {
-                onConfigurationChanged(configuration.copy(maximumOutputTokens = it))
-            }
+            NumberChoiceSetting(
+                title = "Physische Micro-Batchgröße",
+                value = configuration.microBatchSize,
+                description = "16 bis aktuelle Prompt-Batchgröße",
+                regularOptions = SettingsOptionCatalogs.aiMicroBatchSize(configuration.batchSize)
+            ) { onConfigurationChanged(configuration.copy(microBatchSize = it)) }
+            NumberChoiceSetting(
+                title = "Maximale Ausgabetokens",
+                value = configuration.maximumOutputTokens,
+                description = "32 bis halbe Kontextgröße",
+                regularOptions = SettingsOptionCatalogs.aiMaximumOutputTokens(configuration.contextSize)
+            ) { onConfigurationChanged(configuration.copy(maximumOutputTokens = it)) }
             ChoiceSetting(
                 title = "Flash Attention",
                 selected = configuration.flashAttention,
@@ -152,9 +200,20 @@ fun AiPerformanceScreen(
                 )
             ) { onConfigurationChanged(configuration.copy(loadMode = it)) }
         }
+
         ExpandableSettingsCard("cpu", "CPU und KleidiAI", uiPreferences, onReset = {
             val d = LocalAiConfiguration()
-            onConfigurationChanged(configuration.copy(cpuBackend=d.cpuBackend, cpuCoreMask=d.cpuCoreMask, strictCpuPlacement=d.strictCpuPlacement, threadPriority=d.threadPriority, threadPollingPercent=d.threadPollingPercent, kleidiSmeUnits=d.kleidiSmeUnits, kleidiChunkMultiplier=d.kleidiChunkMultiplier))
+            onConfigurationChanged(
+                configuration.copy(
+                    cpuBackend = d.cpuBackend,
+                    cpuCoreMask = d.cpuCoreMask,
+                    strictCpuPlacement = d.strictCpuPlacement,
+                    threadPriority = d.threadPriority,
+                    threadPollingPercent = d.threadPollingPercent,
+                    kleidiSmeUnits = d.kleidiSmeUnits,
+                    kleidiChunkMultiplier = d.kleidiChunkMultiplier
+                )
+            )
         }) {
             ChoiceSetting(
                 title = "CPU-Beschleunigung",
@@ -165,10 +224,10 @@ fun AiPerformanceScreen(
                     LocalAiCpuBackend.KLEIDIAI to "KleidiAI"
                 )
             ) { onConfigurationChanged(configuration.copy(cpuBackend = it)) }
-            TextSetting(
-                title = "CPU-Kerne",
+            CpuCoreMaskSetting(
                 value = configuration.cpuCoreMask,
-                placeholder = "Leer = alle, sonst z. B. 4,5,6,7"
+                processorCount = processorCount,
+                maximumFrequenciesKhz = state.aiHardwareSnapshot?.coreMaximumFrequenciesKhz.orEmpty()
             ) { onConfigurationChanged(configuration.copy(cpuCoreMask = it)) }
             BooleanSetting(
                 "Strikte CPU-Kernbindung",
@@ -185,13 +244,13 @@ fun AiPerformanceScreen(
                     LocalAiThreadPriority.HIGH to "Hoch"
                 )
             ) { onConfigurationChanged(configuration.copy(threadPriority = it)) }
-            NumberSetting("Thread-Polling", configuration.threadPollingPercent, "0–100 Prozent") {
+            NumberSetting("Thread-Polling", configuration.threadPollingPercent, "0–100 Prozent; Standard 50") {
                 onConfigurationChanged(configuration.copy(threadPollingPercent = it))
             }
-            NumberSetting("KleidiAI SME-Einheiten", configuration.kleidiSmeUnits, "−1 = automatisch, 0 = aus") {
+            NumberSetting("KleidiAI SME-Einheiten", configuration.kleidiSmeUnits, "−1 = automatisch, 0 = aus, danach 1–64") {
                 onConfigurationChanged(configuration.copy(kleidiSmeUnits = it))
             }
-            NumberSetting("KleidiAI Chunk-Multiplikator", configuration.kleidiChunkMultiplier, "0 = automatisch") {
+            NumberSetting("KleidiAI Chunk-Multiplikator", configuration.kleidiChunkMultiplier, "0 = automatisch, danach 1–64") {
                 onConfigurationChanged(configuration.copy(kleidiChunkMultiplier = it))
             }
             state.aiHardwareSnapshot?.let { hardware ->
@@ -206,18 +265,29 @@ fun AiPerformanceScreen(
                     "Geladene CPU-Variante: ${hardware.cpuVariant} · " +
                         "KleidiAI-Puffer: ${yesNo(hardware.kleidiAiBufferAvailable)} · " +
                         "Modell ${state.performanceProfileModel.modelLabel}: " +
-                        (if (state.performanceProfileModel.kleidiAiCompatible) {
+                        if (state.performanceProfileModel.kleidiAiCompatible) {
                             "KleidiAI-kompatibel"
                         } else {
                             "nicht KleidiAI-kompatibel (benötigt Q4_0 oder Q8_0)"
-                        }),
+                        },
                     style = MaterialTheme.typography.bodySmall
                 )
             }
         }
+
         ExpandableSettingsCard("vulkan", "Vulkan und GPU", uiPreferences, onReset = {
             val d = LocalAiConfiguration()
-            onConfigurationChanged(configuration.copy(backend=d.backend, gpuDeviceIndex=d.gpuDeviceIndex, gpuLayers=d.gpuLayers, gpuLayerPercent=d.gpuLayerPercent, offloadKqv=d.offloadKqv, offloadOperations=d.offloadOperations, automaticCpuFallback=d.automaticCpuFallback))
+            onConfigurationChanged(
+                configuration.copy(
+                    backend = d.backend,
+                    gpuDeviceIndex = d.gpuDeviceIndex,
+                    gpuLayers = d.gpuLayers,
+                    gpuLayerPercent = d.gpuLayerPercent,
+                    offloadKqv = d.offloadKqv,
+                    offloadOperations = d.offloadOperations,
+                    automaticCpuFallback = d.automaticCpuFallback
+                )
+            )
         }) {
             ChoiceSetting(
                 title = "Rechenbackend",
@@ -228,7 +298,29 @@ fun AiPerformanceScreen(
                     LocalAiBackend.VULKAN to "Vulkan – vollständig",
                     LocalAiBackend.HYBRID to "CPU/Vulkan gemischt"
                 )
-            ) { onConfigurationChanged(configuration.copy(backend = it)) }
+            ) { selectedBackend ->
+                val updated = when {
+                    selectedBackend == LocalAiBackend.VULKAN && modelLayerCount > 0 ->
+                        configuration.copy(backend = selectedBackend, gpuLayers = -1, gpuLayerPercent = 100)
+                    selectedBackend == LocalAiBackend.HYBRID && modelLayerCount > 0 -> {
+                        val layers = when {
+                            configuration.gpuLayers in 1..modelLayerCount -> configuration.gpuLayers
+                            else -> modelLayerCount
+                        }
+                        configuration.copy(
+                            backend = selectedBackend,
+                            gpuLayers = layers,
+                            gpuLayerPercent = SettingsOptionCatalogs.gpuPercentForLayers(
+                                selectedBackend,
+                                layers,
+                                modelLayerCount
+                            )
+                        )
+                    }
+                    else -> configuration.copy(backend = selectedBackend)
+                }
+                onConfigurationChanged(updated)
+            }
             val vulkanDevices = state.aiHardwareSnapshot?.vulkanDevices.orEmpty()
             ChoiceSetting(
                 title = "Vulkan-Gerät",
@@ -240,35 +332,51 @@ fun AiPerformanceScreen(
                 },
                 enabled = gpuSettingsEnabled
             ) { onConfigurationChanged(configuration.copy(gpuDeviceIndex = it)) }
-            NumberSetting(
-                "GPU-Schichten",
-                configuration.gpuLayers,
-                if (gpuSettingsEnabled) "−1 = vollständig; bei gemischtem Backend exakte Schichtzahl"
-                else "Nur für Vulkan oder CPU/Vulkan verfügbar",
-                enabled = gpuSettingsEnabled
-            ) { onConfigurationChanged(configuration.copy(gpuLayers = it)) }
-            NumberSetting(
-                "GPU-Anteil",
-                configuration.gpuLayerPercent,
-                if (state.performanceModelLayerCount > 0) {
-                    "0–100 Prozent · Modell hat ${state.performanceModelLayerCount} Schichten"
+            NumberChoiceSetting(
+                title = "GPU-Schichten",
+                value = configuration.gpuLayers,
+                description = if (modelLayerCount > 0) {
+                    "Exakte Auswahl bis $modelLayerCount Modellschichten; bei Vulkan zusätzlich vollständig"
                 } else {
-                    "0–100 Prozent · Modell muss für die Umrechnung installiert sein"
+                    "Modellschichtzahl muss zuerst zuverlässig erkannt werden"
                 },
-                enabled = gpuSettingsEnabled
-            ) { percent ->
-                val normalizedPercent = percent.coerceIn(0, 100)
-                val layers = if (state.performanceModelLayerCount > 0) {
-                    ceil(state.performanceModelLayerCount * normalizedPercent / 100.0).toInt()
-                } else {
-                    configuration.gpuLayers
-                }
+                regularOptions = SettingsOptionCatalogs.aiGpuLayers(configuration.backend, modelLayerCount),
+                enabled = gpuLayerSelectionEnabled
+            ) { layers ->
                 onConfigurationChanged(
                     configuration.copy(
-                        gpuLayerPercent = normalizedPercent,
-                        gpuLayers = if (normalizedPercent == 100) -1 else layers
+                        gpuLayers = layers,
+                        gpuLayerPercent = SettingsOptionCatalogs.gpuPercentForLayers(
+                            configuration.backend,
+                            layers,
+                            modelLayerCount
+                        )
                     )
                 )
+            }
+            NumberChoiceSetting(
+                title = "GPU-Anteil",
+                value = configuration.gpuLayerPercent,
+                description = if (modelLayerCount > 0) {
+                    "Bedienhilfe in 5-%-Schritten · Modell hat $modelLayerCount Schichten; exakte Schichtzahl bleibt maßgeblich"
+                } else {
+                    "Modell muss für die Umrechnung installiert und analysierbar sein"
+                },
+                regularOptions = SettingsOptionCatalogs.aiGpuLayerPercent,
+                enabled = gpuLayerSelectionEnabled
+            ) { percent ->
+                SettingsOptionCatalogs.gpuLayersForPercent(
+                    configuration.backend,
+                    percent,
+                    modelLayerCount
+                )?.let { layers ->
+                    onConfigurationChanged(
+                        configuration.copy(
+                            gpuLayerPercent = percent,
+                            gpuLayers = layers
+                        )
+                    )
+                }
             }
             BooleanSetting(
                 "KQV/KV-Cache auslagern",
@@ -294,41 +402,78 @@ fun AiPerformanceScreen(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+
         ExpandableSettingsCard("stability", "Arbeitsspeicher, Wärme und Stabilität", uiPreferences, onReset = {
             val d = LocalAiConfiguration()
-            onConfigurationChanged(configuration.copy(minimumFreeMemoryMb=d.minimumFreeMemoryMb, maximumMemoryPercent=d.maximumMemoryPercent, maximumVulkanMemoryPercent=d.maximumVulkanMemoryPercent, thermalWarningStatus=d.thermalWarningStatus, thermalThrottleStatus=d.thermalThrottleStatus, thermalStopStatus=d.thermalStopStatus, throttledThreads=d.throttledThreads, gpuLayersReducedPerStep=d.gpuLayersReducedPerStep, coolingPauseSeconds=d.coolingPauseSeconds))
+            onConfigurationChanged(
+                configuration.copy(
+                    minimumFreeMemoryMb = d.minimumFreeMemoryMb,
+                    maximumMemoryPercent = d.maximumMemoryPercent,
+                    maximumVulkanMemoryPercent = d.maximumVulkanMemoryPercent,
+                    thermalWarningStatus = d.thermalWarningStatus,
+                    thermalThrottleStatus = d.thermalThrottleStatus,
+                    thermalStopStatus = d.thermalStopStatus,
+                    throttledThreads = d.throttledThreads,
+                    gpuLayersReducedPerStep = d.gpuLayersReducedPerStep,
+                    coolingPauseSeconds = d.coolingPauseSeconds
+                )
+            )
         }) {
-            NumberSetting("Freie RAM-Reserve", configuration.minimumFreeMemoryMb, "128–8.192 MB") {
+            NumberSetting("Freie RAM-Reserve", configuration.minimumFreeMemoryMb, "128–8.192 MB; Standard 512 MB") {
                 onConfigurationChanged(configuration.copy(minimumFreeMemoryMb = it))
             }
-            NumberSetting("Maximaler RAM-Anteil", configuration.maximumMemoryPercent, "40–95 Prozent") {
+            NumberSetting("Maximaler RAM-Anteil", configuration.maximumMemoryPercent, "40–95 Prozent; 1-%-Schritte") {
                 onConfigurationChanged(configuration.copy(maximumMemoryPercent = it))
             }
-            NumberSetting("Maximaler Vulkan-Speicheranteil", configuration.maximumVulkanMemoryPercent, "25–95 Prozent") {
+            NumberSetting("Maximaler Vulkan-Speicheranteil", configuration.maximumVulkanMemoryPercent, "25–95 Prozent; 1-%-Schritte") {
                 onConfigurationChanged(configuration.copy(maximumVulkanMemoryPercent = it))
             }
-            ThermalChoice("Warnschwelle", configuration.thermalWarningStatus) {
-                onConfigurationChanged(configuration.copy(thermalWarningStatus = it))
-            }
-            ThermalChoice("Leistungsreduzierung", configuration.thermalThrottleStatus) {
-                onConfigurationChanged(configuration.copy(thermalThrottleStatus = it))
-            }
-            ThermalChoice("Berechnung beenden", configuration.thermalStopStatus) {
-                onConfigurationChanged(configuration.copy(thermalStopStatus = it))
-            }
-            NumberSetting("Threads bei Wärmereduzierung", configuration.throttledThreads, "1 bis CPU-Kernzahl") {
-                onConfigurationChanged(configuration.copy(throttledThreads = it))
-            }
-            NumberSetting("GPU-Schichten je Reduktionsschritt", configuration.gpuLayersReducedPerStep, "1–128") {
+            ThermalChoice(
+                title = "Warnschwelle",
+                selected = configuration.thermalWarningStatus,
+                minimum = 0,
+                maximum = configuration.thermalThrottleStatus
+            ) { onConfigurationChanged(configuration.copy(thermalWarningStatus = it)) }
+            ThermalChoice(
+                title = "Leistungsreduzierung",
+                selected = configuration.thermalThrottleStatus,
+                minimum = configuration.thermalWarningStatus,
+                maximum = configuration.thermalStopStatus
+            ) { onConfigurationChanged(configuration.copy(thermalThrottleStatus = it)) }
+            ThermalChoice(
+                title = "Berechnung beenden",
+                selected = configuration.thermalStopStatus,
+                minimum = configuration.thermalThrottleStatus,
+                maximum = 6
+            ) { onConfigurationChanged(configuration.copy(thermalStopStatus = it)) }
+            NumberChoiceSetting(
+                title = "Threads bei Wärmereduzierung",
+                value = configuration.throttledThreads,
+                description = "1 bis erkannte CPU-Kerne",
+                regularOptions = SettingsOptionCatalogs.processorThreads(processorCount)
+            ) { onConfigurationChanged(configuration.copy(throttledThreads = it)) }
+            NumberSetting("GPU-Schichten je Reduktionsschritt", configuration.gpuLayersReducedPerStep, "1–128; sinnvolle Staffelung für Stabilitätstests") {
                 onConfigurationChanged(configuration.copy(gpuLayersReducedPerStep = it))
             }
-            NumberSetting("Abkühlpause", configuration.coolingPauseSeconds, "0–300 Sekunden") {
+            NumberSetting("Abkühlpause", configuration.coolingPauseSeconds, "0–300 Sekunden; Standard 15") {
                 onConfigurationChanged(configuration.copy(coolingPauseSeconds = it))
             }
         }
+
         ExpandableSettingsCard("benchmark", "Leistungstest", uiPreferences, onReset = {
             val d = LocalAiConfiguration()
-            onConfigurationChanged(configuration.copy(benchmarkWarmupRuns=d.benchmarkWarmupRuns, benchmarkMeasuredRuns=d.benchmarkMeasuredRuns, benchmarkPromptCharacters=d.benchmarkPromptCharacters, benchmarkOutputTokens=d.benchmarkOutputTokens, benchmarkPauseSeconds=d.benchmarkPauseSeconds, benchmarkMinimumBatteryPercent=d.benchmarkMinimumBatteryPercent, benchmarkRequiresCharging=d.benchmarkRequiresCharging, benchmarkMaximumThermalStatus=d.benchmarkMaximumThermalStatus))
+            onConfigurationChanged(
+                configuration.copy(
+                    benchmarkWarmupRuns = d.benchmarkWarmupRuns,
+                    benchmarkMeasuredRuns = d.benchmarkMeasuredRuns,
+                    benchmarkPromptCharacters = d.benchmarkPromptCharacters,
+                    benchmarkOutputTokens = d.benchmarkOutputTokens,
+                    benchmarkPauseSeconds = d.benchmarkPauseSeconds,
+                    benchmarkMinimumBatteryPercent = d.benchmarkMinimumBatteryPercent,
+                    benchmarkRequiresCharging = d.benchmarkRequiresCharging,
+                    benchmarkMaximumThermalStatus = d.benchmarkMaximumThermalStatus
+                )
+            )
         }) {
             NumberSetting("Aufwärmdurchläufe", configuration.benchmarkWarmupRuns, "0–5") {
                 onConfigurationChanged(configuration.copy(benchmarkWarmupRuns = it))
@@ -336,16 +481,16 @@ fun AiPerformanceScreen(
             NumberSetting("Messdurchläufe", configuration.benchmarkMeasuredRuns, "1–10") {
                 onConfigurationChanged(configuration.copy(benchmarkMeasuredRuns = it))
             }
-            NumberSetting("Testprompt-Länge", configuration.benchmarkPromptCharacters, "128–8.192 Zeichen") {
+            NumberSetting("Testprompt-Länge", configuration.benchmarkPromptCharacters, "128–8.192 Zeichen; 128er-Schritte") {
                 onConfigurationChanged(configuration.copy(benchmarkPromptCharacters = it))
             }
-            NumberSetting("Ausgabetokens pro Test", configuration.benchmarkOutputTokens, "32–512") {
+            NumberSetting("Ausgabetokens pro Test", configuration.benchmarkOutputTokens, "32–512; 32er-Schritte") {
                 onConfigurationChanged(configuration.copy(benchmarkOutputTokens = it))
             }
             NumberSetting("Pause zwischen Läufen", configuration.benchmarkPauseSeconds, "0–120 Sekunden") {
                 onConfigurationChanged(configuration.copy(benchmarkPauseSeconds = it))
             }
-            NumberSetting("Mindestakkustand", configuration.benchmarkMinimumBatteryPercent, "0–100 Prozent") {
+            NumberSetting("Mindestakkustand", configuration.benchmarkMinimumBatteryPercent, "0–100 Prozent; 5-%-Schritte") {
                 onConfigurationChanged(configuration.copy(benchmarkMinimumBatteryPercent = it))
             }
             BooleanSetting(
@@ -375,6 +520,7 @@ fun AiPerformanceScreen(
                 BenchmarkResultCard(result)
             }
         }
+
         ExpandableSettingsCard("profiles", "Profile sowie JSON-Import und -Export", uiPreferences, onReset = onResetConfiguration) {
             Text("Profil auf ein anderes KI-Modell übertragen", style = MaterialTheme.typography.titleSmall)
             AiModel.entries.filter { it != state.performanceProfileModel }.forEach { target ->
@@ -527,29 +673,14 @@ internal fun NumberSetting(
     enabled: Boolean = true,
     onValueChanged: (Int) -> Unit
 ) {
-    var text by remember(title) { mutableStateOf(value.toString()) }
-    var focused by remember(title) { mutableStateOf(false) }
-    LaunchedEffect(value) {
-        if (!focused) text = value.toString()
-    }
-    fun commit() {
-        text.toIntOrNull()?.let(onValueChanged)
-    }
-    OutlinedTextField(
-        value = text,
-        onValueChange = { text = it },
-        label = { Text(title) },
-        supportingText = { Text(description) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-        keyboardActions = KeyboardActions(onDone = { commit() }),
-        singleLine = true,
+    val options = defaultNumberOptions(title)
+    NumberChoiceSetting(
+        title = title,
+        value = value,
+        description = description,
+        regularOptions = if (options.isEmpty()) listOf(value) else options,
         enabled = enabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .onFocusChanged { state ->
-                if (focused && !state.isFocused) commit()
-                focused = state.isFocused
-            }
+        onValueChanged = onValueChanged
     )
 }
 
@@ -612,12 +743,12 @@ internal fun <T> ChoiceSetting(
                 Text(label)
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                options.forEach { (value, optionLabel) ->
+                options.forEach { (optionValue, optionLabel) ->
                     DropdownMenuItem(
-                        text = { Text(optionLabel) },
+                        text = { Text(if (optionValue == selected) "✓  $optionLabel" else optionLabel) },
                         onClick = {
                             expanded = false
-                            onSelected(value)
+                            onSelected(optionValue)
                         }
                     )
                 }
@@ -627,11 +758,19 @@ internal fun <T> ChoiceSetting(
 }
 
 @Composable
-private fun ThermalChoice(title: String, selected: Int, onSelected: (Int) -> Unit) {
+private fun ThermalChoice(
+    title: String,
+    selected: Int,
+    minimum: Int = 0,
+    maximum: Int = 6,
+    onSelected: (Int) -> Unit
+) {
+    val safeMinimum = minimum.coerceIn(0, 6)
+    val safeMaximum = maximum.coerceIn(safeMinimum, 6)
     ChoiceSetting(
         title = title,
         selected = selected,
-        options = (0..6).map { it to thermalStatusLabel(it) },
+        options = (safeMinimum..safeMaximum).map { it to thermalStatusLabel(it) },
         onSelected = onSelected
     )
 }
@@ -659,7 +798,7 @@ private fun BenchmarkResultCard(result: AiBenchmarkResult) {
             result.runs.forEach { run ->
                 Text(
                     "Lauf ${run.runNumber}: ${decimal(run.outputTokensPerSecond)} Tokens/s · " +
-                        "${thermalStatusLabel(run.thermalStatus)}",
+                        thermalStatusLabel(run.thermalStatus),
                     style = MaterialTheme.typography.bodySmall
                 )
             }
