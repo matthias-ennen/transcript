@@ -81,7 +81,6 @@ fun AiDiagnosticsScreen(
     }
 }
 
-
 @Composable
 private fun ThermalStatusIndicator(rawStatus: Int?) {
     val status = normalizeAiDiagnosticsThermalStatus(rawStatus)
@@ -442,7 +441,9 @@ private fun AiSelfTestCard(
                             append("\nPromptverarbeitung: ${metrics.promptProcessingMs} ms")
                             append("\nZeit bis zum ersten Token: ${metrics.timeToFirstTokenMs} ms")
                             append("\nAntworterzeugung: ${metrics.answerGenerationMs} ms")
-                            append("\nGesamtdauer: ${metrics.totalMs} ms")
+                            append("\nErfasste native Rechenphasen: ${metrics.accountedInferenceMs} ms")
+                            append("\nAußerhalb dieser Rechenphasen: ${metrics.outsideAccountedInferenceMs} ms")
+                            append("\nEnde-zu-Ende-Gesamtdauer: ${metrics.totalMs} ms")
                             append("\nTokens: ${metrics.promptTokens} Eingabe · ${metrics.generatedTokens} Antwort")
                             append("\nBeendigung: ${aiFinishReasonLabel(metrics.finishReason)}")
                             append(
