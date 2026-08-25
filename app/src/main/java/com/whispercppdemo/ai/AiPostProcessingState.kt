@@ -21,17 +21,17 @@ data class AiSelfTestMetrics(
     val cpuFallbackUsed: Boolean,
     val promptTokens: Int,
     val generatedTokens: Int,
-    val chatTemplateMs: Long,
-    val tokenizationMs: Long,
-    val contextCreationMs: Long,
-    val promptDecodeMs: Long,
     val promptProcessingMs: Long,
     val timeToFirstTokenMs: Long,
     val answerGenerationMs: Long,
     val nativeInferenceMs: Long,
     val totalMs: Long,
     val finishReason: String,
-    val thinkingDisabled: Boolean
+    val thinkingDisabled: Boolean,
+    val chatTemplateMs: Long = 0L,
+    val tokenizationMs: Long = 0L,
+    val contextCreationMs: Long = 0L,
+    val promptDecodeMs: Long = 0L
 ) {
     /** TTFT overlaps prompt processing and must never be added a second time. */
     val accountedNativeComputeMs: Long
