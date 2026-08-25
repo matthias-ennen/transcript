@@ -83,6 +83,7 @@ data class LocalAiConfiguration(
             gpuLayerPercent = if (gpuEnabled) normalizedGpuPercent else 0,
             offloadKqv = gpuEnabled && offloadKqv,
             offloadOperations = gpuEnabled && offloadOperations,
+            cpuCoreMask = normalizeCpuCoreMask(cpuCoreMask, processorLimit),
             threadPollingPercent = threadPollingPercent.coerceIn(0, 100),
             kleidiSmeUnits = kleidiSmeUnits.coerceIn(-1, 64),
             kleidiChunkMultiplier = kleidiChunkMultiplier.coerceIn(0, 64),
@@ -146,6 +147,17 @@ data class LocalAiConfiguration(
         fun preferredThreadCount(
             availableProcessors: Int = Runtime.getRuntime().availableProcessors()
         ): Int = (availableProcessors - 2).coerceIn(2, 6)
+
+        private fun normalizeCpuCoreMask(value: String, processorLimit: Int): String {
+            if (value.isBlank()) return ""
+            val cores = value.split(',')
+                .mapNotNull { it.trim().toIntOrNull() }
+                .filter { it in 0 until processorLimit }
+                .distinct()
+                .sorted()
+            if (cores.isEmpty() || cores.size == processorLimit) return ""
+            return cores.joinToString(",")
+        }
     }
 }
 

@@ -28,6 +28,28 @@ class AiPerformanceConfigurationTest {
     }
 
     @Test
+    fun normalizedCanonicalizesImportedCpuCoreMask() {
+        assertEquals(
+            "0,2,7",
+            LocalAiConfiguration(cpuCoreMask = "7, 2, 99, foo, 0, 2")
+                .normalized(availableProcessors = 8)
+                .cpuCoreMask
+        )
+        assertEquals(
+            "",
+            LocalAiConfiguration(cpuCoreMask = "99,foo,-1")
+                .normalized(availableProcessors = 8)
+                .cpuCoreMask
+        )
+        assertEquals(
+            "",
+            LocalAiConfiguration(cpuCoreMask = (0 until 8).joinToString(","))
+                .normalized(availableProcessors = 8)
+                .cpuCoreMask
+        )
+    }
+
+    @Test
     fun cpuBackendNeverKeepsGpuLayers() {
         val normalized = LocalAiConfiguration(
             backend = LocalAiBackend.CPU,
