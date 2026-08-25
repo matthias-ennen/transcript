@@ -53,7 +53,7 @@ fun WhisperSettingsScreen(
         }
 
         ExpandableSettingsCard("compute", "Rechenleistung", preferences) {
-            NumberSetting("CPU-Threads", settings.threads, "0 = automatisch; sonst 1 bis CPU-Kernzahl") {
+            NumberSetting("CPU-Threads", settings.threads, "Automatisch oder 1 bis zur erkannten CPU-Kernzahl") {
                 onSettingsChanged(settings.copy(threads = it))
             }
             ChoiceSetting(
@@ -81,12 +81,18 @@ fun WhisperSettingsScreen(
                     WhisperDecoding.BEAM_SEARCH to "Beam Search – genauer"
                 )
             ) { onSettingsChanged(settings.copy(decoding = it)) }
-            NumberSetting("Beam-Größe", settings.beamSize, "1–20; nur bei Beam Search") {
-                onSettingsChanged(settings.copy(beamSize = it))
-            }
-            NumberSetting("Alternative Ergebnisse", settings.bestOf, "1–20; nur im schnellen Verfahren") {
-                onSettingsChanged(settings.copy(bestOf = it))
-            }
+            NumberSetting(
+                "Beam-Größe",
+                settings.beamSize,
+                "1–20; nur bei Beam Search",
+                enabled = settings.decoding == WhisperDecoding.BEAM_SEARCH
+            ) { onSettingsChanged(settings.copy(beamSize = it)) }
+            NumberSetting(
+                "Alternative Ergebnisse",
+                settings.bestOf,
+                "1–20; nur im schnellen Verfahren",
+                enabled = settings.decoding == WhisperDecoding.GREEDY
+            ) { onSettingsChanged(settings.copy(bestOf = it)) }
             NumberSetting("Temperatur", settings.temperaturePercent, "0–100 Prozent; niedrig ist für Transkription meist besser") {
                 onSettingsChanged(settings.copy(temperaturePercent = it))
             }
@@ -99,9 +105,11 @@ fun WhisperSettingsScreen(
         }
 
         ExpandableSettingsCard("segments", "Segmente, Zeitstempel und Chunking", preferences) {
-            NumberSetting("Maximale Segmentlänge", settings.maximumSegmentCharacters, "0 = unbegrenzt; sonst 1–500 Zeichen") {
-                onSettingsChanged(settings.copy(maximumSegmentCharacters = it))
-            }
+            NumberSetting(
+                "Maximale Segmentlänge",
+                settings.maximumSegmentCharacters,
+                "Unbegrenzt oder praktisch nutzbare 10er-Schritte von 10 bis 500 Zeichen; gespeicherte Sonderwerte bleiben sichtbar"
+            ) { onSettingsChanged(settings.copy(maximumSegmentCharacters = it)) }
             BooleanSetting(
                 "An Wortgrenzen aufteilen",
                 "Trennt Segmente möglichst nicht mitten im Wort.",
@@ -135,13 +143,13 @@ fun WhisperSettingsScreen(
             BooleanSetting("Nicht-Sprach-Tokens unterdrücken", "Reduziert Geräusch- und Musikmarkierungen.", settings.suppressNonSpeechTokens) {
                 onSettingsChanged(settings.copy(suppressNonSpeechTokens = it))
             }
-            NumberSetting("Mindest-Log-Wahrscheinlichkeit", settings.logProbabilityThresholdPercent, "−500 bis 0; Standard −100 = −1,00") {
+            NumberSetting("Mindest-Log-Wahrscheinlichkeit", settings.logProbabilityThresholdPercent, "−5,00 bis 0,00; Standard −1,00") {
                 onSettingsChanged(settings.copy(logProbabilityThresholdPercent = it))
             }
             NumberSetting("Stille-Schwelle", settings.noSpeechThresholdPercent, "0–100 Prozent; Standard 60") {
                 onSettingsChanged(settings.copy(noSpeechThresholdPercent = it))
             }
-            NumberSetting("Kompressionsschwelle", settings.entropyThresholdPercent, "0–500; Standard 240 = 2,40") {
+            NumberSetting("Kompressionsschwelle", settings.entropyThresholdPercent, "0,00–5,00; Standard 2,40") {
                 onSettingsChanged(settings.copy(entropyThresholdPercent = it))
             }
             ResetButton { onResetGroup(WhisperSettingsGroup.PROTECTION) }
