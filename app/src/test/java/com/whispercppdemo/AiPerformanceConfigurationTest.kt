@@ -92,6 +92,55 @@ class AiPerformanceConfigurationTest {
     }
 
     @Test
+    fun explicitGpuBackendsUseConservativeAndroidBatchSize() {
+        val hybrid = LocalAiConfiguration(
+            backend = LocalAiBackend.HYBRID,
+            gpuLayers = 4,
+            batchSize = 1_024,
+            microBatchSize = 512
+        ).normalized()
+        val vulkan = LocalAiConfiguration(
+            backend = LocalAiBackend.VULKAN,
+            batchSize = 1_024,
+            microBatchSize = 512
+        ).normalized()
+
+        assertEquals(LocalAiConfiguration.SAFE_ANDROID_GPU_BATCH_SIZE, hybrid.batchSize)
+        assertEquals(LocalAiConfiguration.SAFE_ANDROID_GPU_BATCH_SIZE, hybrid.microBatchSize)
+        assertEquals(LocalAiConfiguration.SAFE_ANDROID_GPU_BATCH_SIZE, vulkan.batchSize)
+        assertEquals(LocalAiConfiguration.SAFE_ANDROID_GPU_BATCH_SIZE, vulkan.microBatchSize)
+    }
+
+    @Test
+    fun androidGpuSafetyRejectsFullVulkanAndLargeHybridTrialsBeforeJni() {
+        assertEquals(
+            true,
+            LocalAiConfiguration(backend = LocalAiBackend.VULKAN)
+                .androidGpuSafetyError()
+                ?.contains("Vollständiger Vulkan-Offload") == true
+        )
+        assertEquals(
+            true,
+            LocalAiConfiguration(
+                backend = LocalAiBackend.HYBRID,
+                gpuLayers = LocalAiConfiguration.SAFE_ANDROID_HYBRID_LAYERS + 1
+            ).androidGpuSafetyError()
+                ?.contains("höchstens ${LocalAiConfiguration.SAFE_ANDROID_HYBRID_LAYERS}") == true
+        )
+        assertEquals(
+            null,
+            LocalAiConfiguration(
+                backend = LocalAiBackend.HYBRID,
+                gpuLayers = LocalAiConfiguration.SAFE_ANDROID_HYBRID_LAYERS
+            ).androidGpuSafetyError()
+        )
+        assertEquals(
+            null,
+            LocalAiConfiguration(backend = LocalAiBackend.CPU).androidGpuSafetyError()
+        )
+    }
+
+    @Test
     fun runtimeKeyChangesOnlyForNativeRuntimeFields() {
         val base = LocalAiConfiguration()
         assertEquals(
