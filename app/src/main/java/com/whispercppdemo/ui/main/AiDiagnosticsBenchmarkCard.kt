@@ -397,8 +397,9 @@ private suspend fun runAiDiagnosticsBenchmark(
             currentCoroutineContext().ensureActive()
             val configuration = variant.configuration.normalized(hardwareAtStart.processorCount)
             val before = AiHardwareProbe.read(context)
-            benchmarkGuardError(before, configuration)?.let { guard ->
-                abortedReason = guard
+            val guardError = benchmarkGuardError(before, configuration)
+            if (guardError != null) {
+                abortedReason = guardError
                 break@outer
             }
 
