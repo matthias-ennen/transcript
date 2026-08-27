@@ -201,8 +201,31 @@ class LocalAiEngine(
         fun runtimeCapabilitiesJson(): String =
             LocalAiNative.runtimeCapabilities(nativeLibrarySearchPath())
 
-        fun inspectModelLayerCount(modelPath: String): Int =
-            LocalAiNative.inspectModelLayerCount(modelPath, nativeLibrarySearchPath())
+        /**
+         * Pinned Transcript Qwen3.5 GGUF variants use the same text-layer count
+         * within a parameter-size family, independent of quantization. This is a
+         * guarded fallback only; native GGUF inspection always wins when it yields
+         * a positive layer count.
+         */
+        fun knownModelLayerCount(modelPath: String): Int {
+            val fileName = modelPath
+                .substringAfterLast('/')
+                .substringAfterLast('\\')
+                .lowercase()
+            return when {
+                "qwen3.5-0.8b" in fileName -> 24
+                "qwen3.5-2b" in fileName -> 24
+                "qwen3.5-4b" in fileName -> 32
+                else -> 0
+            }
+        }
+
+        fun inspectModelLayerCount(modelPath: String): Int {
+            val nativeLayers = runCatching {
+                LocalAiNative.inspectModelLayerCount(modelPath, nativeLibrarySearchPath())
+            }.getOrDefault(0)
+            return nativeLayers.takeIf { it > 0 } ?: knownModelLayerCount(modelPath)
+        }
     }
 }
 
