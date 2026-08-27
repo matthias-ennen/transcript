@@ -76,6 +76,7 @@ fun AiDiagnosticsScreen(
             onStart = onStart,
             onResetConversation = onResetConversation
         )
+        AiDiagnosticsBenchmarkCard(state = state)
         if (state.diagnostics.isNotEmpty()) {
             DiagnosticsLogCard(state.diagnostics)
         }
@@ -384,7 +385,8 @@ private fun AiSelfTestCard(
                 placeholder = { Text("Eigene Eingabe für die KI …") },
                 minLines = 3,
                 maxLines = 8,
-                enabled = !state.isBusy || state.isAiModelPreloading,
+                enabled = (!state.isBusy || state.isAiModelPreloading) &&
+                    !AiDiagnosticsBenchmarkSession.isRunning,
                 modifier = Modifier.fillMaxWidth()
             )
             Button(
@@ -393,7 +395,7 @@ private fun AiSelfTestCard(
                     modelInstalled = modelInstalled,
                     modelReady = state.isAiModelReady,
                     modelPreloading = state.isAiModelPreloading,
-                    operationActive = state.isBusy,
+                    operationActive = state.isBusy || AiDiagnosticsBenchmarkSession.isRunning,
                     prompt = state.aiTestPrompt
                 ),
                 modifier = Modifier.fillMaxWidth()
@@ -408,7 +410,8 @@ private fun AiSelfTestCard(
             }
             OutlinedButton(
                 onClick = onResetConversation,
-                enabled = !state.isBusy && !state.isAiModelPreloading,
+                enabled = !state.isBusy && !state.isAiModelPreloading &&
+                    !AiDiagnosticsBenchmarkSession.isRunning,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Unterhaltung zurücksetzen")
