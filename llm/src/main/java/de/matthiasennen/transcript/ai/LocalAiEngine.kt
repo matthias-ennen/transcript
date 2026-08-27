@@ -34,30 +34,33 @@ class LocalAiEngine(
     val configuration: LocalAiConfiguration = LocalAiConfiguration()
 ) : Closeable {
     private val normalizedConfiguration = configuration.normalized()
-    private var handle: Long = LocalAiNative.create(
-        modelPath = modelPath,
-        contextSize = normalizedConfiguration.contextSize,
-        generationThreads = normalizedConfiguration.generationThreads,
-        promptThreads = normalizedConfiguration.promptThreads,
-        batchSize = normalizedConfiguration.batchSize,
-        microBatchSize = normalizedConfiguration.microBatchSize,
-        flashAttention = normalizedConfiguration.flashAttention.ordinal,
-        loadMode = normalizedConfiguration.loadMode.ordinal,
-        backend = normalizedConfiguration.backend.ordinal,
-        cpuBackend = normalizedConfiguration.cpuBackend.ordinal,
-        gpuDeviceIndex = normalizedConfiguration.gpuDeviceIndex,
-        gpuLayers = normalizedConfiguration.gpuLayers,
-        offloadKqv = normalizedConfiguration.offloadKqv,
-        offloadOperations = normalizedConfiguration.offloadOperations,
-        automaticCpuFallback = normalizedConfiguration.automaticCpuFallback,
-        cpuCoreMask = normalizedConfiguration.cpuCoreMask,
-        strictCpuPlacement = normalizedConfiguration.strictCpuPlacement,
-        threadPriority = normalizedConfiguration.threadPriority.ordinal,
-        threadPollingPercent = normalizedConfiguration.threadPollingPercent,
-        kleidiSmeUnits = normalizedConfiguration.kleidiSmeUnits,
-        kleidiChunkMultiplier = normalizedConfiguration.kleidiChunkMultiplier,
-        nativeLibrarySearchPath = nativeLibrarySearchPath()
-    )
+    private var handle: Long = run {
+        normalizedConfiguration.androidGpuSafetyError()?.let(::error)
+        LocalAiNative.create(
+            modelPath = modelPath,
+            contextSize = normalizedConfiguration.contextSize,
+            generationThreads = normalizedConfiguration.generationThreads,
+            promptThreads = normalizedConfiguration.promptThreads,
+            batchSize = normalizedConfiguration.batchSize,
+            microBatchSize = normalizedConfiguration.microBatchSize,
+            flashAttention = normalizedConfiguration.flashAttention.ordinal,
+            loadMode = normalizedConfiguration.loadMode.ordinal,
+            backend = normalizedConfiguration.backend.ordinal,
+            cpuBackend = normalizedConfiguration.cpuBackend.ordinal,
+            gpuDeviceIndex = normalizedConfiguration.gpuDeviceIndex,
+            gpuLayers = normalizedConfiguration.gpuLayers,
+            offloadKqv = normalizedConfiguration.offloadKqv,
+            offloadOperations = normalizedConfiguration.offloadOperations,
+            automaticCpuFallback = normalizedConfiguration.automaticCpuFallback,
+            cpuCoreMask = normalizedConfiguration.cpuCoreMask,
+            strictCpuPlacement = normalizedConfiguration.strictCpuPlacement,
+            threadPriority = normalizedConfiguration.threadPriority.ordinal,
+            threadPollingPercent = normalizedConfiguration.threadPollingPercent,
+            kleidiSmeUnits = normalizedConfiguration.kleidiSmeUnits,
+            kleidiChunkMultiplier = normalizedConfiguration.kleidiChunkMultiplier,
+            nativeLibrarySearchPath = nativeLibrarySearchPath()
+        )
+    }
 
     init {
         check(handle != 0L) { "Das lokale KI-Modell konnte nicht geladen werden." }
