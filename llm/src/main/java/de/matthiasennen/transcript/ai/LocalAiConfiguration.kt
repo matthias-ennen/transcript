@@ -59,7 +59,15 @@ data class LocalAiConfiguration(
     fun normalized(availableProcessors: Int = Runtime.getRuntime().availableProcessors()): LocalAiConfiguration {
         val processorLimit = availableProcessors.coerceIn(1, 64)
         val normalizedContext = contextSize.coerceIn(1_024, 32_768)
-        val normalizedBatch = batchSize.coerceIn(32, normalizedContext)
+        val gpuEnabled = backend == LocalAiBackend.VULKAN || backend == LocalAiBackend.HYBRID
+        // Android Vulkan drivers have shown DEVICE_LOST failures with large prefill batches.
+        // Keep the first controlled GPU trials at the minimum useful llama.cpp batch size.
+        val normalizedBatchMaximum = if (gpuEnabled) {
+            minOf(normalizedContext, SAFE_ANDROID_GPU_BATCH_SIZE)
+        } else {
+            normalizedContext
+        }
+        val normalizedBatch = batchSize.coerceIn(32, normalizedBatchMaximum)
         val normalizedMicroBatch = microBatchSize.coerceIn(16, normalizedBatch)
         val normalizedWarning = thermalWarningStatus.coerceIn(0, 6)
         val normalizedThrottle = thermalThrottleStatus.coerceIn(normalizedWarning, 6)
@@ -70,7 +78,6 @@ data class LocalAiConfiguration(
             LocalAiBackend.VULKAN -> if (gpuLayers == 0) -1 else gpuLayers.coerceIn(-1, 512)
             LocalAiBackend.HYBRID -> gpuLayers.coerceIn(1, 512)
         }
-        val gpuEnabled = backend == LocalAiBackend.VULKAN || backend == LocalAiBackend.HYBRID
         return copy(
             contextSize = normalizedContext,
             generationThreads = generationThreads.coerceIn(1, processorLimit),
@@ -104,6 +111,22 @@ data class LocalAiConfiguration(
             benchmarkMinimumBatteryPercent = benchmarkMinimumBatteryPercent.coerceIn(0, 100),
             benchmarkMaximumThermalStatus = benchmarkMaximumThermalStatus.coerceIn(0, 6)
         )
+    }
+
+    /**
+     * Temporary Android GPU guard for the controlled #61 device investigation.
+     * A native Vulkan DEVICE_LOST can abort the whole Android process before Kotlin
+     * gets a throwable, so risky configurations must be rejected before JNI starts.
+     */
+    fun androidGpuSafetyError(): String? {
+        val value = normalized()
+        return when {
+            value.backend == LocalAiBackend.VULKAN ->
+                "Vollständiger Vulkan-Offload ist in dieser Testversion nach einem bestätigten Android-GPU-Absturz gesperrt. Bitte CPU/Vulkan gemischt verwenden."
+            value.backend == LocalAiBackend.HYBRID && value.gpuLayers > SAFE_ANDROID_HYBRID_LAYERS ->
+                "Der abgesicherte Hybrid-Test erlaubt zunächst höchstens $SAFE_ANDROID_HYBRID_LAYERS GPU-Schichten. Bitte die GPU-Schichten reduzieren."
+            else -> null
+        }
     }
 
     /** Fields that change the native model mapping or compute context. */
@@ -144,6 +167,9 @@ data class LocalAiConfiguration(
     ).normalized()
 
     companion object {
+        const val SAFE_ANDROID_GPU_BATCH_SIZE = 32
+        const val SAFE_ANDROID_HYBRID_LAYERS = 4
+
         fun preferredThreadCount(
             availableProcessors: Int = Runtime.getRuntime().availableProcessors()
         ): Int = (availableProcessors - 2).coerceIn(2, 6)
