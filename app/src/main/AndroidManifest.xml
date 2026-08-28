@@ -84,6 +84,15 @@
         </service>
 
         <service
+            android:name=".ai.AiExecutionKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Lokale Offline-KI-Benchmarks und Diagnose bei ausgeschaltetem Bildschirm" />
+        </service>
+
+        <service
             android:name=".transcription.TranscriptionService"
             android:exported="false"
             android:process=":transcription"
