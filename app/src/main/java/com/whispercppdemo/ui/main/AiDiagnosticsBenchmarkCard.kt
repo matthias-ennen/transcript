@@ -30,6 +30,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.BuildConfig
 import de.matthiasennen.transcript.ai.AiEngineSessionManager
+import de.matthiasennen.transcript.ai.AiExecutionKeepAliveService
 import de.matthiasennen.transcript.ai.AiHardwareProbe
 import de.matthiasennen.transcript.ai.AiHardwareSnapshot
 import de.matthiasennen.transcript.ai.AiModel
@@ -126,6 +127,7 @@ private data class AiDiagnosticsBenchmarkResult(
 @Composable
 internal fun AiDiagnosticsBenchmarkCard(state: TranscriptUiState) {
     val context = LocalContext.current
+    val appContext = context.applicationContext
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val inventory = remember(context) {
@@ -162,6 +164,7 @@ internal fun AiDiagnosticsBenchmarkCard(state: TranscriptUiState) {
     DisposableEffect(Unit) {
         onDispose {
             benchmarkJob?.cancel()
+            AiExecutionKeepAliveService.stop(appContext)
             AiDiagnosticsBenchmarkSession.stop()
             AiEngineSessionManager.release()
         }
@@ -201,6 +204,10 @@ internal fun AiDiagnosticsBenchmarkCard(state: TranscriptUiState) {
             Text("Automatischer KI-Benchmark", style = MaterialTheme.typography.titleSmall)
             Text(
                 "Testmodell und Testpaket werden nur für diesen Benchmark verwendet. Die normalen KI-Einstellungen und das im Alltag ausgewählte Modell werden nicht umgestellt.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                "Während des Benchmarks hält ein Foreground-Service die CPU aktiv. Der Bildschirm darf ausgeschaltet oder gesperrt werden.",
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -300,12 +307,23 @@ internal fun AiDiagnosticsBenchmarkCard(state: TranscriptUiState) {
                             repetitions = activePlan.repetitionsPerVariant,
                             thermalStatus = state.aiDiagnosticsThermalStatus ?: -1
                         )
+                        val keepAliveFailure = runCatching {
+                            AiExecutionKeepAliveService.start(
+                                appContext,
+                                "Benchmark ${activePlan.benchmarkPackage.label} läuft …"
+                            )
+                        }.exceptionOrNull()
+                        if (keepAliveFailure != null) {
+                            benchmarkMessage = "Benchmark konnte den Hintergrundbetrieb nicht absichern: " +
+                                (keepAliveFailure.localizedMessage ?: keepAliveFailure::class.java.simpleName)
+                            return@Button
+                        }
                         AiDiagnosticsBenchmarkSession.start()
                         benchmarkJob = scope.launch {
                             try {
                                 val result = withContext(Dispatchers.IO) {
                                     runAiDiagnosticsBenchmark(
-                                        context = context.applicationContext,
+                                        context = appContext,
                                         inventory = inventory,
                                         plan = activePlan,
                                         installedModels = installedModels,
@@ -329,6 +347,7 @@ internal fun AiDiagnosticsBenchmarkCard(state: TranscriptUiState) {
                                     ?: "Benchmark konnte nicht abgeschlossen werden."
                             } finally {
                                 AiEngineSessionManager.release()
+                                AiExecutionKeepAliveService.stop(appContext)
                                 AiDiagnosticsBenchmarkSession.stop()
                                 benchmarkJob = null
                             }
@@ -595,6 +614,7 @@ private fun formatAiDiagnosticsBenchmarkReport(result: AiDiagnosticsBenchmarkRes
         appendLine("Geplant: ${result.plan.totalMeasuredRuns} Läufe · ausgeführt: ${result.runs.size}")
         appendLine("Paketdauer inklusive Pausen/Laden: ${formatSeconds(result.durationMs)} s")
         appendLine("Reihenfolge: rundenweise/interleaved")
+        appendLine("Hintergrundbetrieb: Foreground-Service + Partial Wake Lock")
         appendLine()
         appendLine("HARDWARE")
         appendLine("CPU-Kerne: ${result.hardware.processorCount}")
