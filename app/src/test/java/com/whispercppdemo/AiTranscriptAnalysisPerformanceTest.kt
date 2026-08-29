@@ -17,7 +17,7 @@ class AiTranscriptAnalysisPerformanceTest {
         assertTrue(
             aiTranscriptAnalysisPerformanceLines(snapshot)
                 .first()
-                .contains("sonstige Zeit 3,5 s")
+                .contains("Rest 3,5 s")
         )
     }
 
@@ -33,7 +33,7 @@ class AiTranscriptAnalysisPerformanceTest {
     }
 
     @Test
-    fun `multiple generations explain that detail metrics are last run only`() {
+    fun `multiple generations expose per run metrics`() {
         val metrics = LocalAiGenerationMetrics(
             promptTokens = 335,
             generatedTokens = 62,
@@ -51,12 +51,19 @@ class AiTranscriptAnalysisPerformanceTest {
         val lines = aiTranscriptAnalysisPerformanceLines(
             snapshot(
                 generationCount = 3,
-                lastGenerationMetrics = metrics
+                generationPerformance = listOf(
+                    AiTranscriptAnalysisGenerationPerformance(
+                        label = "Teil 1/2 wird ausgewertet",
+                        phaseDurationMs = 140_000L,
+                        metrics = metrics
+                    )
+                )
             )
         )
 
+        assertTrue(lines.any { it.contains("Lauf 1/3") })
         assertTrue(lines.any { it.contains("335→62 Tokens") })
-        assertTrue(lines.any { it.contains("letzten KI-Lauf") })
+        assertTrue(lines.any { it.contains("1/3 Einzelmessungen") })
     }
 
     @Test
@@ -66,20 +73,35 @@ class AiTranscriptAnalysisPerformanceTest {
         assertEquals("93,7 s", formatAiDuration(93_680L))
     }
 
+    @Test
+    fun `memory and token rate formatters are readable for device tests`() {
+        assertEquals("512 MB", formatAiMemory(512L * 1_048_576L))
+        assertEquals("10,0 Tok/s", formatAiTokenRate(tokens = 100, milliseconds = 10_000L))
+    }
+
     private fun snapshot(
         modelLoadMs: Long = 0L,
         totalInferenceMs: Long = 1_000L,
         totalDurationMs: Long = 1_200L,
         generationCount: Int = 1,
-        lastGenerationMetrics: LocalAiGenerationMetrics? = null
+        generationPerformance: List<AiTranscriptAnalysisGenerationPerformance> = emptyList()
     ) = AiTranscriptAnalysisPerformanceSnapshot(
         modelLoadMs = modelLoadMs,
+        modelAlreadyLoaded = false,
         totalInferenceMs = totalInferenceMs,
         totalDurationMs = totalDurationMs,
+        preAnalysisMs = 0L,
+        analysisWallMs = totalInferenceMs,
+        postAnalysisMs = 0L,
         generationCount = generationCount,
         sourceChunkCount = 1,
         configuration = LocalAiConfiguration(),
         runtimeReport = null,
-        lastGenerationMetrics = lastGenerationMetrics
+        generationPerformance = generationPerformance,
+        startingAppPssBytes = 0L,
+        peakAppPssBytes = 0L,
+        endingAppPssBytes = 0L,
+        maximumThermalStatus = -1,
+        resourceSampleCount = 0
     )
 }
