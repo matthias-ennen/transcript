@@ -1,8 +1,28 @@
 # Lokale Qwen3.5-Modelle
 
-Stand: Issue #61
+Stand: Produktentscheidung 29.08.2026 · Issues #101, #102 und #61
 
-Transcript bietet während der Performanceuntersuchung sechs vollwertig integrierte GGUF-Varianten derselben Qwen3.5-Familie. Die Varianten werden nicht mit der APK ausgeliefert, sondern bei Bedarf heruntergeladen und anschließend per SHA-256 geprüft.
+Transcript behält den lokalen Qwen3.5-/`llama.cpp`-Unterbau. Die fachliche Rolle
+der Modelle wird jedoch geändert: Qwen soll das Whisper-Transkript künftig
+**nicht mehr korrigieren**, sondern auf ausdrücklichen Benutzerwunsch das fertige,
+aktuell akzeptierte Transkript auswerten.
+
+Für Version 1.0 sind vier feste Auswertungsaufgaben vorgesehen:
+
+1. Zusammenfassen
+2. Kernaussagen / Stichpunkte
+3. Aufgaben & To-dos
+4. Entscheidungen / Besprechungsprotokoll
+
+Die KI-Ausgabe ist ein separates Ergebnis und verändert Transkripttext,
+Zeitstempel, Segmentreihenfolge und Transkript-Herkunft nicht.
+
+## Aktuelle Vergleichsmatrix
+
+Während #61 bleiben sechs vollwertig integrierte GGUF-Varianten derselben
+Qwen3.5-Familie als reproduzierbare Vergleichsmatrix erhalten. Die Modelle werden
+nicht mit der APK ausgeliefert, sondern bei Bedarf heruntergeladen und danach per
+SHA-256 geprüft.
 
 | Klasse | Modell | Quantisierung | Download | KleidiAI-Pfad | Quelle / gepinnte Revision |
 | --- | --- | --- | ---: | --- | --- |
@@ -24,14 +44,59 @@ Transcript bietet während der Performanceuntersuchung sechs vollwertig integrie
 
 ## Lizenz
 
-Die verwendeten Qwen3.5-Basismodelle stehen unter Apache License 2.0. Die konkreten GGUF-Quellen werden gepinnt, damit Modellherkunft und heruntergeladene Binärdatei reproduzierbar bleiben. Der Lizenztext liegt unter `licenses/Qwen3.5-Apache-2.0.txt`; die Drittanbieterübersicht steht in `THIRD_PARTY_NOTICES.md`.
+Die verwendeten Qwen3.5-Basismodelle stehen unter Apache License 2.0. Die
+konkreten GGUF-Quellen sind gepinnt, damit Modellherkunft und heruntergeladene
+Binärdatei reproduzierbar bleiben. Der Lizenztext liegt unter
+`licenses/Qwen3.5-Apache-2.0.txt`; die Drittanbieterübersicht steht in
+`THIRD_PARTY_NOTICES.md`.
+
+Vor Version 1.0 prüft #35 erneut jede tatsächlich ausgelieferte Variante samt
+Quantisierungsquelle, Revision, SHA-256 und Attribution.
 
 ## Produkt- und Testregel
 
-Die sechs Einträge sind während #61 echte App-Modelle, keine versteckten Benchmarkdateien. Sie besitzen dieselben Download-, Auswahl-, Lösch-, Diagnose-, Benchmark- und Nachbearbeitungspfade sowie jeweils ein eigenes Leistungsprofil.
+Die sechs Einträge sind während #61 echte App-Modelle, keine versteckten
+Benchmarkdateien. Sie besitzen dieselben Download-, Auswahl-, Lösch-, Diagnose-
+und Benchmarkpfade sowie jeweils ein eigenes Leistungsprofil.
 
-Die drei Benutzerklassen bleiben `Schnell`, `Ausgewogen` und `Sehr genau`; die Quantisierung wird in Klammern ergänzt. Nach reproduzierbaren Gerätevergleichen wird entschieden, welche Varianten für Version 1.0 dauerhaft sinnvoll sind. Werden Varianten später entfernt, werden Modellkatalog, GUI, Downloads, Profile, Tests und Dokumentation vollständig bereinigt.
+Die bisherige Transkript-Korrektur ist **kein Qualitätsmaßstab mehr**. Die Modelle
+werden künftig mit identischem Transkriptmaterial an den vier realen
+Auswertungsaufgaben verglichen.
+
+Bewertet werden gemeinsam:
+
+- Ende-zu-Ende-Antwortzeit
+- Prompt-/Prefill-Zeit
+- Zeit bis zum ersten Token
+- Generierungszeit und Tokenrate
+- RAM- und thermisches Verhalten
+- Stabilität und tatsächlicher CPU-/KleidiAI-/Vulkan-/Hybridpfad
+- inhaltliche Treue und Abdeckung bei Zusammenfassungen/Kernaussagen
+- Erfindungen beziehungsweise Fehlzuordnungen bei Aufgaben und Entscheidungen
+- Verhalten bei kurzen, mittleren und langen Transkripten
+
+Bei langen Transkripten muss zusätzlich der in #102 geplante mehrstufige Weg
+bewertet werden. Ein Modell ist nicht allein deshalb geeignet, weil ein kurzer
+Einzelprompt schnell beantwortet wird.
+
+## Entscheidung nach #61
+
+Die drei Benutzerklassen bleiben während der Untersuchung `Schnell`,
+`Ausgewogen` und `Sehr genau`; die Quantisierung wird in Klammern ergänzt.
+
+Nach reproduzierbaren Gerätevergleichen wird ausdrücklich entschieden:
+
+- welche Kombination die **schnellste ausreichend gute** Standardlösung ist,
+- ob mehrere Qualitätsstufen für die neue Auswertungsfunktion einen echten
+  Produktnutzen haben,
+- ob alle sechs sichtbaren Varianten in Version 1.0 bleiben sollen.
+
+Werden Varianten später entfernt, werden Modellkatalog, GUI, Downloads, Profile,
+Tests, Lizenzen und Dokumentation vollständig konsistent bereinigt. Eine
+Reduzierung erfolgt nicht stillschweigend während der Messung.
 
 ## Nicht Teil der aktuellen Matrix
 
-Qwen3.5 2B Q8_0 und Qwen3.5 4B Q8_0 werden in #61 zunächst nicht integriert. Sie werden nur erneut bewertet, wenn die Messergebnisse der Sechser-Matrix einen konkreten technischen Nutzen erwarten lassen.
+Qwen3.5 2B Q8_0 und Qwen3.5 4B Q8_0 werden in #61 zunächst nicht integriert. Sie
+werden nur erneut bewertet, wenn die Sechser-Matrix einen konkreten technischen
+Grund dafür liefert.
