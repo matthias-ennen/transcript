@@ -2,7 +2,7 @@
 
 Stand: 29.08.2026
 
-Dieses Arbeitsdokument beschreibt den aktuell freigegebenen nächsten Schritt für die lokale KI-Auswertung aus #102.
+Dieses Arbeitsdokument beschreibt das freigegebene Arbeitspaket für die lokale KI-Auswertung aus #102. Die nächste an Matthias ausgegebene APK ist der gemeinsame Geräte-Testbuild; technische Zwischenläufe werden nicht zur Installation ausgegeben.
 
 ## Gemeinsame Modellmatrix
 
@@ -28,23 +28,33 @@ Verglichen werden dieselben vier Aktionen aus #102:
 
 ## Messintegrität
 
-Jeder abgeschlossene Auswertungslauf friert seine tatsächlich verwendete Konfiguration, den aktiven Runtimepfad und die letzte native Generationsmetrik zum Abschlusszeitpunkt ein. Die UI rekonstruiert diese Werte nicht nachträglich aus veränderbaren Einstellungen oder einem globalen späteren KI-Lauf.
+Jeder abgeschlossene Auswertungslauf friert seine tatsächlich verwendete Konfiguration, den aktiven Runtimepfad sowie die zu diesem Auftrag gehörenden nativen Generationsmetriken zum Abschlusszeitpunkt ein. Die UI rekonstruiert diese Werte nicht nachträglich aus veränderbaren Einstellungen oder einem späteren KI-Lauf.
 
-Erfasst werden insbesondere:
+Erfasst werden:
 
-- Ende-zu-Ende-Dauer
-- Modellladezeit
-- gesamte Inferenzzeit
-- Prompt-/Prefill-Zeit
-- Time-to-first-token
-- Generierungszeit
-- Eingabe-/Ausgabetokens
-- Kontext, Batch/Micro-Batch und Threads
-- aktiver CPU-/KleidiAI-/Vulkanpfad und Fallbackstatus
+- Service-Ende-zu-Ende-Dauer
+- Modellladezeit und Information, ob das passende Modell bereits geladen war
+- Vorbereitung vor der Analyse und Nachbereitung danach
+- gesamte Inferenzzeit und Analyse-Wanduhrzeit
+- je KI-Aufruf die sichtbare Teil-/Merge-Phase, Phasendauer und Overhead
+- Promptverarbeitung, Time-to-first-token und Generierungszeit
+- Prompt-Decode/Prefill und Generierung jeweils mit Tokens/s
+- Eingabe-/Ausgabetokens und Finish-Grund
+- Kontext, Batch/Micro-Batch und Prompt-/Generierungsthreads
+- tatsächlich aktiver CPU-/KleidiAI-/Vulkanpfad, GPU-Schichten und Fallbackstatus
+- Start-, maximal gemessener und abschließender App-PSS sowie höchster gemessener Android-Thermalstatus
 - Anzahl Quellteile und Anzahl hierarchischer KI-Aufrufe
 
-## Nächste Optimierungsstufe
+Die Ressourcenmessung erfolgt an den Phasengrenzen des realen Produktpfads. Der ausgewiesene RAM-Wert heißt deshalb bewusst „Max. Messwert“ und behauptet keine nicht beobachtbare punktgenaue Spitze zwischen zwei Messpunkten. Die Compose-Renderzeit selbst wird nicht als vermeintlich exakter Wert ausgegeben; die für #61 entscheidenden mehrsekündigen oder mehrminütigen Laufzeitanteile liegen im Service-/Runtimepfad.
 
-Nach grüner CI für die Messintegrität wird eine reproduzierbare Praxisbasis für alle sechs Modelle aufgebaut. Änderungen an Threads, Batch/Micro-Batch, Ausgabelimits und Backend werden nur übernommen, wenn sie bei identischem Material messbar schneller sind und die Ergebnisqualität/Stabilität erhalten bleibt.
+## Geräte-Testbasis
 
-Der nächste an Matthias ausgegebene APK-Build wird ausdrücklich als #61-Testbuild gekennzeichnet und erhält einen kurzen Testplan. Zwischen-Builds dienen nur CI/Entwicklung und müssen nicht installiert werden.
+Für einen fairen Modellvergleich bleibt das akzeptierte Transkript während eines Vergleichs unverändert. Zuerst wird mit Standardprofilen und CPU/AUTO gearbeitet; Vulkan/Hybrid wird wegen des bereits nachgewiesenen nativen Absturzrisikos nicht unkontrolliert in die Baseline gemischt. Der separate Sicherheitsstand aus PR #100 bleibt für die anschließende kontrollierte GPU-Prüfung relevant.
+
+Die erste Geräteauswertung soll mit derselben Transkriptquelle über alle sechs Modelle erfolgen. Die eingeblendeten Leistungsdaten können direkt über „Leistungsdaten kopieren“ übernommen werden, damit Modell, Runtimepfad und Messwerte nicht manuell abgeschrieben werden müssen.
+
+Für die Qualitätsprüfung werden anschließend dieselben vier Produktaktionen auf den aufgrund der Baseline sinnvollen Referenzmodellen betrachtet. Kurze und lange Transkripte werden getrennt bewertet; ein langer Lauf muss seine Quellteile und Zusammenführungsaufrufe einzeln ausweisen.
+
+## Entscheidungsregel
+
+Eine Konfiguration wird nur bevorzugt, wenn sie bei identischem Material messbar schneller ist und Ergebnisqualität, Stabilität und vollständige Quellenabdeckung erhält. Ausgabelimits werden nicht lediglich zur Beschleunigung versteckt gekürzt. Eine endgültige Modell-/Backendempfehlung oder Reduzierung des sichtbaren Modellkatalogs erfolgt erst nach den realen Xiaomi-Messungen und ausdrücklicher Produktentscheidung von Matthias.

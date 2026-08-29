@@ -25,19 +25,37 @@ internal object AiTranscriptAnalysisPerformanceStore {
         result: AiTranscriptAnalysisResult,
         configuration: LocalAiConfiguration,
         runtimeReport: LocalAiRuntimeReport?,
-        lastGenerationMetrics: LocalAiGenerationMetrics?
+        modelAlreadyLoaded: Boolean,
+        preAnalysisMs: Long,
+        analysisWallMs: Long,
+        postAnalysisMs: Long,
+        generationPerformance: List<AiTranscriptAnalysisGenerationPerformance>,
+        startingAppPssBytes: Long,
+        peakAppPssBytes: Long,
+        endingAppPssBytes: Long,
+        maximumThermalStatus: Int,
+        resourceSampleCount: Int
     ) {
         latest = Entry(
             key = key(result),
             snapshot = AiTranscriptAnalysisPerformanceSnapshot(
                 modelLoadMs = result.modelLoadMs,
+                modelAlreadyLoaded = modelAlreadyLoaded,
                 totalInferenceMs = result.totalInferenceMs,
                 totalDurationMs = result.totalDurationMs,
+                preAnalysisMs = preAnalysisMs.coerceAtLeast(0L),
+                analysisWallMs = analysisWallMs.coerceAtLeast(0L),
+                postAnalysisMs = postAnalysisMs.coerceAtLeast(0L),
                 generationCount = result.generationCount,
                 sourceChunkCount = result.sourceChunkCount,
                 configuration = configuration.normalized(),
                 runtimeReport = runtimeReport,
-                lastGenerationMetrics = lastGenerationMetrics
+                generationPerformance = generationPerformance.toList(),
+                startingAppPssBytes = startingAppPssBytes.coerceAtLeast(0L),
+                peakAppPssBytes = peakAppPssBytes.coerceAtLeast(0L),
+                endingAppPssBytes = endingAppPssBytes.coerceAtLeast(0L),
+                maximumThermalStatus = maximumThermalStatus,
+                resourceSampleCount = resourceSampleCount.coerceAtLeast(0)
             )
         )
     }

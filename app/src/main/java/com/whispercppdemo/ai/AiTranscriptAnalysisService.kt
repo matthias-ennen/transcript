@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Debug
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -104,7 +105,25 @@ class AiTranscriptAnalysisService : Service() {
 
     private fun runAnalysis(request: AiTranscriptAnalysisRequest, model: AiModel) {
         val startedAt = SystemClock.elapsedRealtime()
+        var startingAppPssBytes = 0L
+        var peakAppPssBytes = 0L
+        var endingAppPssBytes = 0L
+        var maximumThermalStatus = -1
+        var resourceSampleCount = 0
+
+        fun sampleResources() {
+            val pssBytes = runCatching { Debug.getPss().toLong() * 1_024L }.getOrDefault(0L)
+            if (resourceSampleCount == 0) startingAppPssBytes = pssBytes
+            endingAppPssBytes = pssBytes
+            peakAppPssBytes = maxOf(peakAppPssBytes, pssBytes)
+            AiHardwareProbe.readThermalStatus(this)?.let { thermal ->
+                maximumThermalStatus = maxOf(maximumThermalStatus, thermal)
+            }
+            resourceSampleCount += 1
+        }
+
         try {
+            sampleResources()
             val modelFile = File(File(filesDir, "ai-models"), model.fileName)
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
@@ -118,10 +137,30 @@ class AiTranscriptAnalysisService : Service() {
             activeConfiguration = configuration
             ensureContinues()
 
+            val generationPerformance = mutableListOf<AiTranscriptAnalysisGenerationPerformance>()
+            var pendingPhaseLabel: String? = null
+            var pendingPhaseStartedAt = 0L
+
+            fun closePendingPhase(now: Long = SystemClock.elapsedRealtime()) {
+                val label = pendingPhaseLabel ?: return
+                val metrics = LocalAiEngine.lastGenerationMetricsSnapshot() ?: return
+                generationPerformance += AiTranscriptAnalysisGenerationPerformance(
+                    label = label,
+                    phaseDurationMs = (now - pendingPhaseStartedAt).coerceAtLeast(0L),
+                    metrics = metrics
+                )
+                pendingPhaseLabel = null
+            }
+
             val analyzer = AiTranscriptAnalyzer(
                 configuration = configuration,
                 ensureContinues = ::ensureContinues,
                 onProgress = { progress ->
+                    val now = SystemClock.elapsedRealtime()
+                    closePendingPhase(now)
+                    sampleResources()
+                    pendingPhaseLabel = progress.activityDetail
+                    pendingPhaseStartedAt = now
                     AiTranscriptAnalysisCoordinator.update(
                         AiTranscriptAnalysisState.Running(
                             action = request.action,
@@ -143,24 +182,38 @@ class AiTranscriptAnalysisService : Service() {
                 }
             )
 
+            var analysisStartedAt = 0L
+            var analysisEndedAt = 0L
             val session = AiEngineSessionManager.withModel(
                 model = model,
                 file = modelFile,
                 configuration = configuration
             ) { engine, _ ->
+                analysisStartedAt = SystemClock.elapsedRealtime()
                 val execution = analyzer.analyze(
                     engine = engine,
                     action = request.action,
                     source = request.sourceText
                 )
+                analysisEndedAt = SystemClock.elapsedRealtime()
+                closePendingPhase(analysisEndedAt)
+                sampleResources()
                 Triple(
                     execution,
                     runCatching { engine.runtimeReport() }.getOrNull(),
-                    LocalAiEngine.lastGenerationMetricsSnapshot()
+                    generationPerformance.toList()
                 )
             }
             ensureContinues()
+            sampleResources()
             val execution = session.value.first
+            val completedAt = SystemClock.elapsedRealtime()
+            val totalDurationMs = (completedAt - startedAt).coerceAtLeast(0L)
+            val preAnalysisMs = (
+                analysisStartedAt - startedAt - session.info.modelLoadMs
+            ).coerceAtLeast(0L)
+            val analysisWallMs = (analysisEndedAt - analysisStartedAt).coerceAtLeast(0L)
+            val postAnalysisMs = (completedAt - analysisEndedAt).coerceAtLeast(0L)
             val result = AiTranscriptAnalysisResult(
                 action = request.action,
                 model = model,
@@ -171,14 +224,23 @@ class AiTranscriptAnalysisService : Service() {
                 generationCount = execution.generationCount,
                 modelLoadMs = session.info.modelLoadMs,
                 totalInferenceMs = execution.totalInferenceMs,
-                totalDurationMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
+                totalDurationMs = totalDurationMs,
                 cpuFallbackUsed = session.info.cpuFallbackUsed
             )
             AiTranscriptAnalysisPerformanceStore.capture(
                 result = result,
                 configuration = configuration,
                 runtimeReport = session.value.second,
-                lastGenerationMetrics = session.value.third
+                modelAlreadyLoaded = session.info.modelAlreadyLoaded,
+                preAnalysisMs = preAnalysisMs,
+                analysisWallMs = analysisWallMs,
+                postAnalysisMs = postAnalysisMs,
+                generationPerformance = session.value.third,
+                startingAppPssBytes = startingAppPssBytes,
+                peakAppPssBytes = peakAppPssBytes,
+                endingAppPssBytes = endingAppPssBytes,
+                maximumThermalStatus = maximumThermalStatus,
+                resourceSampleCount = resourceSampleCount
             )
             requestStore.clear()
             AiTranscriptAnalysisCoordinator.update(AiTranscriptAnalysisState.Completed(result))
