@@ -59,17 +59,18 @@ internal fun TranscriptUiState.presentCompletedTranscription(
         whisperSegments = completed.segments,
         audioDurationMs = audioDurationMs
     )
-    val startsAutomaticAi = completed.segments.isNotEmpty() &&
-        aiPostProcessingEnabled && automaticAiPostProcessingEnabled && selectedAiModelInstalled
-    val automaticAiModelMissing = completed.segments.isNotEmpty() &&
-        aiPostProcessingEnabled && automaticAiPostProcessingEnabled && !selectedAiModelInstalled
+    // #101: Qwen korrigiert das Whisper-Ergebnis nicht mehr automatisch.
+    // Die Felder der Presentation bleiben vorerst bestehen, damit der bestehende
+    // ViewModel-Vertrag für Diagnose/Runtime nicht unnötig groß umgebaut wird.
+    val startsAutomaticAi = false
+    val automaticAiModelMissing = false
     val capturedSectionMinutes = transcriptSectionMinutes
         ?.coerceIn(1, 5)
         ?: whisperSettings.sectionMinutes.coerceIn(1, 5)
     TranscriptGroupingRuntime.use(capturedSectionMinutes)
     return CompletedTranscriptionPresentation(
         state = copy(
-            isBusy = startsAutomaticAi,
+            isBusy = false,
             isTranscribing = false,
             isCancellationRequested = false,
             progress = null,
@@ -90,15 +91,14 @@ internal fun TranscriptUiState.presentCompletedTranscription(
             transcriptionDurationSeconds = completed.transcriptionDurationSeconds,
             vadProcessingSummary = completed.vadSummary,
             error = null,
-            status = when {
-                startsAutomaticAi -> "Transkription fertig. Texte werden jetzt mit KI überarbeitet …"
-                completed.segments.isEmpty() -> "Es wurde kein Text erkannt."
-                automaticAiModelMissing -> "Transkription fertig. KI-Nachbearbeitung übersprungen: Modell fehlt."
-                else -> "Fertig: ${completed.segments.size} Textabschnitte erkannt."
+            status = if (completed.segments.isEmpty()) {
+                "Es wurde kein Text erkannt."
+            } else {
+                "Fertig: ${completed.segments.size} Textabschnitte erkannt."
             },
             statusKind = StatusMessageKind.COMPLETION,
             statusEventId = statusEventId + 1L,
-            cannaBotMode = if (startsAutomaticAi) CannaBotMode.REVIEW else CannaBotMode.IDLE
+            cannaBotMode = CannaBotMode.IDLE
         ),
         timelineSegments = timelineSegments,
         startsAutomaticAi = startsAutomaticAi,
