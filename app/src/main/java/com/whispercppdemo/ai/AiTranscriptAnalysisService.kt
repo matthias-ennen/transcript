@@ -148,14 +148,19 @@ class AiTranscriptAnalysisService : Service() {
                 file = modelFile,
                 configuration = configuration
             ) { engine, _ ->
-                analyzer.analyze(
+                val execution = analyzer.analyze(
                     engine = engine,
                     action = request.action,
                     source = request.sourceText
                 )
+                Triple(
+                    execution,
+                    runCatching { engine.runtimeReport() }.getOrNull(),
+                    LocalAiEngine.lastGenerationMetricsSnapshot()
+                )
             }
             ensureContinues()
-            val execution = session.value
+            val execution = session.value.first
             val result = AiTranscriptAnalysisResult(
                 action = request.action,
                 model = model,
@@ -168,6 +173,12 @@ class AiTranscriptAnalysisService : Service() {
                 totalInferenceMs = execution.totalInferenceMs,
                 totalDurationMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
                 cpuFallbackUsed = session.info.cpuFallbackUsed
+            )
+            AiTranscriptAnalysisPerformanceStore.capture(
+                result = result,
+                configuration = configuration,
+                runtimeReport = session.value.second,
+                lastGenerationMetrics = session.value.third
             )
             requestStore.clear()
             AiTranscriptAnalysisCoordinator.update(AiTranscriptAnalysisState.Completed(result))
