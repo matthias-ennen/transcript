@@ -80,7 +80,16 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Lokale Offline-Nachbearbeitung erkannter Transkripttexte" />
+                android:value="Lokale Offline-Modellvorbereitung und KI-Diagnose" />
+        </service>
+
+        <service
+            android:name=".ai.AiTranscriptAnalysisService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Lokale Offline-Auswertung fertiger Transkripttexte" />
         </service>
 
         <service
