@@ -40,6 +40,7 @@ internal fun AiTranscriptAnalysisCard(
     val currentFingerprint = sourceText.takeIf(String::isNotBlank)
         ?.let(::aiTranscriptSourceFingerprint)
     val result = state.aiTranscriptAnalysisResult
+        ?.takeIf { it.sourceFileName == (state.selectedFileName ?: "Transkript") }
     val resultOutdated = result != null && result.sourceFingerprint != currentFingerprint
 
     if (showActionDialog) {
@@ -52,7 +53,7 @@ internal fun AiTranscriptAnalysisCard(
                         "Die lokale KI arbeitet auf der aktuell akzeptierten Fassung des gesamten Transkripts. Das Transkript selbst wird nicht verändert.",
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    AiTranscriptAnalysisAction.entries.forEach { action ->
+                    AiTranscriptAnalysisAction.values().forEach { action ->
                         OutlinedButton(
                             onClick = {
                                 showActionDialog = false
@@ -121,6 +122,13 @@ internal fun AiTranscriptAnalysisCard(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Mit KI auswerten")
+                }
+                if (result == null) {
+                    state.aiTranscriptAnalysisStatus
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { status ->
+                            Text(status, style = MaterialTheme.typography.bodySmall)
+                        }
                 }
             }
 
