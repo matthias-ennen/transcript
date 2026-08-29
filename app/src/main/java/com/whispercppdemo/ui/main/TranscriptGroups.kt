@@ -389,7 +389,6 @@ internal fun TranscriptList(
                         isEditingGroup = isEditingGroup,
                         allOriginal = allOriginal,
                         allEdited = allEdited,
-                        onAiEdit = { onAiEditGroup(group.startMs) },
                         onEdit = { requestEdit(TranscriptEditTarget.Group(group.startMs)) },
                         onOriginal = { showGroupOriginal(group) },
                         onEdited = { showGroupEdited(group) },
@@ -744,7 +743,6 @@ private fun TranscriptGroupEditorActions(
     isEditingGroup: Boolean,
     allOriginal: Boolean,
     allEdited: Boolean,
-    onAiEdit: () -> Unit,
     onEdit: () -> Unit,
     onOriginal: () -> Unit,
     onEdited: () -> Unit,
@@ -752,39 +750,13 @@ private fun TranscriptGroupEditorActions(
     onApply: () -> Unit
 ) {
     if (!isEditingGroup) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min)
+        OutlinedButton(
+            onClick = onEdit,
+            enabled = state.transcriptView == TranscriptViewMode.EDITED &&
+                !state.isBusy && !state.isAiPostProcessing,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            OutlinedButton(
-                onClick = onAiEdit,
-                enabled = state.transcriptView == TranscriptViewMode.EDITED &&
-                    !state.isBusy && !state.isEditingTranscript &&
-                    state.completedModel != null && state.selectedAiModelInstalled,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = "KI-Nachbearbeitung",
-                    maxLines = 1,
-                    softWrap = false,
-                    style = MaterialTheme.typography.labelMedium
-                )
-            }
-            OutlinedButton(
-                onClick = onEdit,
-                enabled = state.transcriptView == TranscriptViewMode.EDITED &&
-                    !state.isBusy && !state.isAiPostProcessing,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            ) {
-                Text("Bearbeiten")
-            }
+            Text("Bearbeiten")
         }
         return
     }
