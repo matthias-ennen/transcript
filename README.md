@@ -34,10 +34,11 @@ Die KI arbeitet dabei auf der aktuell akzeptierten Transkriptfassung einschließ
 manueller Korrekturen. Das KI-Ergebnis ist ein **separates Resultat** und verändert
 weder Transkripttext noch Zeitstempel, Segmentreihenfolge oder Transkript-Herkunft.
 
-Die Umstellung ist in den Issues #101 und #102 geplant. Der aktuelle Code enthält
-bis zur Umsetzung von #101 noch Teile der bisherigen KI-Korrekturstrecke. Die
-technische Ist-Architektur in `docs/ARCHITECTURE.md` wird deshalb erst zusammen mit
-der tatsächlichen Codeumstellung angepasst.
+Issue #101 ist abgeschlossen: Die frühere KI-Nachbearbeitung ist aus dem
+produktiven Transkriptworkflow entfernt, während Qwen-Modellverwaltung, Diagnose,
+Benchmarks und der lokale `llama.cpp`-Unterbau erhalten bleiben. Issue #102 baut
+als nächsten Schritt die separate KI-Auswertung am Ende des fertigen Transkripts
+auf.
 
 Die verbindliche Produkt- und Planungsentscheidung ist zusätzlich in
 [`docs/PRODUCT_DIRECTION.md`](docs/PRODUCT_DIRECTION.md) dokumentiert.
@@ -68,13 +69,13 @@ Audio/Video auswählen oder aufnehmen
 → akzeptierte Transkriptfassung
 → exportieren / teilen
 → optional lokale KI-Auswertung
-→ separates KI-Ergebnis kopieren / teilen
+→ separates KI-Ergebnis kopieren
 ```
 
 Für Songs ist in #41 zusätzlich eine lokale Gesangstrennung **vor Whisper**
 geplant. Allgemeine Audio-Vorverarbeitung wie Rauschminderung oder
-Sprachhervorhebung wird in #103 zunächst nur anhand reproduzierbarer A/B-Tests
-bewertet und erst bei nachgewiesenem Qualitätsgewinn als Produktfunktion geplant.
+Sprachhervorhebung wird in #103 zunächst anhand reproduzierbarer A/B-Tests bewertet
+und erst bei nachgewiesenem Qualitätsgewinn als Produktfunktion geplant.
 
 ## Funktionsumfang und stabile Grundlagen
 
@@ -141,14 +142,15 @@ privaten App-Speicher gehalten. Einzelne Fragmente können während der Wiederga
 kontrolliert und manuell korrigiert werden. Zeitstempel bleiben schreibgeschützt.
 
 Für neu entstehende Produktzustände sind Whisper-Original und manuelle Änderung
-die fachlich relevanten Transkriptzustände. Historische Entwicklungsstände mit
-`AI`-Herkunft werden im Rahmen #101 migrations-/lesesicher behandelt, aber die
-neue KI-Auswertung erzeugt keine Transkript-Herkunft `AI`.
+die fachlich relevanten Transkriptzustände. Alte Entwicklungs-/Teststände mit
+`AI`-Herkunft erhalten keine zusätzliche Migrationsanforderung; die neue
+KI-Auswertung erzeugt ebenfalls keine Transkript-Herkunft `AI`.
 
 ## Geplante lokale KI-Auswertung
 
-Nach einem fertigen beziehungsweise wiederhergestellten Transkript soll ein klar
-getrennter Bereich **Mit KI auswerten** angeboten werden.
+Nach einem fertigen beziehungsweise wiederhergestellten Transkript wird in #102
+ein klar getrennter Bereich **KI-Auswertung** beziehungsweise **Mit KI auswerten**
+ergänzt.
 
 Die Auswertung:
 
@@ -156,7 +158,7 @@ Die Auswertung:
 - verwendet die aktuell akzeptierte Transkriptfassung,
 - verändert das Transkript niemals,
 - zeigt ihr Ergebnis getrennt vom Transkript,
-- soll mindestens Kopieren, Teilen, Neu erzeugen und Abbrechen ermöglichen,
+- muss mindestens Kopieren, Neu erzeugen und Abbrechen ermöglichen,
 - darf eine normale Whisper-Transkription ohne installiertes Qwen-Modell nicht blockieren,
 - darf lange Transkripte nicht still am Modellkontext abschneiden.
 
@@ -185,6 +187,18 @@ der vier realen Auswertungsaufgaben. Bewertet werden unter anderem:
 Die sechs Qwen-Varianten bleiben zunächst eine echte Vergleichsmatrix. Eine
 mögliche spätere Reduzierung wird erst nach den Gerätevergleichen bewusst
 entschieden.
+
+## Audioqualität vor Whisper
+
+#103 evaluiert allgemeine lokale Vorverarbeitung wie Rauschminderung,
+Sprachhervorhebung oder Normalisierung anhand identischer Quelldateien. #41
+behandelt separat die Gesangstrennung/Source Separation für Songs. Beides liegt
+vor Whisper und darf das Originalaudio nicht überschreiben.
+
+## GUI-Sammelpaket
+
+Kleine visuelle Korrekturen werden in #107 gesammelt und später gebündelt
+umgesetzt, ohne die aktuelle Funktionsroadmap zu unterbrechen.
 
 ## Lange Aufnahmen und Hintergrundbetrieb
 
@@ -261,5 +275,5 @@ Lizenzhinweise befinden sich unter `licenses/` und in
 
 Die aktuelle technische Ist-Struktur ist in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) beschrieben. Die verbindliche
-Produktrichtung und die geplante Umstellung stehen in
+Produktrichtung steht in
 [`docs/PRODUCT_DIRECTION.md`](docs/PRODUCT_DIRECTION.md).
