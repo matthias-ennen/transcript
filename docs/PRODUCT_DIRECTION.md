@@ -2,7 +2,7 @@
 
 Stand: **29.08.2026**
 
-Verbindliche GitHub-Issues: #26, #101, #102, #61, #78, #103, #41
+Verbindliche GitHub-Issues: #26, #101, #102, #61, #78, #103, #41, #107
 
 ## Entscheidung
 
@@ -45,7 +45,7 @@ Audio/Video auswählen oder aufnehmen
 → exportieren / teilen
 → optional lokale KI-Auswertung
 → separates KI-Ergebnis
-→ kopieren / teilen
+→ kopieren
 ```
 
 Der Songmodus aus #41 ergänzt vor Whisper eine eigene lokale
@@ -60,10 +60,10 @@ Für neu entstehende Produktzustände gilt:
 - manuell bearbeitete beziehungsweise akzeptierte Fassung,
 - Herkunft `ORIGINAL` / `MANUAL`.
 
-Historische Entwicklungsstände können bereits `AI` als Transkript-Herkunft
-enthalten. #101 muss solche Zustände lesesicher behandeln, wenn das für
-Update-/Persistenzkompatibilität erforderlich ist. Die neue KI-Auswertung erzeugt
-keine Transkript-Herkunft `AI`.
+Die vor Version 1.0 verworfene KI-Korrektur erzeugt keine neue fachliche
+Kompatibilitätsanforderung. Alte Entwicklungs-/Teststände mit `AI`-Herkunft müssen
+nicht eigens migriert oder für die neue Funktion weitergetragen werden. Die neue
+KI-Auswertung erzeugt ebenfalls keine Transkript-Herkunft `AI`.
 
 ## KI-Auswertung für Version 1.0
 
@@ -81,14 +81,15 @@ Kernfunktion von Version 1.0.
 ## Regeln für KI-Ergebnisse
 
 - KI-Auswertung startet niemals automatisch nach Whisper.
-- Benutzer löst jede Auswertung bewusst aus.
+- Der Benutzer löst jede Auswertung bewusst aus.
 - Quelle ist die **aktuell akzeptierte Transkriptfassung**, einschließlich
   manueller Korrekturen.
 - KI-Ausgabe wird getrennt vom Transkript dargestellt.
 - KI-Ausgabe darf Transkripttext, Zeitstempel, Segmentreihenfolge und Herkunft
   niemals verändern.
-- Ergebnis soll mindestens kopierbar und teilbar sein; Abbruch und erneute
-  Erzeugung gehören zum Produktumfang.
+- Ergebnis muss mindestens kopierbar sein; Abbruch und erneute Erzeugung gehören
+  zum Produktumfang. Teilen kann ergänzt werden, wenn es sich ohne neuen komplexen
+  Workflow an die vorhandene Android-Share-Funktion anbinden lässt.
 - Wenn keine Aufgaben oder Entscheidungen erkennbar sind, soll das Modell dies
   mitteilen statt Inhalte zu erfinden.
 - Ergebnis soll standardmäßig in der Sprache des Transkripts erzeugt werden.
@@ -136,7 +137,7 @@ Version 1.0 sichtbar bleiben oder der Katalog kontrolliert reduziert wird.
 ## Audioqualität vor Whisper
 
 Nachgelagerte Text-KI darf keine Probleme der Audio-/Whisper-Pipeline verdecken.
-Deshalb werden zwei weitere Bereiche getrennt behandelt:
+Deshalb werden drei Bereiche getrennt behandelt:
 
 - **#78:** Ursachen von Whisper-Wiederholungsschleifen/Halluzinationen verstehen.
 - **#103:** allgemeine Audio-Vorverarbeitung wie Rauschminderung,
@@ -145,6 +146,12 @@ Deshalb werden zwei weitere Bereiche getrennt behandelt:
 
 Originalaudio wird bei Vorverarbeitung nicht überschrieben; Zwischenprodukte
 bleiben temporär und lokal.
+
+## GUI-Sammelpaket
+
+#107 sammelt kleine visuelle Korrekturen, ohne die lineare Funktionsroadmap zu
+unterbrechen. Erster Punkt ist die Farbangleichung der Dokument-/Bearbeitet-Symbole
+an den zentralen Farbwert der Segmentnummer-Kapsel.
 
 ## Datenschutz
 
@@ -163,17 +170,19 @@ Die endgültigen rechtlichen Texte und Play-Data-Safety-Angaben werden in #51 un
 
 ## Verbindliche Roadmap
 
-Gemäß #26 ist die aktuelle Reihenfolge:
+#101 ist am 29.08.2026 abgeschlossen und nach `main` gemergt. Die lineare Folge
+lautet jetzt:
 
-**#101 → #102 → #61 → #78 → #103 → #41 → #39 → #51 → #33 → #34 → #27 → #35**
+**#102 → #61 → #78 → #103 → #41 → #39 → #51 → #33 → #34 → #27 → #35**
 
-#44 läuft als Produktakte parallel. #40 ist Zukunftsausbau nach Android 1.0.
+#44 läuft als Produktakte parallel. #107 ist ein paralleles GUI-Sammelpaket. #40
+ist Zukunftsausbau nach Android 1.0.
 
 ### Nächster Schritt
 
-#101 ist das nächste Arbeitspaket. Es entfernt die alte KI-Korrektursemantik aus
-dem produktiven Workflow, **ohne** den LLM-Unterbau zu löschen. Danach baut #102
-die neue Auswertungsoberfläche und Datenlogik auf.
+#102 ist das aktuelle Arbeitspaket. Es ergänzt am Ende des fertigen
+Gesamttranskripts die neue lokale KI-Auswertung, ohne die bestehende
+Whisper-/Manuell-Strecke wieder zu verändern.
 
 ## Historischer Sicherungspunkt
 
@@ -181,16 +190,14 @@ Vor der zwischenzeitlich erwogenen vollständigen KI-Entfernung wurde der Branch
 `archive/local-ai-postprocessing-2026-08-29` auf dem damaligen `main`-Stand
 `ee00badead1a2d70a15724573179425d3e651e30` angelegt.
 
-Der Branch bleibt als unveränderter historischer Wiederherstellungspunkt bestehen.
-Er ist nicht die neue Entwicklungsbasis; die aktive Produktentwicklung läuft
-weiter auf `main` und den zugehörigen Issue-/Feature-Branches.
+Der Branch bleibt als historischer Wiederherstellungspunkt bestehen. Er ist nicht
+die neue Entwicklungsbasis; die aktive Produktentwicklung läuft auf `main` und den
+zugehörigen Issue-/Feature-Branches.
 
-## Dokumentationsregel während des Übergangs
+## Dokumentationsregel
 
-`docs/ARCHITECTURE.md` beschreibt die **tatsächlich implementierte** Architektur.
-Da der aktuelle Code bis zur Umsetzung von #101 noch die alte KI-Korrekturstrecke
-enthält, wird die Architekturdatei nicht vorzeitig so umgeschrieben, als sei #101
-bereits implementiert.
-
-Mit der tatsächlichen Codeumstellung in #101 muss `docs/ARCHITECTURE.md` dann
-synchron auf die neue Ist-Architektur aktualisiert werden.
+`docs/ARCHITECTURE.md` soll die **tatsächlich implementierte** Architektur
+beschreiben. Nach #101 ist die alte KI-Korrektur produktiv nicht mehr erreichbar;
+intern vorhandene Runtime-/Korrekturbausteine werden mit #102 anhand des neuen
+echten Anwendungsfalls generalisiert. Die Architekturdatei wird dabei auf den
+realen neuen Datenfluss synchronisiert.
