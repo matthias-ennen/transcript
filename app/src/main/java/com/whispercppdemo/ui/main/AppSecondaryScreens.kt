@@ -178,9 +178,9 @@ fun SettingsScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("KI-Nachbearbeitung", style = MaterialTheme.typography.headlineSmall)
+                Text("Lokale KI", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Lokale KI glättet erkannte Texte, ohne Transkripte an einen Server zu senden.",
+                    "Hier werden die lokalen Qwen-Modelle sowie Diagnose und Leistungsprofile verwaltet. Die KI verändert das Transkript nicht mehr; separate Auswertungen des fertigen Transkripts folgen in einem eigenen Arbeitspaket.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 TextButton(
@@ -205,21 +205,6 @@ fun SettingsScreen(
                         textDecoration = TextDecoration.Underline
                     )
                 }
-                AiSettingSwitch(
-                    title = "KI-Nachbearbeitung aktivieren",
-                    description = "Schaltet die optionale lokale Textkorrektur frei.",
-                    checked = state.aiPostProcessingEnabled,
-                    enabled = !state.isBusy && !state.isRecording && !state.isAiModelPreloading,
-                    onCheckedChange = onAiEnabledChanged
-                )
-                AiSettingSwitch(
-                    title = "Nach der Transkription automatisch ausführen",
-                    description = "Whisper wird zuerst entladen; danach bearbeitet die KI das gesamte Transkript.",
-                    checked = state.automaticAiPostProcessingEnabled,
-                    enabled = state.aiPostProcessingEnabled && !state.isBusy &&
-                        !state.isRecording && !state.isAiModelPreloading,
-                    onCheckedChange = onAiAutomaticChanged
-                )
 
                 Text("Lokales KI-Modell", style = MaterialTheme.typography.titleLarge)
                 Text(
@@ -586,7 +571,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
 
         InfoCard("Datenschutz") {
             Text(
-                "Audio, Video, Transkription und KI-Nachbearbeitung bleiben auf diesem Gerät. Nur Modelldownloads benötigen eine Internetverbindung."
+                "Audio, Video, Transkription und lokale KI-Verarbeitung bleiben auf diesem Gerät. Nur Modelldownloads benötigen eine Internetverbindung."
             )
         }
 
