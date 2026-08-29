@@ -4,7 +4,8 @@ import de.matthiasennen.transcript.ai.AiTranscriptAnalysisState
 
 /**
  * Keeps the new analysis service independent from transcript editing state while making its
- * busy/progress/result state visible to the existing screen-level interaction guards.
+ * active busy/progress state visible to the existing screen-level interaction guards.
+ * Terminal analysis states deliberately do not overwrite a newer transcription/download status.
  */
 internal fun TranscriptUiState.withAiTranscriptAnalysisState(
     analysisState: AiTranscriptAnalysisState
@@ -13,7 +14,8 @@ internal fun TranscriptUiState.withAiTranscriptAnalysisState(
         isAiTranscriptAnalysisRunning = false,
         aiTranscriptAnalysisCancellationRequested = false,
         aiTranscriptAnalysisProgress = null,
-        aiTranscriptAnalysisStatus = null
+        aiTranscriptAnalysisStatus = null,
+        aiTranscriptAnalysisResult = null
     )
 
     is AiTranscriptAnalysisState.Starting -> copy(
@@ -23,6 +25,7 @@ internal fun TranscriptUiState.withAiTranscriptAnalysisState(
         aiTranscriptAnalysisAction = analysisState.action,
         aiTranscriptAnalysisProgress = null,
         aiTranscriptAnalysisStatus = "KI-Auswertung wird vorbereitet …",
+        aiTranscriptAnalysisResult = null,
         status = "KI-Auswertung wird vorbereitet …",
         activityDetail = "${analysisState.model.modelLabel} wird lokal vorbereitet.",
         error = null,
@@ -36,6 +39,7 @@ internal fun TranscriptUiState.withAiTranscriptAnalysisState(
         aiTranscriptAnalysisAction = analysisState.action,
         aiTranscriptAnalysisProgress = analysisState.progress,
         aiTranscriptAnalysisStatus = analysisState.status,
+        aiTranscriptAnalysisResult = null,
         status = analysisState.status,
         activityDetail = analysisState.activityDetail,
         error = null,
@@ -48,47 +52,36 @@ internal fun TranscriptUiState.withAiTranscriptAnalysisState(
         aiTranscriptAnalysisCancellationRequested = true,
         aiTranscriptAnalysisAction = analysisState.action,
         aiTranscriptAnalysisStatus = "Abbruch wird durchgeführt …",
+        aiTranscriptAnalysisResult = null,
         status = "KI-Auswertung wird abgebrochen …",
         activityDetail = "Die laufende lokale Modellantwort wird sicher beendet.",
         cannaBotMode = CannaBotMode.WAITING
     )
 
     is AiTranscriptAnalysisState.Completed -> copy(
-        isBusy = false,
         isAiTranscriptAnalysisRunning = false,
         aiTranscriptAnalysisCancellationRequested = false,
         aiTranscriptAnalysisAction = analysisState.result.action,
         aiTranscriptAnalysisProgress = 1f,
         aiTranscriptAnalysisStatus = "KI-Auswertung abgeschlossen.",
-        aiTranscriptAnalysisResult = analysisState.result,
-        status = "KI-Auswertung abgeschlossen.",
-        activityDetail = "${analysisState.result.action.resultTitle} ist bereit.",
-        error = null,
-        cannaBotMode = CannaBotMode.REVIEW
+        aiTranscriptAnalysisResult = analysisState.result
     )
 
     is AiTranscriptAnalysisState.Cancelled -> copy(
-        isBusy = false,
         isAiTranscriptAnalysisRunning = false,
         aiTranscriptAnalysisCancellationRequested = false,
         aiTranscriptAnalysisAction = analysisState.action,
         aiTranscriptAnalysisProgress = null,
         aiTranscriptAnalysisStatus = "KI-Auswertung abgebrochen.",
-        status = "KI-Auswertung abgebrochen.",
-        activityDetail = null,
-        cannaBotMode = CannaBotMode.IDLE
+        aiTranscriptAnalysisResult = null
     )
 
     is AiTranscriptAnalysisState.Failed -> copy(
-        isBusy = false,
         isAiTranscriptAnalysisRunning = false,
         aiTranscriptAnalysisCancellationRequested = false,
         aiTranscriptAnalysisAction = analysisState.action,
         aiTranscriptAnalysisProgress = null,
-        aiTranscriptAnalysisStatus = "KI-Auswertung fehlgeschlagen.",
-        status = "KI-Auswertung fehlgeschlagen.",
-        activityDetail = null,
-        error = analysisState.message,
-        cannaBotMode = CannaBotMode.IDLE
+        aiTranscriptAnalysisStatus = analysisState.message,
+        aiTranscriptAnalysisResult = null
     )
 }
