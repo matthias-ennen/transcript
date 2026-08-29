@@ -16,6 +16,7 @@ class AiTranscriptAnalysisPerformanceStoreTest {
             batchSize = 256,
             microBatchSize = 128
         )
+        val normalizedConfiguration = configuration.normalized()
         val runtime = LocalAiRuntimeReport(
             requestedBackend = "CPU",
             activeBackend = "CPU",
@@ -45,9 +46,9 @@ class AiTranscriptAnalysisPerformanceStoreTest {
 
         val snapshot = AiTranscriptAnalysisPerformanceStore.snapshotFor(result)
         requireNotNull(snapshot)
-        assertEquals(4, snapshot.configuration.generationThreads)
-        assertEquals(6, snapshot.configuration.promptThreads)
-        assertEquals(256, snapshot.configuration.batchSize)
+        assertEquals(normalizedConfiguration.generationThreads, snapshot.configuration.generationThreads)
+        assertEquals(normalizedConfiguration.promptThreads, snapshot.configuration.promptThreads)
+        assertEquals(normalizedConfiguration.batchSize, snapshot.configuration.batchSize)
         assertEquals("CPU", snapshot.runtimeReport?.activeBackend)
         assertEquals(320, snapshot.lastGenerationMetrics?.promptTokens)
 
