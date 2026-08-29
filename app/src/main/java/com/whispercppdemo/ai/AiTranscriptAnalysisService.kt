@@ -145,7 +145,7 @@ class AiTranscriptAnalysisService : Service() {
 
             val session = AiEngineSessionManager.withModel(
                 model = model,
-                modelFile = modelFile,
+                file = modelFile,
                 configuration = configuration
             ) { engine, _ ->
                 analyzer.analyze(
