@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +70,9 @@ import androidx.core.content.ContextCompat
 import de.matthiasennen.transcript.export.ExportFormat
 import de.matthiasennen.transcript.export.exportTranscript
 import de.matthiasennen.transcript.ai.AiModel
+import de.matthiasennen.transcript.ai.AiTranscriptAnalysisCoordinator
+import de.matthiasennen.transcript.ai.AiTranscriptAnalysisService
+import de.matthiasennen.transcript.ai.transcriptTextForAiAnalysis
 import kotlinx.coroutines.launch
 
 private enum class PendingTranscriptAction {
@@ -80,7 +84,9 @@ private enum class PendingTranscriptAction {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainScreenViewModel) {
-    val state = viewModel.uiState
+    val baseState = viewModel.uiState
+    val analysisState by AiTranscriptAnalysisCoordinator.state.collectAsState()
+    val state = baseState.withAiTranscriptAnalysisState(analysisState)
     val context = LocalContext.current
     var page by remember { mutableStateOf(AppPage.MAIN) }
     var appLanguage by remember {
@@ -466,7 +472,7 @@ private fun MainContent(
                 title = { Text("KI-Modell fehlt") },
                 text = {
                     Text(
-                        "Für die lokale KI-Nachbearbeitung muss zuerst in den Einstellungen " +
+                        "Für die lokale KI-Auswertung muss zuerst in den Einstellungen " +
                             "ein KI-Modell heruntergeladen und ausgewählt werden."
                     )
                 },
@@ -736,6 +742,24 @@ private fun MainContent(
                                 )
                             }
                         }
+                        AiTranscriptAnalysisCard(
+                            state = state,
+                            onStart = { action ->
+                                val sourceText = transcriptTextForAiAnalysis(state.segments)
+                                if (!state.selectedAiModelInstalled) {
+                                    showMissingAiModelDialog = true
+                                } else if (sourceText.isNotBlank()) {
+                                    AiTranscriptAnalysisService.start(
+                                        context = context,
+                                        model = state.selectedAiModel,
+                                        fileName = state.selectedFileName ?: "Transkript",
+                                        action = action,
+                                        sourceText = sourceText
+                                    )
+                                }
+                            },
+                            onCancel = { AiTranscriptAnalysisService.cancel(context) }
+                        )
                     }
                 }
             }

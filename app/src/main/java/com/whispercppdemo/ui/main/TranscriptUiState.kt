@@ -8,6 +8,8 @@ import de.matthiasennen.transcript.ai.AiHardwareSnapshot
 import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.ai.AiSelfTestMetrics
+import de.matthiasennen.transcript.ai.AiTranscriptAnalysisAction
+import de.matthiasennen.transcript.ai.AiTranscriptAnalysisResult
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.download.VadModelInstallation
 import de.matthiasennen.transcript.download.DownloadStorageIssue
@@ -66,6 +68,12 @@ data class TranscriptUiState(
     val aiSelfTestModel: AiModel? = null,
     val aiSelfTestMetrics: AiSelfTestMetrics? = null,
     val latestAiCorrectionTrace: AiCorrectionTrace? = null,
+    val isAiTranscriptAnalysisRunning: Boolean = false,
+    val aiTranscriptAnalysisCancellationRequested: Boolean = false,
+    val aiTranscriptAnalysisAction: AiTranscriptAnalysisAction? = null,
+    val aiTranscriptAnalysisProgress: Float? = null,
+    val aiTranscriptAnalysisStatus: String? = null,
+    val aiTranscriptAnalysisResult: AiTranscriptAnalysisResult? = null,
     val performanceProfileModel: AiModel = AiModel.BALANCED,
     val aiPerformanceConfiguration: LocalAiConfiguration = LocalAiConfiguration(),
     val aiHardwareSnapshot: AiHardwareSnapshot? = null,
