@@ -1,8 +1,6 @@
 package de.matthiasennen.transcript.ai
 
 import com.whispercpp.whisper.WhisperSegment
-import de.matthiasennen.transcript.ai.LocalAiConfiguration
-import de.matthiasennen.transcript.ai.LocalAiEngine
 import java.security.MessageDigest
 
 /** Fixed product actions for Transcript 1.0. */
@@ -42,6 +40,7 @@ data class AiTranscriptAnalysisResult(
     val action: AiTranscriptAnalysisAction,
     val model: AiModel,
     val text: String,
+    val sourceFileName: String,
     val sourceFingerprint: String,
     val sourceChunkCount: Int,
     val generationCount: Int,
