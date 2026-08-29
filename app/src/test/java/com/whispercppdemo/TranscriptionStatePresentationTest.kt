@@ -38,7 +38,7 @@ class TranscriptionStatePresentationTest {
     }
 
     @Test
-    fun `completed state reports missing model when automatic AI is enabled`() {
+    fun `completed state never starts legacy automatic AI correction`() {
         val completed = TranscriptionState.Completed(
             fileName = "interview.m4a",
             model = WhisperModel.BASE,
@@ -53,9 +53,10 @@ class TranscriptionStatePresentationTest {
         ).presentCompletedTranscription(completed)
 
         assertFalse(presentation.startsAutomaticAi)
-        assertTrue(presentation.automaticAiModelMissing)
+        assertFalse(presentation.automaticAiModelMissing)
+        assertFalse(presentation.state.isBusy)
         assertEquals(
-            "Transkription fertig. KI-Nachbearbeitung übersprungen: Modell fehlt.",
+            "Fertig: 1 Textabschnitte erkannt.",
             presentation.state.status
         )
     }
