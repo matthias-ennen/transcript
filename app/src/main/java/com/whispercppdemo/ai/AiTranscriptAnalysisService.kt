@@ -160,6 +160,7 @@ class AiTranscriptAnalysisService : Service() {
                 action = request.action,
                 model = model,
                 text = execution.text,
+                sourceFileName = request.fileName,
                 sourceFingerprint = request.sourceFingerprint,
                 sourceChunkCount = execution.sourceChunkCount,
                 generationCount = execution.generationCount,
