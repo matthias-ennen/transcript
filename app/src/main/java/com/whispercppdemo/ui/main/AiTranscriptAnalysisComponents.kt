@@ -172,6 +172,7 @@ internal fun AiTranscriptAnalysisCard(
                     "${completed.model.modelLabel} · ${completed.sourceChunkCount} Quellteil(e) · ${completed.generationCount} KI-Lauf/Läufe",
                     style = MaterialTheme.typography.labelSmall
                 )
+                AiTranscriptAnalysisPerformanceDetails(completed)
             }
         }
     }
