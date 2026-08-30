@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -49,10 +50,17 @@ internal fun AiTranscriptAnalysisCard(
             title = { Text("Mit KI auswerten") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Die lokale KI arbeitet auf der aktuell akzeptierten Fassung des gesamten Transkripts. Das Transkript selbst wird nicht verändert.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CannaBotStatusAnimation(state)
+                        Text(
+                            "Die lokale KI arbeitet auf der aktuell akzeptierten Fassung des gesamten Transkripts. Das Transkript selbst wird nicht verändert.",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                     AiTranscriptAnalysisAction.values().forEach { action ->
                         OutlinedButton(
                             onClick = {
