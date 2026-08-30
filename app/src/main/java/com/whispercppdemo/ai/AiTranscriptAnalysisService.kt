@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Debug
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -36,6 +37,7 @@ class AiTranscriptAnalysisService : Service() {
     private var processingJob: Job? = null
     private lateinit var requestStore: AiTranscriptAnalysisRequestStore
     private var activeConfiguration: LocalAiConfiguration? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -88,6 +90,24 @@ class AiTranscriptAnalysisService : Service() {
             TranscriptNotifications.AI_PROCESSING_ID,
             buildNotification("${request.action.displayLabel} wird vorbereitet …", 0, true)
         )
+        try {
+            acquireAnalysisWakeLock()
+        } catch (failure: Throwable) {
+            requestStore.clear()
+            AiTranscriptAnalysisCoordinator.update(
+                AiTranscriptAnalysisState.Failed(
+                    action = request.action,
+                    model = model,
+                    sourceFingerprint = request.sourceFingerprint,
+                    message = "Der Prozessor konnte für die KI-Auswertung nicht aktiv gehalten werden."
+                )
+            )
+            finishWithNotification(
+                "KI-Auswertung unterbrochen",
+                "Der Prozessor konnte für die KI-Auswertung nicht aktiv gehalten werden."
+            )
+            return START_NOT_STICKY
+        }
         processingJob = serviceScope.launch {
             runAnalysis(request, model)
             processingJob = null
@@ -99,6 +119,7 @@ class AiTranscriptAnalysisService : Service() {
 
     override fun onDestroy() {
         stopRequested.set(true)
+        releaseAnalysisWakeLock()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -283,7 +304,27 @@ class AiTranscriptAnalysisService : Service() {
             }
         } finally {
             activeConfiguration = null
+            releaseAnalysisWakeLock()
         }
+    }
+
+    private fun acquireAnalysisWakeLock() {
+        wakeLock = getSystemService(PowerManager::class.java).newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "$packageName:local-ai-transcript-analysis"
+        ).apply {
+            setReferenceCounted(false)
+            acquire(6L * 60L * 60L * 1_000L)
+        }
+    }
+
+    private fun releaseAnalysisWakeLock() {
+        wakeLock?.let { lock ->
+            runCatching {
+                if (lock.isHeld) lock.release()
+            }
+        }
+        wakeLock = null
     }
 
     private fun ensureContinues() {
