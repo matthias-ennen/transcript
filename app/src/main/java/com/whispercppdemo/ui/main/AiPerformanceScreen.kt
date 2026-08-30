@@ -36,8 +36,6 @@ import de.matthiasennen.transcript.ai.AiBenchmarkResult
 import de.matthiasennen.transcript.ai.AiHardwareSnapshot
 import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiPerformanceUiPreferences
-import de.matthiasennen.transcript.ai.AiPostProcessingStrategy
-import de.matthiasennen.transcript.ai.AiPostProcessingStrategyPreferences
 import de.matthiasennen.transcript.ai.LocalAiBackend
 import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.ai.LocalAiCpuBackend
@@ -67,12 +65,6 @@ fun AiPerformanceScreen(
     val uiPreferences = remember(context.applicationContext) {
         AiPerformanceUiPreferences(context.applicationContext)
     }
-    val postProcessingStrategyPreferences = remember(context.applicationContext) {
-        AiPostProcessingStrategyPreferences(context.applicationContext)
-    }
-    var postProcessingStrategy by remember {
-        mutableStateOf(postProcessingStrategyPreferences.load())
-    }
     val processorCount = (state.aiHardwareSnapshot?.processorCount
         ?: Runtime.getRuntime().availableProcessors()).coerceIn(1, 64)
     val gpuSettingsEnabled = configuration.backend == LocalAiBackend.VULKAN ||
@@ -88,21 +80,6 @@ fun AiPerformanceScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         LiveStatusLine(state, state.aiPerformanceMessage)
-        ChoiceSetting(
-            title = "KI-Nachbearbeitungsstrategie",
-            selected = postProcessingStrategy,
-            options = listOf(
-                AiPostProcessingStrategy.SEGMENTWISE to "Segmentweise",
-                AiPostProcessingStrategy.SECTIONWISE to "Abschnittsweise"
-            )
-        ) { selected ->
-            postProcessingStrategyPreferences.save(selected)
-            postProcessingStrategy = selected
-        }
-        Text(
-            "Gilt global für alle KI-Modelle. Segmentweise prüft Fragment für Fragment; Abschnittsweise prüft die sichtbare Gruppe in einem KI-Aufruf und gibt nur Änderungen zurück.",
-            style = MaterialTheme.typography.bodySmall
-        )
         ProfileAndHardwareSection(
             state = state,
             onSelectProfileModel = onSelectProfileModel,
