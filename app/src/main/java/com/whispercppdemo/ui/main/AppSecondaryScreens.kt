@@ -52,6 +52,7 @@ fun SettingsScreen(
     onDownloadVadModel: () -> Unit,
     onDeleteVadModel: () -> Unit,
     onSelectSongModel: (SongSeparationModel) -> Unit,
+    onDownloadSongModel: (SongSeparationModel) -> Unit,
     onDeleteSongModel: (SongSeparationModel) -> Unit,
     onDeleteAllSongModels: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
@@ -199,7 +200,11 @@ fun SettingsScreen(
                         installation = installation,
                         selected = installation.model == state.selectedSongSeparationModel,
                         enabled = !state.isBusy && !state.isRecording,
+                        isDownloading = state.downloadingSongModel == installation.model,
+                        downloadedBytes = state.songDownloadedBytes,
+                        totalBytes = state.songDownloadTotalBytes,
                         onSelect = { onSelectSongModel(installation.model) },
+                        onDownload = { onDownloadSongModel(installation.model) },
                         onDelete = { songModelToDelete = installation.model }
                     )
                 }
@@ -573,7 +578,11 @@ private fun SongModelStorageCard(
     installation: SongModelInstallation,
     selected: Boolean,
     enabled: Boolean,
+    isDownloading: Boolean,
+    downloadedBytes: Long,
+    totalBytes: Long,
     onSelect: () -> Unit,
+    onDownload: () -> Unit,
     onDelete: () -> Unit
 ) {
     val model = installation.model
@@ -596,6 +605,9 @@ private fun SongModelStorageCard(
             Text(model.description, style = MaterialTheme.typography.bodySmall)
             Text(
                 when {
+                    isDownloading && totalBytes > 0L ->
+                        "Download · ${formatDownloadSize(downloadedBytes)} von ${formatDownloadSize(totalBytes)}"
+                    isDownloading -> "Download wird vorbereitet …"
                     installation.isInstalled ->
                         "Installiert · ${formatDownloadSize(installation.installedBytes)}${if (selected) " · Ausgewählt" else ""}"
                     installation.partialBytes > 0L ->
@@ -604,20 +616,30 @@ private fun SongModelStorageCard(
                 },
                 style = MaterialTheme.typography.bodySmall
             )
+            if (isDownloading) {
+                if (totalBytes > 0L) {
+                    LinearProgressIndicator(
+                        progress = (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
             if (!installation.isInstalled) {
                 Button(
-                    onClick = {},
-                    enabled = false,
+                    onClick = onDownload,
+                    enabled = enabled && !isDownloading,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Herunterladen")
+                    Text(if (installation.partialBytes > 0L) "Download fortsetzen" else "Herunterladen")
                 }
             } else if (!selected) {
                 Button(onClick = onSelect, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                     Text("Auswählen")
                 }
             }
-            if (installation.storedBytes > 0L) {
+            if (installation.storedBytes > 0L && !isDownloading) {
                 OutlinedButton(onClick = onDelete, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                     Text("Löschen")
                 }
