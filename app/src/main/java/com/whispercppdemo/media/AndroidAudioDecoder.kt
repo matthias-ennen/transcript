@@ -7,6 +7,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.os.SystemClock
+import de.matthiasennen.transcript.song.SongWorkerRuntime
+import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.decodeAndSeparateSongChunk
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CancellationException
@@ -73,6 +76,11 @@ fun inspectAudioTrack(context: Context, uri: Uri): AudioTrackInfo {
  * Decodes only [startMs, endMs) and resamples it while MediaCodec output is
  * consumed. Source-rate PCM is never accumulated, so the peak Java memory is
  * bounded by the current 16-kHz Whisper section.
+ *
+ * In Song mode the immutable worker snapshot redirects this same preparation
+ * point through the selected local separator. The separator is closed before
+ * the resulting 16-kHz vocal PCM is returned, therefore it cannot overlap with
+ * the later Whisper model load.
  */
 internal fun decodeAudioChunk(
     context: Context,
@@ -82,8 +90,22 @@ internal fun decodeAudioChunk(
     shouldCancel: () -> Boolean = { false },
     onDecoderRestart: (AudioDecoderStallException) -> Unit = {},
     onProgress: (Float) -> Unit = {}
-): DecodedAudioChunk = withSingleDecoderRestart(onDecoderRestart) {
-    decodeAudioChunkAttempt(context, uri, startMs, endMs, shouldCancel, onProgress)
+): DecodedAudioChunk {
+    val songConfiguration = SongWorkerRuntime.current()
+    if (songConfiguration.mode == TranscriptionMode.SONG) {
+        return decodeAndSeparateSongChunk(
+            context = context,
+            uri = uri,
+            startMs = startMs,
+            endMs = endMs,
+            configuration = songConfiguration,
+            shouldCancel = shouldCancel,
+            onProgress = onProgress
+        )
+    }
+    return withSingleDecoderRestart(onDecoderRestart) {
+        decodeAudioChunkAttempt(context, uri, startMs, endMs, shouldCancel, onProgress)
+    }
 }
 
 private fun decodeAudioChunkAttempt(
