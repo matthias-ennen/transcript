@@ -1,7 +1,9 @@
 package de.matthiasennen.transcript.transcription
 
 import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.SongSeparationRuntime
 import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.TranscriptionModeRuntime
 import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperDecoding
 import de.matthiasennen.transcript.ui.main.WhisperSettings
@@ -23,8 +25,8 @@ data class TranscriptionJobConfiguration(
     val modelId: String,
     val language: String,
     val whisperSettings: WhisperSettings,
-    val transcriptionMode: TranscriptionMode = TranscriptionMode.SPEECH,
-    val songSeparationModelId: String = SongSeparationModel.BALANCED.id
+    val transcriptionMode: TranscriptionMode = TranscriptionModeRuntime.current,
+    val songSeparationModelId: String = SongSeparationRuntime.currentModel.id
 ) {
     fun normalized(): TranscriptionJobConfiguration = copy(
         modelId = modelId.trim(),
