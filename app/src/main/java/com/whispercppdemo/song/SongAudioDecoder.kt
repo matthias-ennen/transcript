@@ -12,6 +12,7 @@ import java.util.concurrent.CancellationException
 
 private const val SONG_DECODER_TIMEOUT_US = 10_000L
 private const val SONG_DECODER_MAX_IDLE_POLLS = 500
+private const val MAX_SOURCE_FRAMES_PER_WINDOW = 6_000_000
 
 internal data class SongAudioChunk(
     val interleavedStereo44100: FloatArray,
@@ -20,8 +21,9 @@ internal data class SongAudioChunk(
 )
 
 /**
- * Decodes only one bounded separator window. Source-rate PCM is retained only for
- * the current window and is immediately resampled to 44.1-kHz stereo.
+ * Decodes only one bounded separator window. PCM is kept in a primitive float
+ * buffer rather than boxed frame objects and is immediately resampled to
+ * 44.1-kHz stereo after the current window.
  */
 internal fun decodeSongAudioChunk(
     context: Context,
@@ -56,7 +58,10 @@ internal fun decodeSongAudioChunk(
         decoder.start()
         codecStarted = true
 
-        val sourceFrames = ArrayList<StereoFrame>()
+        val estimatedFrames = (((endMs - startMs) * sampleRate.coerceAtLeast(1)) / 1_000L)
+            .coerceIn(1L, MAX_SOURCE_FRAMES_PER_WINDOW.toLong())
+            .toInt()
+        val sourceFrames = StereoFloatBuffer(estimatedFrames)
         val info = MediaCodec.BufferInfo()
         var inputEnded = false
         var outputEnded = false
@@ -126,7 +131,7 @@ internal fun decodeSongAudioChunk(
             }
         }
 
-        check(sourceFrames.isNotEmpty()) { "Der Songabschnitt enthält keine dekodierbaren Audiodaten." }
+        check(sourceFrames.frameCount > 0) { "Der Songabschnitt enthält keine dekodierbaren Audiodaten." }
         val wantedFrames = (((endMs - startMs) * SONG_SAMPLE_RATE) / 1_000L)
             .coerceAtLeast(1L)
             .coerceAtMost(Int.MAX_VALUE.toLong())
@@ -143,7 +148,29 @@ internal fun decodeSongAudioChunk(
     }
 }
 
-private data class StereoFrame(val left: Float, val right: Float)
+private class StereoFloatBuffer(initialFrames: Int) {
+    private var values = FloatArray((initialFrames.coerceAtLeast(1) * 2).coerceAtMost(MAX_SOURCE_FRAMES_PER_WINDOW * 2))
+    var frameCount: Int = 0
+        private set
+
+    fun add(left: Float, right: Float) {
+        check(frameCount < MAX_SOURCE_FRAMES_PER_WINDOW) {
+            "Der Audiodecoder lieferte ungewöhnlich viele Samples für einen Songabschnitt."
+        }
+        val needed = (frameCount + 1) * 2
+        if (needed > values.size) {
+            val grown = maxOf(needed, (values.size * 3 / 2).coerceAtLeast(2))
+                .coerceAtMost(MAX_SOURCE_FRAMES_PER_WINDOW * 2)
+            values = values.copyOf(grown)
+        }
+        values[frameCount * 2] = left
+        values[frameCount * 2 + 1] = right
+        frameCount++
+    }
+
+    fun left(frame: Int): Float = values[frame * 2]
+    fun right(frame: Int): Float = values[frame * 2 + 1]
+}
 
 private fun appendSongFrames(
     buffer: ByteBuffer,
@@ -153,7 +180,7 @@ private fun appendSongFrames(
     pcmEncoding: Int,
     requestedStartUs: Long,
     requestedEndUs: Long,
-    destination: MutableList<StereoFrame>
+    destination: StereoFloatBuffer
 ): Boolean {
     val rate = sampleRate.coerceAtLeast(1)
     val channels = channelCount.coerceAtLeast(1)
@@ -172,34 +199,36 @@ private fun appendSongFrames(
         } else {
             left
         }
-        destination += StereoFrame(left, right)
+        destination.add(left, right)
     }
     return false
 }
 
 private fun resampleStereo(
-    source: List<StereoFrame>,
+    source: StereoFloatBuffer,
     sourceRate: Int,
     wantedFrames: Int
 ): FloatArray {
     val output = FloatArray(wantedFrames * 2)
-    if (source.size == 1) {
+    if (source.frameCount == 1) {
         for (i in 0 until wantedFrames) {
-            output[2 * i] = source[0].left
-            output[2 * i + 1] = source[0].right
+            output[2 * i] = source.left(0)
+            output[2 * i + 1] = source.right(0)
         }
         return output
     }
     val scale = sourceRate.coerceAtLeast(1).toDouble() / SONG_SAMPLE_RATE.toDouble()
     for (i in 0 until wantedFrames) {
         val position = i * scale
-        val leftIndex = position.toInt().coerceIn(0, source.lastIndex)
-        val rightIndex = (leftIndex + 1).coerceAtMost(source.lastIndex)
+        val leftIndex = position.toInt().coerceIn(0, source.frameCount - 1)
+        val rightIndex = (leftIndex + 1).coerceAtMost(source.frameCount - 1)
         val fraction = (position - leftIndex).toFloat().coerceIn(0f, 1f)
-        val a = source[leftIndex]
-        val b = source[rightIndex]
-        output[2 * i] = a.left + (b.left - a.left) * fraction
-        output[2 * i + 1] = a.right + (b.right - a.right) * fraction
+        val leftA = source.left(leftIndex)
+        val leftB = source.left(rightIndex)
+        val rightA = source.right(leftIndex)
+        val rightB = source.right(rightIndex)
+        output[2 * i] = leftA + (leftB - leftA) * fraction
+        output[2 * i + 1] = rightA + (rightB - rightA) * fraction
     }
     return output
 }
