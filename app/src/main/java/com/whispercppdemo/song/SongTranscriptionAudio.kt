@@ -7,6 +7,7 @@ import de.matthiasennen.transcript.media.AudioSampleDiagnostics
 import de.matthiasennen.transcript.media.DecodedAudioChunk
 import de.matthiasennen.transcript.media.analyzeAudioSamples
 import java.io.File
+import java.util.concurrent.CancellationException
 import kotlin.math.PI
 import kotlin.math.cos
 
@@ -34,26 +35,31 @@ internal fun decodeAndSeparateSongChunk(
     val modelDirectory = File(context.filesDir, "song-models")
     val starts = separatorWindowStarts(startMs, endMs)
 
-    SongSeparatorEngine.open(
-        model = configuration.model,
-        modelDirectory = modelDirectory,
-        threads = configuration.threads
-    ).use { engine ->
+    val engine = songStage("${configuration.model.modelLabel} konnte nicht geladen werden") {
+        SongSeparatorEngine.open(
+            model = configuration.model,
+            modelDirectory = modelDirectory,
+            threads = configuration.threads
+        )
+    }
+    engine.use {
         starts.forEachIndexed { index, absoluteStartMs ->
-            if (shouldCancel()) throw java.util.concurrent.CancellationException(
-                "Gesangstrennung abgebrochen."
-            )
+            if (shouldCancel()) throw CancellationException("Gesangstrennung abgebrochen.")
             val absoluteEndMs = minOf(absoluteStartMs + SEPARATOR_WINDOW_MS, endMs)
-            val decoded = decodeSongAudioChunk(
-                context = context,
-                uri = uri,
-                startMs = absoluteStartMs,
-                endMs = absoluteEndMs,
-                shouldCancel = shouldCancel
-            )
+            val decoded = songStage("Song-Audio konnte nicht dekodiert werden") {
+                decodeSongAudioChunk(
+                    context = context,
+                    uri = uri,
+                    startMs = absoluteStartMs,
+                    endMs = absoluteEndMs,
+                    shouldCancel = shouldCancel
+                )
+            }
             val actualFrames44100 = decoded.interleavedStereo44100.size / 2
             val padded = padStereo(decoded.interleavedStereo44100, KIM_SAMPLES_PER_CHANNEL)
-            val vocals = engine.separateVocals(padded)
+            val vocals = songStage("Gesangstrennung mit ${configuration.model.modelLabel} fehlgeschlagen") {
+                engine.separateVocals(padded)
+            }
             val mono16k = downmixAndResampleToWhisper(
                 interleavedStereo44100 = vocals,
                 usableFrames44100 = actualFrames44100
@@ -101,6 +107,16 @@ internal fun separatorWindowStarts(startMs: Long, endMs: Long): List<Long> {
         position += SEPARATOR_STEP_MS
     }
     return starts
+}
+
+private inline fun <T> songStage(label: String, block: () -> T): T = try {
+    block()
+} catch (failure: CancellationException) {
+    throw failure
+} catch (failure: Exception) {
+    val detail = failure.localizedMessage?.takeIf(String::isNotBlank)
+        ?: failure.javaClass.simpleName
+    throw IllegalStateException("$label: $detail", failure)
 }
 
 private fun padStereo(source: FloatArray, wantedFrames: Int): FloatArray {
