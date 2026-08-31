@@ -6,6 +6,9 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import de.matthiasennen.transcript.media.decoderTimestampOffsetUs
+import de.matthiasennen.transcript.media.isExtractorEndOfStream
+import de.matthiasennen.transcript.media.normalizedDecoderTimestampUs
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CancellationException
@@ -24,6 +27,11 @@ internal data class SongAudioChunk(
  * Decodes only one bounded separator window. PCM is kept in a primitive float
  * buffer rather than boxed frame objects and is immediately resampled to
  * 44.1-kHz stereo after the current window.
+ *
+ * The timestamp normalization mirrors the proven normal transcription decoder.
+ * This matters for media whose first extractor timestamp is negative: without
+ * normalization Android can emit a window that appears to end before the
+ * requested range and Song mode would fail before the separator is reached.
  */
 internal fun decodeSongAudioChunk(
     context: Context,
@@ -64,6 +72,7 @@ internal fun decodeSongAudioChunk(
         val sourceFrames = StereoFloatBuffer(estimatedFrames)
         val info = MediaCodec.BufferInfo()
         var inputEnded = false
+        var inputTimestampOffsetUs: Long? = null
         var outputEnded = false
         var reachedEnd = false
         var idlePolls = 0
@@ -78,13 +87,23 @@ internal fun decodeSongAudioChunk(
                         ?: error("Der Audiodecoder stellte keinen Eingabepuffer bereit.")
                     val size = extractor.readSampleData(input, 0)
                     val timeUs = extractor.sampleTime
-                    if (size < 0 || timeUs > endUs) {
+                    if (isExtractorEndOfStream(size) || timeUs > endUs) {
                         decoder.queueInputBuffer(
                             inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM
                         )
                         inputEnded = true
                     } else {
-                        decoder.queueInputBuffer(inputIndex, 0, size, timeUs.coerceAtLeast(0L), 0)
+                        val timestampOffsetUs = inputTimestampOffsetUs
+                            ?: decoderTimestampOffsetUs(timeUs).also {
+                                inputTimestampOffsetUs = it
+                            }
+                        decoder.queueInputBuffer(
+                            inputIndex,
+                            0,
+                            size,
+                            normalizedDecoderTimestampUs(timeUs, timestampOffsetUs),
+                            0
+                        )
                         extractor.advance()
                     }
                     progressed = true
