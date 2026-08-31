@@ -10,6 +10,6 @@
     <path d="m44 29 3-3 6 6-3 3-6-6Z" fill="currentColor" opacity=".28" stroke="#FFFFFF" stroke-width="1.2"/>
     <path d="m47 26 3-3 6 6-3 3-6-6Z" fill="#E85B5B" stroke="#FFFFFF" stroke-width="1.2"/>
     <path d="m24 49 6 6-8 2.5 2-8.5Z" fill="currentColor" opacity=".85" stroke="#FFFFFF" stroke-width="1.2"/>
-    <path d="m22 57.5 2-3 3 3-5 0Z" fill="#2B2F3A" stroke="none"/>
+    <path d="M22 57.5 24.4 54.4 25.8 56.9 22 57.5Z" fill="#2B2F3A" stroke="none"/>
   </g>
 </svg>
