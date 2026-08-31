@@ -12,5 +12,5 @@
     <path android:fillAlpha="0.28" android:fillColor="@color/transcript_status_primary" android:pathData="M44,29L47,26L53,32L50,35L44,29Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.2" />
     <path android:fillColor="#FFE85B5B" android:pathData="M47,26L50,23L56,29L53,32L47,26Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.2" />
     <path android:fillAlpha="0.85" android:fillColor="@color/transcript_status_primary" android:pathData="M24,49L30,55L22,57.5L24,49Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.2" />
-    <path android:fillColor="#FF2B2F3A" android:pathData="M22,57.5L24,54.5L27,57.5H22Z" />
+    <path android:fillColor="#FF2B2F3A" android:pathData="M22,57.5L24.4,54.4L25.8,56.9L22,57.5Z" />
 </vector>
