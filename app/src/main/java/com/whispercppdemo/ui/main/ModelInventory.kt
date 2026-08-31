@@ -4,6 +4,8 @@ import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.download.SileroVadModel
 import de.matthiasennen.transcript.download.VadModelInstallation
+import de.matthiasennen.transcript.song.SongModelInstallation
+import de.matthiasennen.transcript.song.SongSeparationModel
 import java.io.File
 
 /**
@@ -16,11 +18,13 @@ internal class ModelInventory(filesDirectory: File) {
     private val whisperDirectory = File(filesDirectory, "models")
     private val vadDirectory = File(filesDirectory, "vad-models")
     private val aiDirectory = File(filesDirectory, "ai-models")
+    private val songDirectory = File(filesDirectory, "song-models")
 
     fun ensureDirectories() {
         whisperDirectory.mkdirs()
         vadDirectory.mkdirs()
         aiDirectory.mkdirs()
+        songDirectory.mkdirs()
     }
 
     fun whisperFile(model: WhisperModel): File = File(whisperDirectory, model.fileName)
@@ -35,6 +39,11 @@ internal class ModelInventory(filesDirectory: File) {
     fun aiFile(model: AiModel): File = File(aiDirectory, model.fileName)
 
     fun aiPartialFile(model: AiModel): File = File(aiDirectory, "${model.fileName}.part")
+
+    fun songFile(model: SongSeparationModel): File = File(songDirectory, model.fileName)
+
+    fun songPartialFile(model: SongSeparationModel): File =
+        File(songDirectory, "${model.fileName}.part")
 
     fun whisperInstallations(): List<ModelInstallation> = WhisperModel.entries.map { model ->
         val file = whisperFile(model)
@@ -65,6 +74,16 @@ internal class ModelInventory(filesDirectory: File) {
         )
     }
 
+    fun songInstallations(): List<SongModelInstallation> = SongSeparationModel.entries.map { model ->
+        val file = songFile(model)
+        SongModelInstallation(
+            model = model,
+            isInstalled = model.expectedBytes > 0L && file.isFile && file.length() == model.expectedBytes,
+            installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
+            partialBytes = songPartialFile(model).takeIf(File::isFile)?.length() ?: 0L
+        )
+    }
+
     fun deleteWhisper(model: WhisperModel, genericErrors: Boolean = false) = deletePair(
         complete = whisperFile(model),
         partial = whisperPartialFile(model),
@@ -88,6 +107,13 @@ internal class ModelInventory(filesDirectory: File) {
         else "${model.modelLabel} konnte nicht gelöscht werden.",
         partialError = if (genericErrors) "Der unvollständige KI-Download konnte nicht gelöscht werden."
         else "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
+    )
+
+    fun deleteSong(model: SongSeparationModel) = deletePair(
+        complete = songFile(model),
+        partial = songPartialFile(model),
+        completeError = "${model.modelLabel} konnte nicht gelöscht werden.",
+        partialError = "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
     )
 
     private fun deletePair(
