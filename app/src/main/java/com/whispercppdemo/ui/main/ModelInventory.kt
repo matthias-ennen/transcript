@@ -40,10 +40,11 @@ internal class ModelInventory(filesDirectory: File) {
 
     fun aiPartialFile(model: AiModel): File = File(aiDirectory, "${model.fileName}.part")
 
-    fun songFile(model: SongSeparationModel): File = File(songDirectory, model.fileName)
+    fun songFile(model: SongSeparationModel, artifactFileName: String): File =
+        File(File(songDirectory, model.id).apply { mkdirs() }, artifactFileName)
 
-    fun songPartialFile(model: SongSeparationModel): File =
-        File(songDirectory, "${model.fileName}.part")
+    fun songPartialFile(model: SongSeparationModel, artifactFileName: String): File =
+        File(File(songDirectory, model.id).apply { mkdirs() }, "${artifactFileName}.part")
 
     fun whisperInstallations(): List<ModelInstallation> = WhisperModel.entries.map { model ->
         val file = whisperFile(model)
@@ -75,12 +76,21 @@ internal class ModelInventory(filesDirectory: File) {
     }
 
     fun songInstallations(): List<SongModelInstallation> = SongSeparationModel.entries.map { model ->
-        val file = songFile(model)
+        val installedBytes = model.artifacts.sumOf { artifact ->
+            songFile(model, artifact.fileName).takeIf(File::isFile)?.length() ?: 0L
+        }
+        val partialBytes = model.artifacts.sumOf { artifact ->
+            songPartialFile(model, artifact.fileName).takeIf(File::isFile)?.length() ?: 0L
+        }
+        val installed = model.artifacts.all { artifact ->
+            val file = songFile(model, artifact.fileName)
+            file.isFile && file.length() == artifact.expectedBytes
+        }
         SongModelInstallation(
             model = model,
-            isInstalled = model.expectedBytes > 0L && file.isFile && file.length() == model.expectedBytes,
-            installedBytes = file.takeIf(File::isFile)?.length() ?: 0L,
-            partialBytes = songPartialFile(model).takeIf(File::isFile)?.length() ?: 0L
+            isInstalled = installed,
+            installedBytes = installedBytes,
+            partialBytes = partialBytes
         )
     }
 
@@ -109,12 +119,20 @@ internal class ModelInventory(filesDirectory: File) {
         else "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
     )
 
-    fun deleteSong(model: SongSeparationModel) = deletePair(
-        complete = songFile(model),
-        partial = songPartialFile(model),
-        completeError = "${model.modelLabel} konnte nicht gelöscht werden.",
-        partialError = "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
-    )
+    fun deleteSong(model: SongSeparationModel) {
+        model.artifacts.forEach { artifact ->
+            deletePair(
+                complete = songFile(model, artifact.fileName),
+                partial = songPartialFile(model, artifact.fileName),
+                completeError = "${model.modelLabel} konnte nicht gelöscht werden.",
+                partialError = "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
+            )
+        }
+        val directory = File(songDirectory, model.id)
+        check(!directory.exists() || directory.list()?.isNotEmpty() == true || directory.delete()) {
+            "Der Modellordner von ${model.modelLabel} konnte nicht gelöscht werden."
+        }
+    }
 
     private fun deletePair(
         complete: File,
