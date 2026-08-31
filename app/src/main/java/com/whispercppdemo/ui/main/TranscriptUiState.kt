@@ -14,6 +14,8 @@ import de.matthiasennen.transcript.ai.LocalAiConfiguration
 import de.matthiasennen.transcript.download.VadModelInstallation
 import de.matthiasennen.transcript.download.DownloadStorageIssue
 import de.matthiasennen.transcript.transcription.VadProcessingSummary
+import de.matthiasennen.transcript.song.SongModelInstallation
+import de.matthiasennen.transcript.song.SongSeparationModel
 
 enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
 
@@ -51,6 +53,8 @@ data class TranscriptUiState(
     val isVadDownloading: Boolean = false,
     val vadDownloadedBytes: Long = 0L,
     val vadDownloadTotalBytes: Long = 0L,
+    val selectedSongSeparationModel: SongSeparationModel = SongSeparationModel.BALANCED,
+    val songModelInstallations: List<SongModelInstallation> = emptyList(),
     val selectedAiModel: AiModel = AiModel.BALANCED,
     val aiModelInstallations: List<AiModelInstallation> = emptyList(),
     val aiPostProcessingEnabled: Boolean = false,
