@@ -58,6 +58,8 @@ import de.matthiasennen.transcript.transcription.TranscriptResultPersistence
 import de.matthiasennen.transcript.transcription.TranscriptResultStore
 import de.matthiasennen.transcript.transcription.TranscriptionService
 import de.matthiasennen.transcript.transcription.TranscriptionState
+import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.SongSeparationPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -93,6 +95,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val recordingFolderPreferences = RecordingFolderPreferences(application)
     private val whisperSettingsPreferences = WhisperSettingsPreferences(application)
+    private val songSeparationPreferences = SongSeparationPreferences(application)
     private val audioPlayer: AudioPlayerController = AudioPlayerController(
         context = application,
         onPrepared = { durationMs ->
@@ -147,6 +150,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         val whisperSettings = whisperSettingsPreferences.load()
         refreshModelInstallations(selectedModel)
         refreshVadModelInstallation()
+        refreshSongModelInstallations(songSeparationPreferences.loadSelectedModel())
         val aiSettings = aiPreferences.load()
         val recordingFolder = recordingFolderPreferences.loadValid()
         uiState = uiState.copy(
@@ -1661,6 +1665,66 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     }
 
+    fun selectSongSeparationModel(model: SongSeparationModel) {
+        if (uiState.isBusy || uiState.isRecording) return
+        val installation = uiState.songModelInstallations.firstOrNull { it.model == model }
+        if (installation?.isInstalled != true) return
+        songSeparationPreferences.saveSelectedModel(model)
+        uiState = uiState.copy(
+            selectedSongSeparationModel = model,
+            status = "${model.modelLabel} ist für den Songmodus ausgewählt.",
+            cannaBotMode = CannaBotMode.IDLE
+        )
+    }
+
+    fun deleteSongSeparationModel(model: SongSeparationModel) {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "${model.modelLabel} wird gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) { modelInventory.deleteSong(model) }
+            }.onSuccess {
+                refreshSongModelInstallations(uiState.selectedSongSeparationModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "${model.modelLabel} wurde gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }.onFailure(::fail)
+        }
+    }
+
+    fun deleteAllSongSeparationModels() {
+        if (uiState.isBusy) return
+        viewModelScope.launch {
+            uiState = uiState.copy(
+                isBusy = true,
+                progress = null,
+                error = null,
+                status = "Alle Songmodelle werden gelöscht …",
+                cannaBotMode = CannaBotMode.WAITING
+            )
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    SongSeparationModel.entries.forEach(modelInventory::deleteSong)
+                }
+            }.onSuccess {
+                refreshSongModelInstallations(uiState.selectedSongSeparationModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    status = "Alle Songmodelle wurden gelöscht.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+            }.onFailure(::fail)
+        }
+    }
+
     fun transcribe() {
         val uri = uiState.selectedAudio ?: return
         if (!uiState.modelReady || uiState.isBusy) return
@@ -2401,6 +2465,22 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
             )
         }.getOrDefault(DeviceStorageSnapshot())
         uiState = uiState.copy(deviceStorage = snapshot)
+    }
+
+    private fun refreshSongModelInstallations(selectedModel: SongSeparationModel) {
+        val installations = modelInventory.songInstallations()
+        val effectiveSelected = if (
+            installations.firstOrNull { it.model == selectedModel }?.isInstalled == true
+        ) {
+            selectedModel
+        } else {
+            selectedModel
+        }
+        uiState = uiState.copy(
+            selectedSongSeparationModel = effectiveSelected,
+            songModelInstallations = installations
+        )
+        refreshDeviceStorage()
     }
 
     private fun refreshAiModelInstallations(selectedModel: AiModel) {
