@@ -51,11 +51,11 @@ internal object SongStft {
         val samplesPerChannel = interleavedStereo.size / 2
         val pad = if (centered) fftSize / 2 else 0
         val paddedSamples = samplesPerChannel + pad * 2
-        val frames = if (paddedSamples <= fftSize) 1 else 1 + (paddedSamples - fftSize + hopSize - 1) / hopSize
+        val frames = if (paddedSamples <= fftSize) 1 else 1 + (paddedSamples - fftSize) / hopSize
         val bins = fftSize / 2 + 1
         val values = 2 * bins * frames
-        val real = FloatArray(2 * bins * frames)
-        val imaginary = FloatArray(2 * bins * frames)
+        val real = FloatArray(values)
+        val imaginary = FloatArray(values)
         val fft = FloatFFT_1D(fftSize.toLong())
         val buffer = FloatArray(fftSize * 2)
 
@@ -77,7 +77,6 @@ internal object SongStft {
             }
         }
 
-        check(real.size == values && imaginary.size == values)
         return SongSpectrogram(
             channels = 2,
             fftSize = fftSize,
@@ -140,7 +139,8 @@ internal object SongStft {
         val wanted = spectrogram.originalSamplesPerChannel
         val output = FloatArray(wanted * 2)
         for (i in 0 until wanted) {
-            val source = (cropStart + i).coerceIn(0, paddedLength - 1)
+            val source = cropStart + i
+            if (source >= paddedLength) break
             output[2 * i] = channels[0][source]
             output[2 * i + 1] = channels[1][source]
         }
