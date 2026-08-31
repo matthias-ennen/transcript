@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Debug
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -35,6 +37,7 @@ class AiTranscriptAnalysisService : Service() {
     private var processingJob: Job? = null
     private lateinit var requestStore: AiTranscriptAnalysisRequestStore
     private var activeConfiguration: LocalAiConfiguration? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -87,6 +90,24 @@ class AiTranscriptAnalysisService : Service() {
             TranscriptNotifications.AI_PROCESSING_ID,
             buildNotification("${request.action.displayLabel} wird vorbereitet …", 0, true)
         )
+        try {
+            acquireAnalysisWakeLock()
+        } catch (failure: Throwable) {
+            requestStore.clear()
+            AiTranscriptAnalysisCoordinator.update(
+                AiTranscriptAnalysisState.Failed(
+                    action = request.action,
+                    model = model,
+                    sourceFingerprint = request.sourceFingerprint,
+                    message = "Der Prozessor konnte für die KI-Auswertung nicht aktiv gehalten werden."
+                )
+            )
+            finishWithNotification(
+                "KI-Auswertung unterbrochen",
+                "Der Prozessor konnte für die KI-Auswertung nicht aktiv gehalten werden."
+            )
+            return START_NOT_STICKY
+        }
         processingJob = serviceScope.launch {
             runAnalysis(request, model)
             processingJob = null
@@ -98,13 +119,32 @@ class AiTranscriptAnalysisService : Service() {
 
     override fun onDestroy() {
         stopRequested.set(true)
+        releaseAnalysisWakeLock()
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun runAnalysis(request: AiTranscriptAnalysisRequest, model: AiModel) {
         val startedAt = SystemClock.elapsedRealtime()
+        var startingAppPssBytes = 0L
+        var peakAppPssBytes = 0L
+        var endingAppPssBytes = 0L
+        var maximumThermalStatus = -1
+        var resourceSampleCount = 0
+
+        fun sampleResources() {
+            val pssBytes = runCatching { Debug.getPss().toLong() * 1_024L }.getOrDefault(0L)
+            if (resourceSampleCount == 0) startingAppPssBytes = pssBytes
+            endingAppPssBytes = pssBytes
+            peakAppPssBytes = maxOf(peakAppPssBytes, pssBytes)
+            AiHardwareProbe.readThermalStatus(this)?.let { thermal ->
+                maximumThermalStatus = maxOf(maximumThermalStatus, thermal)
+            }
+            resourceSampleCount += 1
+        }
+
         try {
+            sampleResources()
             val modelFile = File(File(filesDir, "ai-models"), model.fileName)
             check(modelFile.isFile && modelFile.length() >= model.minimumBytes) {
                 "${model.modelLabel} ist nicht vollständig installiert."
@@ -118,10 +158,30 @@ class AiTranscriptAnalysisService : Service() {
             activeConfiguration = configuration
             ensureContinues()
 
+            val generationPerformance = mutableListOf<AiTranscriptAnalysisGenerationPerformance>()
+            var pendingPhaseLabel: String? = null
+            var pendingPhaseStartedAt = 0L
+
+            fun closePendingPhase(now: Long = SystemClock.elapsedRealtime()) {
+                val label = pendingPhaseLabel ?: return
+                val metrics = LocalAiEngine.lastGenerationMetricsSnapshot() ?: return
+                generationPerformance += AiTranscriptAnalysisGenerationPerformance(
+                    label = label,
+                    phaseDurationMs = (now - pendingPhaseStartedAt).coerceAtLeast(0L),
+                    metrics = metrics
+                )
+                pendingPhaseLabel = null
+            }
+
             val analyzer = AiTranscriptAnalyzer(
                 configuration = configuration,
                 ensureContinues = ::ensureContinues,
                 onProgress = { progress ->
+                    val now = SystemClock.elapsedRealtime()
+                    closePendingPhase(now)
+                    sampleResources()
+                    pendingPhaseLabel = progress.activityDetail
+                    pendingPhaseStartedAt = now
                     AiTranscriptAnalysisCoordinator.update(
                         AiTranscriptAnalysisState.Running(
                             action = request.action,
@@ -143,19 +203,38 @@ class AiTranscriptAnalysisService : Service() {
                 }
             )
 
+            var analysisStartedAt = 0L
+            var analysisEndedAt = 0L
             val session = AiEngineSessionManager.withModel(
                 model = model,
                 file = modelFile,
                 configuration = configuration
             ) { engine, _ ->
-                analyzer.analyze(
+                analysisStartedAt = SystemClock.elapsedRealtime()
+                val execution = analyzer.analyze(
                     engine = engine,
                     action = request.action,
                     source = request.sourceText
                 )
+                analysisEndedAt = SystemClock.elapsedRealtime()
+                closePendingPhase(analysisEndedAt)
+                sampleResources()
+                Triple(
+                    execution,
+                    runCatching { engine.runtimeReport() }.getOrNull(),
+                    generationPerformance.toList()
+                )
             }
             ensureContinues()
-            val execution = session.value
+            sampleResources()
+            val execution = session.value.first
+            val completedAt = SystemClock.elapsedRealtime()
+            val totalDurationMs = (completedAt - startedAt).coerceAtLeast(0L)
+            val preAnalysisMs = (
+                analysisStartedAt - startedAt - session.info.modelLoadMs
+            ).coerceAtLeast(0L)
+            val analysisWallMs = (analysisEndedAt - analysisStartedAt).coerceAtLeast(0L)
+            val postAnalysisMs = (completedAt - analysisEndedAt).coerceAtLeast(0L)
             val result = AiTranscriptAnalysisResult(
                 action = request.action,
                 model = model,
@@ -166,8 +245,23 @@ class AiTranscriptAnalysisService : Service() {
                 generationCount = execution.generationCount,
                 modelLoadMs = session.info.modelLoadMs,
                 totalInferenceMs = execution.totalInferenceMs,
-                totalDurationMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
+                totalDurationMs = totalDurationMs,
                 cpuFallbackUsed = session.info.cpuFallbackUsed
+            )
+            AiTranscriptAnalysisPerformanceStore.capture(
+                result = result,
+                configuration = configuration,
+                runtimeReport = session.value.second,
+                modelAlreadyLoaded = session.info.modelAlreadyLoaded,
+                preAnalysisMs = preAnalysisMs,
+                analysisWallMs = analysisWallMs,
+                postAnalysisMs = postAnalysisMs,
+                generationPerformance = session.value.third,
+                startingAppPssBytes = startingAppPssBytes,
+                peakAppPssBytes = peakAppPssBytes,
+                endingAppPssBytes = endingAppPssBytes,
+                maximumThermalStatus = maximumThermalStatus,
+                resourceSampleCount = resourceSampleCount
             )
             requestStore.clear()
             AiTranscriptAnalysisCoordinator.update(AiTranscriptAnalysisState.Completed(result))
@@ -210,7 +304,27 @@ class AiTranscriptAnalysisService : Service() {
             }
         } finally {
             activeConfiguration = null
+            releaseAnalysisWakeLock()
         }
+    }
+
+    private fun acquireAnalysisWakeLock() {
+        wakeLock = getSystemService(PowerManager::class.java).newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "$packageName:local-ai-transcript-analysis"
+        ).apply {
+            setReferenceCounted(false)
+            acquire(6L * 60L * 60L * 1_000L)
+        }
+    }
+
+    private fun releaseAnalysisWakeLock() {
+        wakeLock?.let { lock ->
+            runCatching {
+                if (lock.isHeld) lock.release()
+            }
+        }
+        wakeLock = null
     }
 
     private fun ensureContinues() {

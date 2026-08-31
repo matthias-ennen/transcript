@@ -9,20 +9,22 @@ internal class TranscriptSession(
     private val persistence: TranscriptResultPersistence
 ) {
     fun beginEditing(state: TranscriptUiState, groupStartMs: Long): TranscriptUiState? {
-        if (
-            state.isBusy || state.segments.isEmpty() ||
-            state.transcriptView != TranscriptViewMode.EDITED
-        ) return null
+        if (state.isBusy || state.segments.isEmpty()) return null
         val sectionMinutes = state.effectiveTranscriptSectionMinutes()
         TranscriptGroupingRuntime.use(sectionMinutes)
         if (state.segments.none {
                 transcriptGroupStartMs(it.startMs, sectionMinutes) == groupStartMs
             }
         ) return null
+        val editSource = if (state.transcriptView == TranscriptViewMode.ORIGINAL) {
+            state.originalTranscriptSegments()
+        } else {
+            state.segments
+        }
         return state.copy(
             isEditingTranscript = true,
             editingTranscriptGroupStartMs = groupStartMs,
-            draftSegments = state.segments,
+            draftSegments = editSource,
             editingTranscriptOrigin = TranscriptSegmentOrigin.MANUAL
         )
     }

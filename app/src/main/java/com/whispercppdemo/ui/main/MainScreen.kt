@@ -742,8 +742,12 @@ private fun MainContent(
                                 )
                             }
                         }
-                        AiTranscriptAnalysisCard(
-                            state = state,
+                    }
+                }
+
+                if (hasCompletedTranscript && !state.isTranscribing) {
+                    AiTranscriptAnalysisCard(
+                        state = state,
                             onStart = { action ->
                                 val sourceText = transcriptTextForAiAnalysis(state.segments)
                                 if (!state.selectedAiModelInstalled) {
@@ -758,9 +762,8 @@ private fun MainContent(
                                     )
                                 }
                             },
-                            onCancel = { AiTranscriptAnalysisService.cancel(context) }
-                        )
-                    }
+                        onCancel = { AiTranscriptAnalysisService.cancel(context) }
+                    )
                 }
             }
             }

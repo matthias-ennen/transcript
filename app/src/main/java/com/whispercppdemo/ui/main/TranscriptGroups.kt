@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -108,7 +109,12 @@ internal fun TranscriptList(
     fun prepareEditDraft(target: TranscriptEditTarget) {
         editedTextByIndex.clear()
         showingOriginalByIndex.clear()
-        state.segments.forEachIndexed { index, segment ->
+        val editSource = if (state.transcriptView == TranscriptViewMode.ORIGINAL) {
+            state.originalTranscriptSegments()
+        } else {
+            state.segments
+        }
+        editSource.forEachIndexed { index, segment ->
             editedTextByIndex[index] = segment.text
             showingOriginalByIndex[index] = segment.text == originalTranscriptText(
                 segment,
@@ -335,10 +341,10 @@ internal fun TranscriptList(
                         TranscriptSegmentCard(
                             number = segmentNumbers.getOrNull(index),
                             segment = indexedSegment.segment,
-                            origin = if (
-                                state.transcriptView == TranscriptViewMode.EDITED &&
-                                !state.isAiPostProcessing
-                            ) state.acceptedTranscriptOrigin(index) else null,
+                            origin = when (state.transcriptView) {
+                                TranscriptViewMode.ORIGINAL -> TranscriptSegmentOrigin.ORIGINAL
+                                TranscriptViewMode.EDITED -> state.acceptedTranscriptOrigin(index)
+                            },
                             isEditing = isEditingGroup || isEditingSingle,
                             editingEnabled = !state.isAiPostProcessing,
                             isPlaybackActive = index == activeSegmentIndex,
@@ -368,8 +374,7 @@ internal fun TranscriptList(
                                     onEdited = { showEdited(index) }
                                 )
                                 else -> TranscriptSegmentEditControls.Start(
-                                    enabled = state.transcriptView == TranscriptViewMode.EDITED &&
-                                        !state.isBusy && !state.isAiPostProcessing,
+                                    enabled = !state.isBusy && !state.isAiPostProcessing,
                                     onEdit = {
                                         requestEdit(
                                             TranscriptEditTarget.Segment(
@@ -550,7 +555,7 @@ private fun TranscriptSegmentCard(
                     .offset(x = 8.dp, y = (-8).dp)
                     .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
                     .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    .background(colorResource(R.color.transcript_status_primary), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -752,8 +757,7 @@ private fun TranscriptGroupEditorActions(
     if (!isEditingGroup) {
         OutlinedButton(
             onClick = onEdit,
-            enabled = state.transcriptView == TranscriptViewMode.EDITED &&
-                !state.isBusy && !state.isAiPostProcessing,
+            enabled = !state.isBusy && !state.isAiPostProcessing,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Bearbeiten")
