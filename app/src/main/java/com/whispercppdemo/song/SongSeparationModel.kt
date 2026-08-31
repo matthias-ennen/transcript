@@ -37,13 +37,19 @@ enum class SongSeparationModel(
         qualityLabel = "Ausgewogen",
         modelLabel = "Deezer Spleeter 2-stem FP16",
         description = "Empfohlener Kompromiss aus Trennqualität, Geschwindigkeit und Speicherbedarf.",
-        downloadSizeLabel = "19,7 MB",
+        downloadSizeLabel = "39,4 MB",
         artifacts = listOf(
             SongModelArtifact(
-                fileName = "spleeter-vocals.fp16.onnx",
+                fileName = "vocals.fp16.onnx",
                 downloadUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-spleeter-2stems-fp16/resolve/d4f5d657bda30d02c3cb7d5d391f3eaa2c632df9/vocals.fp16.onnx?download=true",
                 expectedBytes = 19_680_725L,
                 sha256 = "c17def195c44a71dbe9eea2f27d9f61100cd686ed0353033a56f766f7ecb14a0"
+            ),
+            SongModelArtifact(
+                fileName = "accompaniment.fp16.onnx",
+                downloadUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-spleeter-2stems-fp16/resolve/d4f5d657bda30d02c3cb7d5d391f3eaa2c632df9/accompaniment.fp16.onnx?download=true",
+                expectedBytes = 19_680_732L,
+                sha256 = "492d70a5c9c2d51b7a2f1278e6392109cc088898a878147c6c943b58d0e003b4"
             )
         ),
         recommended = true
