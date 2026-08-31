@@ -539,7 +539,7 @@ private fun TranscriptSegmentCard(
                     .align(Alignment.TopEnd)
                     .offset(x = (-48).dp, y = (-8).dp)
                     .size(32.dp),
-                tint = Color.Unspecified
+                tint = MaterialTheme.colorScheme.primary
             )
         }
 
