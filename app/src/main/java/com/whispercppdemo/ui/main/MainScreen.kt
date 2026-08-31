@@ -73,6 +73,7 @@ import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiTranscriptAnalysisCoordinator
 import de.matthiasennen.transcript.ai.AiTranscriptAnalysisService
 import de.matthiasennen.transcript.ai.transcriptTextForAiAnalysis
+import de.matthiasennen.transcript.song.SongSeparationModel
 import kotlinx.coroutines.launch
 
 private enum class PendingTranscriptAction {
@@ -99,6 +100,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var pendingModelDownload by remember { mutableStateOf<WhisperModel?>(null) }
     var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
     var pendingVadModelDownload by remember { mutableStateOf(false) }
+    var pendingSongModelDownload by remember { mutableStateOf<SongSeparationModel?>(null) }
     var pendingRecording by remember { mutableStateOf(false) }
     var pendingRecordingAfterFolderSelection by remember { mutableStateOf(false) }
     var pendingTranscription by remember { mutableStateOf(false) }
@@ -120,6 +122,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         pendingModelDownload?.let(viewModel::downloadModel)
         pendingAiModelDownload?.let(viewModel::downloadAiModel)
         if (pendingVadModelDownload) viewModel.downloadVadModel()
+        pendingSongModelDownload?.let(viewModel::downloadSongSeparationModel)
         if (pendingRecording) {
             if (granted) viewModel.startRecording()
             else viewModel.reportRecordingNotificationPermissionDenied()
@@ -128,6 +131,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         pendingModelDownload = null
         pendingAiModelDownload = null
         pendingVadModelDownload = false
+        pendingSongModelDownload = null
         pendingRecording = false
         pendingTranscription = false
     }
@@ -239,6 +243,20 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 },
                 onDeleteVadModel = viewModel::deleteVadModel,
                 onSelectSongModel = viewModel::selectSongSeparationModel,
+                onDownloadSongModel = { model ->
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingSongModelDownload = model
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.downloadSongSeparationModel(model)
+                    }
+                },
                 onDeleteSongModel = viewModel::deleteSongSeparationModel,
                 onDeleteAllSongModels = viewModel::deleteAllSongSeparationModels,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
