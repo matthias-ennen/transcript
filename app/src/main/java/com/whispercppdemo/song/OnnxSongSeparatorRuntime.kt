@@ -3,6 +3,7 @@ package de.matthiasennen.transcript.song
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.TensorInfo
 import java.io.Closeable
 import java.io.File
 import java.nio.FloatBuffer
@@ -20,6 +21,13 @@ internal class OnnxSongSeparatorRuntime private constructor(
 
     val outputNames: Set<String>
         get() = session.outputNames
+
+    fun inputShape(inputName: String = inputNames.single()): LongArray {
+        require(inputName in inputNames) { "Unbekannter ONNX-Eingang: $inputName" }
+        val tensorInfo = session.inputInfo[inputName]?.info as? TensorInfo
+            ?: error("Der ONNX-Eingang $inputName ist kein Tensor.")
+        return tensorInfo.shape.copyOf()
+    }
 
     fun runFloat(
         input: FloatArray,
