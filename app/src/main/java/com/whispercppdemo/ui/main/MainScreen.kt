@@ -238,6 +238,9 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     } else viewModel.downloadVadModel()
                 },
                 onDeleteVadModel = viewModel::deleteVadModel,
+                onSelectSongModel = viewModel::selectSongSeparationModel,
+                onDeleteSongModel = viewModel::deleteSongSeparationModel,
+                onDeleteAllSongModels = viewModel::deleteAllSongSeparationModels,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
                 onAiAutomaticChanged = viewModel::setAutomaticAiPostProcessingEnabled,
                 onSelectAiModel = viewModel::selectAiModel,
