@@ -15,6 +15,17 @@ private const val KIM_HOP = 441
 internal const val KIM_FRAMES = 1101
 internal const val KIM_SAMPLES_PER_CHANNEL = KIM_HOP * (KIM_FRAMES - 1)
 
+internal enum class SpleeterTensorLayout {
+    CHANNELS_FIRST,
+    SPLITS_FIRST
+}
+
+internal data class SpleeterTensorPlan(
+    val layout: SpleeterTensorLayout,
+    val splitCount: Int,
+    val shape: LongArray
+)
+
 /**
  * Keeps the selected separator loaded while bounded song chunks are processed.
  * Closing this engine releases every ONNX session before Whisper is loaded.
@@ -75,20 +86,35 @@ internal class SongSeparatorEngine private constructor(
             centered = false
         )
         val paddedFrames = roundUp(spectrogram.frames, SPLEETER_FRAME_BLOCK)
-        val chunkCount = paddedFrames / SPLEETER_FRAME_BLOCK
-        val input = FloatArray(2 * paddedFrames * SPLEETER_BINS)
+        val requiredSplits = paddedFrames / SPLEETER_FRAME_BLOCK
+        val vocalsPlan = spleeterTensorPlan(primary.inputShape(), requiredSplits)
+        val accompanimentPlan = spleeterTensorPlan(accompaniment.inputShape(), requiredSplits)
+        check(
+            vocalsPlan.layout == accompanimentPlan.layout &&
+                vocalsPlan.splitCount == accompanimentPlan.splitCount &&
+                vocalsPlan.shape.contentEquals(accompanimentPlan.shape)
+        ) {
+            "Die beiden Spleeter-Modelle erwarten unterschiedliche Tensorformen."
+        }
+        val plan = vocalsPlan
+        val input = FloatArray(2 * plan.splitCount * SPLEETER_FRAME_BLOCK * SPLEETER_BINS)
         for (channel in 0 until 2) {
             for (frame in 0 until spectrogram.frames) {
                 for (bin in 0 until SPLEETER_BINS) {
                     val source = spectrogram.index(channel, bin, frame)
-                    val target = ((channel * chunkCount * SPLEETER_FRAME_BLOCK + frame) * SPLEETER_BINS) + bin
+                    val target = spleeterTensorIndex(
+                        layout = plan.layout,
+                        splitCount = plan.splitCount,
+                        channel = channel,
+                        frame = frame,
+                        bin = bin
+                    )
                     input[target] = magnitude(spectrogram.real[source], spectrogram.imaginary[source])
                 }
             }
         }
-        val shape = longArrayOf(2, chunkCount.toLong(), SPLEETER_FRAME_BLOCK.toLong(), SPLEETER_BINS.toLong())
-        val vocalsSpec = primary.runFloat(input, shape)
-        val accompanimentSpec = accompaniment.runFloat(input, shape)
+        val vocalsSpec = primary.runFloat(input, plan.shape)
+        val accompanimentSpec = accompaniment.runFloat(input, plan.shape)
         check(vocalsSpec.size == input.size && accompanimentSpec.size == input.size) {
             "Spleeter lieferte eine unerwartete Tensorgröße."
         }
@@ -97,7 +123,13 @@ internal class SongSeparatorEngine private constructor(
         for (channel in 0 until 2) {
             for (frame in 0 until spectrogram.frames) {
                 for (bin in 0 until SPLEETER_BINS) {
-                    val tensorIndex = ((channel * chunkCount * SPLEETER_FRAME_BLOCK + frame) * SPLEETER_BINS) + bin
+                    val tensorIndex = spleeterTensorIndex(
+                        layout = plan.layout,
+                        splitCount = plan.splitCount,
+                        channel = channel,
+                        frame = frame,
+                        bin = bin
+                    )
                     val vocal = vocalsSpec[tensorIndex]
                     val other = accompanimentSpec[tensorIndex]
                     val denominator = vocal * vocal + other * other + 1e-10f
@@ -207,6 +239,80 @@ internal class SongSeparatorEngine private constructor(
         }
     }
 }
+
+internal fun spleeterTensorPlan(modelShape: LongArray, requiredSplits: Int): SpleeterTensorPlan {
+    require(requiredSplits > 0)
+    require(modelShape.size == 4) {
+        "Spleeter erwartet einen vierdimensionalen ONNX-Eingang."
+    }
+    require(matchesStaticDimension(modelShape[2], SPLEETER_FRAME_BLOCK) &&
+        matchesStaticDimension(modelShape[3], SPLEETER_BINS)
+    ) {
+        "Spleeter hat eine unerwartete Zeit-/Frequenzform: ${modelShape.contentToString()}."
+    }
+
+    val layout = when {
+        modelShape[0] == 2L && modelShape[1] != 2L -> SpleeterTensorLayout.CHANNELS_FIRST
+        modelShape[1] == 2L && modelShape[0] != 2L -> SpleeterTensorLayout.SPLITS_FIRST
+        modelShape[0] == 2L && modelShape[1] == 2L -> SpleeterTensorLayout.CHANNELS_FIRST
+        modelShape[0] == 2L && modelShape[1] <= 0L -> SpleeterTensorLayout.CHANNELS_FIRST
+        modelShape[1] == 2L && modelShape[0] <= 0L -> SpleeterTensorLayout.SPLITS_FIRST
+        else -> error("Spleeter-Kanalachse ist unbekannt: ${modelShape.contentToString()}.")
+    }
+    val declaredSplits = when (layout) {
+        SpleeterTensorLayout.CHANNELS_FIRST -> modelShape[1]
+        SpleeterTensorLayout.SPLITS_FIRST -> modelShape[0]
+    }
+    val splitCount = if (declaredSplits > 0L) {
+        check(declaredSplits <= Int.MAX_VALUE) { "Spleeter-Splitzahl ist zu groß." }
+        val fixed = declaredSplits.toInt()
+        check(requiredSplits <= fixed) {
+            "Der Songabschnitt benötigt $requiredSplits Spleeter-Blöcke, das Modell akzeptiert aber nur $fixed."
+        }
+        fixed
+    } else {
+        requiredSplits
+    }
+    val shape = when (layout) {
+        SpleeterTensorLayout.CHANNELS_FIRST -> longArrayOf(
+            2,
+            splitCount.toLong(),
+            SPLEETER_FRAME_BLOCK.toLong(),
+            SPLEETER_BINS.toLong()
+        )
+        SpleeterTensorLayout.SPLITS_FIRST -> longArrayOf(
+            splitCount.toLong(),
+            2,
+            SPLEETER_FRAME_BLOCK.toLong(),
+            SPLEETER_BINS.toLong()
+        )
+    }
+    return SpleeterTensorPlan(layout, splitCount, shape)
+}
+
+internal fun spleeterTensorIndex(
+    layout: SpleeterTensorLayout,
+    splitCount: Int,
+    channel: Int,
+    frame: Int,
+    bin: Int
+): Int {
+    require(channel in 0..1)
+    require(frame >= 0)
+    require(bin in 0 until SPLEETER_BINS)
+    val split = frame / SPLEETER_FRAME_BLOCK
+    val frameInSplit = frame % SPLEETER_FRAME_BLOCK
+    require(split in 0 until splitCount)
+    return when (layout) {
+        SpleeterTensorLayout.CHANNELS_FIRST ->
+            (((channel * splitCount + split) * SPLEETER_FRAME_BLOCK + frameInSplit) * SPLEETER_BINS) + bin
+        SpleeterTensorLayout.SPLITS_FIRST ->
+            (((split * 2 + channel) * SPLEETER_FRAME_BLOCK + frameInSplit) * SPLEETER_BINS) + bin
+    }
+}
+
+private fun matchesStaticDimension(actual: Long, expected: Int): Boolean =
+    actual <= 0L || actual == expected.toLong()
 
 private fun magnitude(real: Float, imaginary: Float): Float =
     sqrt(real * real + imaginary * imaginary)
