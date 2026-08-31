@@ -14,6 +14,7 @@ object TranscriptNotifications {
     const val AI_PROCESSING_ID = 2111
     const val VAD_MODEL_DOWNLOAD_ID = 2112
     const val AI_MODEL_DOWNLOAD_ID = 2113
+    const val SONG_MODEL_DOWNLOAD_ID = 2114
 
     val SMALL_ICON = R.drawable.ic_transcript_notification
 
