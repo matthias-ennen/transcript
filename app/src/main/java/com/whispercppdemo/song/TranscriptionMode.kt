@@ -7,6 +7,15 @@ enum class TranscriptionMode(val label: String) {
     SONG("Song")
 }
 
+/**
+ * Current mode for the active workflow. Recording may force SPEECH here without
+ * overwriting the user's persisted manual default.
+ */
+object TranscriptionModeRuntime {
+    @Volatile
+    var current: TranscriptionMode = TranscriptionMode.SPEECH
+}
+
 private const val PREFERENCES_NAME = "transcription_mode_preferences"
 private const val MANUAL_MODE_KEY = "manual_transcription_mode"
 
