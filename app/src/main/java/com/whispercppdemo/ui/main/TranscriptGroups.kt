@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -539,7 +540,7 @@ private fun TranscriptSegmentCard(
                     .align(Alignment.TopEnd)
                     .offset(x = (-48).dp, y = (-8).dp)
                     .size(32.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = Color.Unspecified
             )
         }
 
@@ -550,7 +551,7 @@ private fun TranscriptSegmentCard(
                     .offset(x = 8.dp, y = (-8).dp)
                     .width(TRANSCRIPT_NUMBER_CAPSULE_WIDTH)
                     .height(TRANSCRIPT_NUMBER_CAPSULE_HEIGHT)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    .background(colorResource(R.color.transcript_status_primary), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
