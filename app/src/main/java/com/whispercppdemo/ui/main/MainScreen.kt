@@ -74,6 +74,9 @@ import de.matthiasennen.transcript.ai.AiTranscriptAnalysisCoordinator
 import de.matthiasennen.transcript.ai.AiTranscriptAnalysisService
 import de.matthiasennen.transcript.ai.transcriptTextForAiAnalysis
 import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.TranscriptionModePreferences
+import de.matthiasennen.transcript.song.TranscriptionModeRuntime
 import kotlinx.coroutines.launch
 
 private enum class PendingTranscriptAction {
@@ -92,6 +95,13 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var page by remember { mutableStateOf(AppPage.MAIN) }
     var appLanguage by remember {
         mutableStateOf(AppLanguagePreference.load(context))
+    }
+    val transcriptionModePreferences = remember(context) { TranscriptionModePreferences(context) }
+    var transcriptionMode by remember {
+        mutableStateOf(transcriptionModePreferences.loadManualMode())
+    }
+    LaunchedEffect(Unit) {
+        TranscriptionModeRuntime.current = transcriptionMode
     }
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -340,6 +350,12 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             AppPage.MAIN -> MainContent(
                 viewModel = viewModel,
                 state = state,
+                transcriptionMode = transcriptionMode,
+                onTranscriptionModeSelected = { mode ->
+                    transcriptionMode = mode
+                    TranscriptionModeRuntime.current = mode
+                    transcriptionModePreferences.saveManualMode(mode)
+                },
                 openSettings = { page = AppPage.SETTINGS },
                 innerPadding = innerPadding,
                 audioPicker = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
@@ -359,6 +375,10 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     }
                 },
                 requestRecording = {
+                    if (!state.isRecording && !state.isRecordingStopping) {
+                        transcriptionMode = TranscriptionMode.SPEECH
+                        TranscriptionModeRuntime.current = TranscriptionMode.SPEECH
+                    }
                     if (state.isRecordingStopping) {
                         Unit
                     } else if (state.isRecording) {
@@ -419,6 +439,8 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 private fun MainContent(
     viewModel: MainScreenViewModel,
     state: TranscriptUiState,
+    transcriptionMode: TranscriptionMode,
+    onTranscriptionModeSelected: (TranscriptionMode) -> Unit,
     openSettings: () -> Unit,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     audioPicker: () -> Unit,
@@ -436,6 +458,7 @@ private fun MainContent(
         var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
         var showTranscriptShareDialog by remember { mutableStateOf(false) }
         var showMissingAiModelDialog by remember { mutableStateOf(false) }
+        var showMissingSongModelDialog by remember { mutableStateOf(false) }
         val scrollState = rememberScrollState()
         val scrollScope = rememberCoroutineScope()
         var transcriptHeadingBottomPx by remember { mutableStateOf<Float?>(null) }
@@ -511,6 +534,30 @@ private fun MainContent(
             )
         }
 
+        if (showMissingSongModelDialog) {
+            AlertDialog(
+                onDismissRequest = { showMissingSongModelDialog = false },
+                title = { Text("Songmodell fehlt") },
+                text = {
+                    Text(
+                        "Für den Songmodus muss zuerst in den Einstellungen ein Modell zur " +
+                            "Gesangstrennung heruntergeladen und ausgewählt werden."
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showMissingSongModelDialog = false
+                        openSettings()
+                    }) { Text("Zu den Einstellungen") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showMissingSongModelDialog = false }) {
+                        Text("Abbrechen")
+                    }
+                }
+            )
+        }
+
         pendingTranscriptAction?.let { pendingAction ->
             val question = when (pendingAction) {
                 PendingTranscriptAction.SELECT_AUDIO ->
@@ -531,7 +578,13 @@ private fun MainContent(
                     when (pendingAction) {
                         PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
                         PendingTranscriptAction.START_RECORDING -> requestRecording()
-                        PendingTranscriptAction.TRANSCRIBE -> requestTranscription()
+                        PendingTranscriptAction.TRANSCRIBE -> {
+                            if (transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled) {
+                                showMissingSongModelDialog = true
+                            } else {
+                                requestTranscription()
+                            }
+                        }
                     }
                 },
                 onDismiss = { pendingTranscriptAction = null }
@@ -570,6 +623,12 @@ private fun MainContent(
             ModelManagerCard(
                 state = state,
                 onDownload = requestModelDownload
+            )
+
+            TranscriptionModeSelector(
+                selected = transcriptionMode,
+                enabled = !state.isBusy && !state.isRecording,
+                onSelected = onTranscriptionModeSelected
             )
 
             OutlinedButton(
@@ -617,6 +676,13 @@ private fun MainContent(
                 onSelected = { viewModel.setLanguage(it) }
             )
 
+            if (transcriptionMode == TranscriptionMode.SONG) {
+                Text(
+                    "Im Songmodus wird Silero VAD für diesen Lauf nicht verwendet.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
             Button(
                 onClick = {
                     if (state.isTranscribing) {
@@ -627,6 +693,8 @@ private fun MainContent(
                         }
                     } else if (state.hasUnsavedTranscriptChanges) {
                         pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
+                    } else if (transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled) {
+                        showMissingSongModelDialog = true
                     } else {
                         requestTranscription()
                     }
