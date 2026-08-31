@@ -35,6 +35,8 @@ import de.matthiasennen.transcript.BuildConfig
 import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.download.SileroVadModel
+import de.matthiasennen.transcript.song.SongModelInstallation
+import de.matthiasennen.transcript.song.SongSeparationModel
 
 @Composable
 fun SettingsScreen(
@@ -49,6 +51,9 @@ fun SettingsScreen(
     onDeleteAllModels: () -> Unit,
     onDownloadVadModel: () -> Unit,
     onDeleteVadModel: () -> Unit,
+    onSelectSongModel: (SongSeparationModel) -> Unit,
+    onDeleteSongModel: (SongSeparationModel) -> Unit,
+    onDeleteAllSongModels: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
     onAiAutomaticChanged: (Boolean) -> Unit,
     onSelectAiModel: (AiModel) -> Unit,
@@ -64,6 +69,8 @@ fun SettingsScreen(
     var aiModelToDelete by remember { mutableStateOf<AiModel?>(null) }
     var confirmDeleteAllAi by remember { mutableStateOf(false) }
     var confirmDeleteVad by remember { mutableStateOf(false) }
+    var songModelToDelete by remember { mutableStateOf<SongSeparationModel?>(null) }
+    var confirmDeleteAllSongModels by remember { mutableStateOf(false) }
     val totalBytes = state.modelInstallations.sumOf(ModelInstallation::storedBytes)
 
     LaunchedEffect(Unit) {
@@ -178,6 +185,44 @@ fun SettingsScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Text("Gesangstrennung / Songmodus", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "Diese Modelle isolieren den Gesang lokal vor der Whisper-Transkription. Im normalen Sprachmodus werden sie nicht benötigt.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "Belegter Speicher: ${formatDownloadSize(state.songModelInstallations.sumOf(SongModelInstallation::storedBytes))}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                state.songModelInstallations.forEach { installation ->
+                    SongModelStorageCard(
+                        installation = installation,
+                        selected = installation.model == state.selectedSongSeparationModel,
+                        enabled = !state.isBusy && !state.isRecording,
+                        onSelect = { onSelectSongModel(installation.model) },
+                        onDelete = { songModelToDelete = installation.model }
+                    )
+                }
+                Text(
+                    "Ausgewogen ist die empfohlene Stufe. Songmodelle werden nur auf ausdrücklichen Wunsch heruntergeladen.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedButton(
+                    onClick = { confirmDeleteAllSongModels = true },
+                    enabled = state.songModelInstallations.any { it.storedBytes > 0L } &&
+                        !state.isBusy && !state.isRecording,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Alle Songmodelle löschen")
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text("Lokale KI", style = MaterialTheme.typography.headlineSmall)
                 Text(
                     "Hier werden die lokalen Qwen-Modelle sowie Diagnose und Leistungsprofile verwaltet. Die KI verändert das Transkript nicht mehr; separate Auswertungen des fertigen Transkripts folgen in einem eigenen Arbeitspaket.",
@@ -260,6 +305,25 @@ fun SettingsScreen(
         )
     }
 
+    songModelToDelete?.let { model ->
+        AlertDialog(
+            onDismissRequest = { songModelToDelete = null },
+            title = { Text("Songmodell löschen?") },
+            text = {
+                Text("${model.modelLabel} und ein eventuell angefangener Download werden entfernt.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    songModelToDelete = null
+                    onDeleteSongModel(model)
+                }) { Text("Löschen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { songModelToDelete = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
     aiModelToDelete?.let { model ->
         AlertDialog(
             onDismissRequest = { aiModelToDelete = null },
@@ -313,6 +377,25 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDeleteAllAi = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (confirmDeleteAllSongModels) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAllSongModels = false },
+            title = { Text("Alle Songmodelle löschen?") },
+            text = {
+                Text("Alle installierten Songmodelle und unvollständigen Downloads werden entfernt.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteAllSongModels = false
+                    onDeleteAllSongModels()
+                }) { Text("Alle löschen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteAllSongModels = false }) { Text("Abbrechen") }
             }
         )
     }
@@ -478,6 +561,64 @@ private fun AiModelStorageCard(
                     enabled = enabled,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    Text("Löschen")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SongModelStorageCard(
+    installation: SongModelInstallation,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val model = installation.model
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = if (selected && installation.isInstalled) BorderStroke(2.dp, Color.White) else null
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                buildString {
+                    append(model.qualityLabel)
+                    if (model.recommended) append(" · Empfohlen")
+                },
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(model.modelLabel, style = MaterialTheme.typography.bodyMedium)
+            Text(model.description, style = MaterialTheme.typography.bodySmall)
+            Text(
+                when {
+                    installation.isInstalled ->
+                        "Installiert · ${formatDownloadSize(installation.installedBytes)}${if (selected) " · Ausgewählt" else ""}"
+                    installation.partialBytes > 0L ->
+                        "Download angefangen · ${formatDownloadSize(installation.partialBytes)} von ${model.downloadSizeLabel}"
+                    else -> "Nicht installiert · Download ${model.downloadSizeLabel}"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (!installation.isInstalled) {
+                Button(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Herunterladen")
+                }
+            } else if (!selected) {
+                Button(onClick = onSelect, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                    Text("Auswählen")
+                }
+            }
+            if (installation.storedBytes > 0L) {
+                OutlinedButton(onClick = onDelete, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                     Text("Löschen")
                 }
             }
