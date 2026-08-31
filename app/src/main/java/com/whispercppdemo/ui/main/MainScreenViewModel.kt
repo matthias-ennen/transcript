@@ -60,6 +60,9 @@ import de.matthiasennen.transcript.transcription.TranscriptionService
 import de.matthiasennen.transcript.transcription.TranscriptionState
 import de.matthiasennen.transcript.song.SongSeparationModel
 import de.matthiasennen.transcript.song.SongSeparationPreferences
+import de.matthiasennen.transcript.song.SongModelDownloadCoordinator
+import de.matthiasennen.transcript.song.SongModelDownloadService
+import de.matthiasennen.transcript.song.SongModelDownloadState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -176,6 +179,9 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
         viewModelScope.launch {
             AiModelDownloadCoordinator.state.collect(::handleAiModelDownloadState)
+        }
+        viewModelScope.launch {
+            SongModelDownloadCoordinator.state.collect(::handleSongModelDownloadState)
         }
         viewModelScope.launch {
             DownloadStorageIssueCoordinator.issue.collect { issue ->
@@ -1665,6 +1671,33 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         }
     }
 
+    fun downloadSongSeparationModel(model: SongSeparationModel) {
+        if (uiState.isBusy || uiState.isRecording) return
+        val partialBytes = uiState.songModelInstallations
+            .firstOrNull { it.model == model }
+            ?.partialBytes ?: 0L
+        if (!hasEnoughDownloadStorage(
+                modelLabel = model.modelLabel,
+                modelBytes = model.totalDownloadBytes,
+                partialBytes = partialBytes
+            )
+        ) return
+        uiState = uiState.copy(
+            isBusy = true,
+            downloadingSongModel = model,
+            songDownloadedBytes = partialBytes,
+            songDownloadTotalBytes = model.totalDownloadBytes,
+            progress = if (model.totalDownloadBytes > 0L) {
+                partialBytes.toFloat() / model.totalDownloadBytes
+            } else null,
+            error = null,
+            status = "${model.modelLabel} wird im Hintergrund heruntergeladen …",
+            cannaBotMode = CannaBotMode.RUNNING
+        )
+        cue(CannaBotCue.RUNNING_RIGHT)
+        SongModelDownloadService.start(application, model)
+    }
+
     fun selectSongSeparationModel(model: SongSeparationModel) {
         if (uiState.isBusy || uiState.isRecording) return
         val installation = uiState.songModelInstallations.firstOrNull { it.model == model }
@@ -2075,6 +2108,72 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
                     error = downloadState.message, status = "VAD-Modelldownload unterbrochen.", cannaBotMode = CannaBotMode.IDLE)
                 cue(CannaBotCue.FAILED)
                 VadModelDownloadCoordinator.reset()
+            }
+        }
+    }
+
+    private fun handleSongModelDownloadState(downloadState: SongModelDownloadState) {
+        when (downloadState) {
+            SongModelDownloadState.Idle -> Unit
+            is SongModelDownloadState.Running -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    downloadingSongModel = downloadState.model,
+                    songDownloadedBytes = downloadState.downloadedBytes,
+                    songDownloadTotalBytes = downloadState.totalBytes,
+                    progress = if (downloadState.totalBytes > 0L) {
+                        downloadState.downloadedBytes.toFloat() / downloadState.totalBytes
+                    } else null,
+                    status = if (downloadState.resumed) {
+                        "${downloadState.model.modelLabel}-Download wird fortgesetzt …"
+                    } else {
+                        "${downloadState.model.modelLabel} wird heruntergeladen …"
+                    },
+                    cannaBotMode = CannaBotMode.RUNNING
+                )
+            }
+            is SongModelDownloadState.Verifying -> {
+                uiState = uiState.copy(
+                    isBusy = true,
+                    downloadingSongModel = downloadState.model,
+                    songDownloadedBytes = downloadState.downloadedBytes,
+                    songDownloadTotalBytes = downloadState.totalBytes,
+                    progress = null,
+                    status = "${downloadState.model.modelLabel} wird geprüft …",
+                    cannaBotMode = CannaBotMode.WAITING
+                )
+            }
+            is SongModelDownloadState.Completed -> {
+                refreshSongModelInstallations(downloadState.model)
+                songSeparationPreferences.saveSelectedModel(downloadState.model)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    selectedSongSeparationModel = downloadState.model,
+                    downloadingSongModel = null,
+                    songDownloadedBytes = 0L,
+                    songDownloadTotalBytes = 0L,
+                    progress = null,
+                    error = null,
+                    status = "${downloadState.model.modelLabel} ist installiert und ausgewählt.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.SUCCESS)
+                SongModelDownloadCoordinator.reset()
+            }
+            is SongModelDownloadState.Failed -> {
+                refreshSongModelInstallations(uiState.selectedSongSeparationModel)
+                uiState = uiState.copy(
+                    isBusy = false,
+                    downloadingSongModel = null,
+                    songDownloadedBytes = downloadState.downloadedBytes,
+                    songDownloadTotalBytes = downloadState.totalBytes,
+                    progress = null,
+                    error = downloadState.message,
+                    status = "Songmodell-Download unterbrochen.",
+                    cannaBotMode = CannaBotMode.IDLE
+                )
+                cue(CannaBotCue.FAILED)
+                SongModelDownloadCoordinator.reset()
             }
         }
     }
