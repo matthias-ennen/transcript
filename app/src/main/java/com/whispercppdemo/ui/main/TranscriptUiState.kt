@@ -16,6 +16,7 @@ import de.matthiasennen.transcript.download.DownloadStorageIssue
 import de.matthiasennen.transcript.transcription.VadProcessingSummary
 import de.matthiasennen.transcript.song.SongModelInstallation
 import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.TranscriptionMode
 
 enum class CannaBotMode { IDLE, WAITING, REVIEW, RUNNING }
 
@@ -39,6 +40,7 @@ data class TranscriptUiState(
     val liveWaveform: List<Float> = emptyList(),
     val isWaveformLoading: Boolean = false,
     val waveformProgress: Float? = null,
+    val transcriptionMode: TranscriptionMode = TranscriptionMode.SPEECH,
     val language: String = "auto",
     val whisperSettings: WhisperSettings = WhisperSettings(),
     val selectedModel: WhisperModel = WhisperModel.BASE,
@@ -123,3 +125,6 @@ data class TranscriptUiState(
     val cannaBotCue: CannaBotCue = CannaBotCue.NONE,
     val cannaBotCueId: Long = 0L
 )
+
+internal val TranscriptUiState.selectedSongModelInstalled: Boolean
+    get() = songModelInstallations.firstOrNull { it.model == selectedSongSeparationModel }?.isInstalled == true
