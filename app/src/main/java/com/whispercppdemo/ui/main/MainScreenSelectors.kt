@@ -20,8 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import de.matthiasennen.transcript.song.TranscriptionMode
 
-/** Reusable model and language selection controls used by the main workflow. */
+/** Reusable model, mode and language selection controls used by the main workflow. */
 @Composable
 internal fun ModelSelector(
     selected: WhisperModel,
@@ -53,6 +54,43 @@ internal fun ModelSelector(
                     text = { Text(model.qualityLabel) },
                     onClick = {
                         onSelected(model)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun TranscriptionModeSelector(
+    selected: TranscriptionMode,
+    enabled: Boolean,
+    onSelected: (TranscriptionMode) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    LaunchedEffect(enabled) {
+        if (!enabled) expanded = false
+    }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val selectorWidth = maxWidth
+        LabeledSelectorButton(
+            label = "Verarbeitungsmodus",
+            value = selected.label,
+            enabled = enabled,
+            onClick = { expanded = true },
+            contentDescription = if (expanded) "Modusliste schließen" else "Modusliste öffnen"
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.width(selectorWidth)
+        ) {
+            TranscriptionMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.label) },
+                    onClick = {
+                        onSelected(mode)
                         expanded = false
                     }
                 )
