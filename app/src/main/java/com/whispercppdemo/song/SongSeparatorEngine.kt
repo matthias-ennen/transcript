@@ -4,7 +4,6 @@ import java.io.Closeable
 import java.io.File
 import kotlin.math.sqrt
 
-private const val SONG_SAMPLE_RATE = 44_100
 private const val UMX_FFT = 4096
 private const val UMX_HOP = 1024
 private const val SPLEETER_FFT = 4096
