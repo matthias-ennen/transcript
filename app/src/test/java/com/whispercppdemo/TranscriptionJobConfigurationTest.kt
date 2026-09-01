@@ -46,7 +46,7 @@ class TranscriptionJobConfigurationTest {
     }
 
     @Test
-    fun `song snapshot survives worker and process restart`() {
+    fun `voice isolation snapshot keeps vad enabled across worker restart`() {
         val configuration = TranscriptionJobConfiguration(
             modelId = "base",
             language = "auto",
@@ -59,6 +59,7 @@ class TranscriptionJobConfigurationTest {
 
         assertEquals(TranscriptionMode.SONG, restored.transcriptionMode)
         assertEquals(SongSeparationModel.HIGH_QUALITY.id, restored.songSeparationModelId)
+        assertEquals(WhisperVadMode.ON, restored.whisperSettings.vadMode)
     }
 
     @Test
