@@ -66,7 +66,7 @@ class SongModelDownloadService : Service() {
                 .onSuccess {
                     clearActiveModel()
                     SongModelDownloadCoordinator.update(SongModelDownloadState.Completed(model))
-                    finish(model, "Songmodell installiert", "${model.modelLabel} ist bereit.")
+                    finish(model, "Stimmisolierungsmodell installiert", "${model.modelLabel} ist bereit.")
                 }
                 .onFailure { failure ->
                     clearActiveModel()
@@ -74,7 +74,8 @@ class SongModelDownloadService : Service() {
                         DownloadStorageIssueCoordinator.show(failure.requirement)
                     }
                     val downloaded = currentStoredBytes(model)
-                    val message = failure.localizedMessage ?: "Der Songmodelldownload ist fehlgeschlagen."
+                    val message = failure.localizedMessage
+                        ?: "Der Download des Stimmisolierungsmodells ist fehlgeschlagen."
                     SongModelDownloadCoordinator.update(
                         SongModelDownloadState.Failed(
                             model = model,
@@ -83,7 +84,7 @@ class SongModelDownloadService : Service() {
                             totalBytes = model.totalDownloadBytes
                         )
                     )
-                    finish(model, "Songmodell-Download unterbrochen", message)
+                    finish(model, "Download des Stimmisolierungsmodells unterbrochen", message)
                 }
         }
         return START_REDELIVER_INTENT
@@ -118,7 +119,7 @@ class SongModelDownloadService : Service() {
                     sha256 = artifact.sha256,
                     destination = destination,
                     partial = partial,
-                    failureLabel = "Songmodell"
+                    failureLabel = "Stimmisolierungsmodell"
                 ),
                 onProgress = { progress: DownloadProgress ->
                     val aggregate = (baseBytes + progress.downloadedBytes)
@@ -207,10 +208,10 @@ class SongModelDownloadService : Service() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "Songmodell-Downloads",
+                    "Stimmisolierungsmodelle",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Zeigt den Fortschritt lokaler Modelle zur Gesangstrennung."
+                    description = "Zeigt den Fortschritt lokaler Modelle zur Stimmisolierung."
                 }
             )
         }
