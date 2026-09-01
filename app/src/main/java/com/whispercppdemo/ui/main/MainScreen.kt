@@ -240,6 +240,19 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
                 onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
                 onOpenVadSettings = { page = AppPage.VAD_SETTINGS },
+                onVadModeChanged = { mode ->
+                    viewModel.updateWhisperSettings(
+                        state.whisperSettings.copy(vadMode = mode),
+                        WhisperSettingsPage.VAD
+                    )
+                },
+                voiceIsolationEnabled = transcriptionMode == TranscriptionMode.SONG,
+                onVoiceIsolationEnabledChanged = { enabled ->
+                    val mode = if (enabled) TranscriptionMode.SONG else TranscriptionMode.SPEECH
+                    transcriptionMode = mode
+                    TranscriptionModeRuntime.current = mode
+                    transcriptionModePreferences.saveManualMode(mode)
+                },
                 onSelectModel = viewModel::selectModel,
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
@@ -351,11 +364,6 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 viewModel = viewModel,
                 state = state,
                 transcriptionMode = transcriptionMode,
-                onTranscriptionModeSelected = { mode ->
-                    transcriptionMode = mode
-                    TranscriptionModeRuntime.current = mode
-                    transcriptionModePreferences.saveManualMode(mode)
-                },
                 openSettings = { page = AppPage.SETTINGS },
                 innerPadding = innerPadding,
                 audioPicker = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
@@ -375,10 +383,6 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     }
                 },
                 requestRecording = {
-                    if (!state.isRecording && !state.isRecordingStopping) {
-                        transcriptionMode = TranscriptionMode.SPEECH
-                        TranscriptionModeRuntime.current = TranscriptionMode.SPEECH
-                    }
                     if (state.isRecordingStopping) {
                         Unit
                     } else if (state.isRecording) {
@@ -440,7 +444,6 @@ private fun MainContent(
     viewModel: MainScreenViewModel,
     state: TranscriptUiState,
     transcriptionMode: TranscriptionMode,
-    onTranscriptionModeSelected: (TranscriptionMode) -> Unit,
     openSettings: () -> Unit,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     audioPicker: () -> Unit,
@@ -537,11 +540,11 @@ private fun MainContent(
         if (showMissingSongModelDialog) {
             AlertDialog(
                 onDismissRequest = { showMissingSongModelDialog = false },
-                title = { Text("Songmodell fehlt") },
+                title = { Text("Modell zur Stimmisolierung fehlt") },
                 text = {
                     Text(
-                        "Für den Songmodus muss zuerst in den Einstellungen ein Modell zur " +
-                            "Gesangstrennung heruntergeladen und ausgewählt werden."
+                        "Für die Stimmisolierung muss zuerst in den Einstellungen ein passendes " +
+                            "Modell heruntergeladen und ausgewählt werden."
                     )
                 },
                 confirmButton = {
@@ -625,12 +628,6 @@ private fun MainContent(
                 onDownload = requestModelDownload
             )
 
-            TranscriptionModeSelector(
-                selected = transcriptionMode,
-                enabled = !state.isBusy && !state.isRecording,
-                onSelected = onTranscriptionModeSelected
-            )
-
             OutlinedButton(
                 onClick = {
                     if (state.hasUnsavedTranscriptChanges) {
@@ -675,13 +672,6 @@ private fun MainContent(
                 enabled = !state.isBusy && !state.isRecording,
                 onSelected = { viewModel.setLanguage(it) }
             )
-
-            if (transcriptionMode == TranscriptionMode.SONG) {
-                Text(
-                    "Im Songmodus wird Silero VAD für diesen Lauf nicht verwendet.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
 
             Button(
                 onClick = {
