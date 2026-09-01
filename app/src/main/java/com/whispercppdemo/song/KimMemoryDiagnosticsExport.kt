@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript.song
 
+import android.annotation.TargetApi
 import android.content.ContentValues
 import android.content.Context
 import android.os.Build
@@ -69,6 +70,7 @@ internal fun exportKimMemoryDiagnosticsToDownloads(
     }.getOrNull()
 }
 
+@TargetApi(Build.VERSION_CODES.Q)
 private fun exportWithMediaStore(
     context: Context,
     source: File,
