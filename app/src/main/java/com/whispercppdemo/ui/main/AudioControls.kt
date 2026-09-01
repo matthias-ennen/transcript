@@ -72,6 +72,8 @@ fun AudioControls(
     val segmentTransportEnabled = state.completedModel != null &&
         state.segments.isNotEmpty() && !state.isRecording && !state.isBusy
     val sourceSelectionEnabled = !state.isBusy && !state.isRecording && !state.isRecordingStopping
+    val originalSelectionEnabled = sourceSelectionEnabled && state.selectedAudio != null
+    val isolationSelectionEnabled = originalSelectionEnabled && preparedSongTrack != null
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -144,40 +146,38 @@ fun AudioControls(
             }
         }
 
-        if (preparedSongTrack != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AudioSourceButton(
-                    label = "Original",
-                    selected = playbackSource == SongPlaybackSource.ORIGINAL,
-                    enabled = sourceSelectionEnabled,
-                    onClick = {
-                        if (SongPlaybackSourceRuntime.select(
-                                SongPlaybackSource.ORIGINAL,
-                                state.selectedAudio
-                            )
-                        ) {
-                            playbackSource = SongPlaybackSource.ORIGINAL
-                        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AudioSourceButton(
+                label = "Original",
+                selected = playbackSource == SongPlaybackSource.ORIGINAL,
+                enabled = originalSelectionEnabled,
+                onClick = {
+                    if (SongPlaybackSourceRuntime.select(
+                            SongPlaybackSource.ORIGINAL,
+                            state.selectedAudio
+                        )
+                    ) {
+                        playbackSource = SongPlaybackSource.ORIGINAL
                     }
-                )
-                AudioSourceButton(
-                    label = "Gesangsspur",
-                    selected = playbackSource == SongPlaybackSource.VOCALS,
-                    enabled = sourceSelectionEnabled,
-                    onClick = {
-                        if (SongPlaybackSourceRuntime.select(
-                                SongPlaybackSource.VOCALS,
-                                state.selectedAudio
-                            )
-                        ) {
-                            playbackSource = SongPlaybackSource.VOCALS
-                        }
+                }
+            )
+            AudioSourceButton(
+                label = "Stimmisolierung",
+                selected = playbackSource == SongPlaybackSource.VOCALS,
+                enabled = isolationSelectionEnabled,
+                onClick = {
+                    if (SongPlaybackSourceRuntime.select(
+                            SongPlaybackSource.VOCALS,
+                            state.selectedAudio
+                        )
+                    ) {
+                        playbackSource = SongPlaybackSource.VOCALS
                     }
-                )
-            }
+                }
+            )
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
