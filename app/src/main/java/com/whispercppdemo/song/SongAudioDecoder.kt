@@ -40,7 +40,7 @@ internal fun decodeSongAudioChunk(
     endMs: Long,
     shouldCancel: () -> Boolean = { false }
 ): SongAudioChunk {
-    require(startMs >= 0L && endMs > startMs) { "Ungültiger Song-Audioabschnitt." }
+    require(startMs >= 0L && endMs > startMs) { "Ungültiger Audioabschnitt für die Stimmisolierung." }
     val extractor = MediaExtractor()
     var codec: MediaCodec? = null
     var codecStarted = false
@@ -78,7 +78,7 @@ internal fun decodeSongAudioChunk(
         var idlePolls = 0
 
         while (!outputEnded && !reachedEnd) {
-            if (shouldCancel()) throw CancellationException("Song-Aufbereitung abgebrochen.")
+            if (shouldCancel()) throw CancellationException("Stimmisolierung abgebrochen.")
             var progressed = false
             if (!inputEnded) {
                 val inputIndex = decoder.dequeueInputBuffer(SONG_DECODER_TIMEOUT_US)
@@ -146,11 +146,11 @@ internal fun decodeSongAudioChunk(
             if (progressed) {
                 idlePolls = 0
             } else if (++idlePolls >= SONG_DECODER_MAX_IDLE_POLLS) {
-                error("Die Song-Audioaufbereitung reagiert nicht mehr.")
+                error("Die Audioaufbereitung für die Stimmisolierung reagiert nicht mehr.")
             }
         }
 
-        check(sourceFrames.frameCount > 0) { "Der Songabschnitt enthält keine dekodierbaren Audiodaten." }
+        check(sourceFrames.frameCount > 0) { "Der Audioabschnitt enthält keine dekodierbaren Audiodaten." }
         val wantedFrames = (((endMs - startMs) * SONG_SAMPLE_RATE) / 1_000L)
             .coerceAtLeast(1L)
             .coerceAtMost(Int.MAX_VALUE.toLong())
@@ -174,7 +174,7 @@ private class StereoFloatBuffer(initialFrames: Int) {
 
     fun add(left: Float, right: Float) {
         check(frameCount < MAX_SOURCE_FRAMES_PER_WINDOW) {
-            "Der Audiodecoder lieferte ungewöhnlich viele Samples für einen Songabschnitt."
+            "Der Audiodecoder lieferte ungewöhnlich viele Samples für einen Abschnitt der Stimmisolierung."
         }
         val needed = (frameCount + 1) * 2
         if (needed > values.size) {
@@ -257,14 +257,14 @@ private fun readSongPcm(buffer: ByteBuffer, offset: Int, encoding: Int): Float =
     AudioFormat.ENCODING_PCM_32BIT -> buffer.getInt(offset) / 2_147_483_648f
     AudioFormat.ENCODING_PCM_8BIT -> ((buffer.get(offset).toInt() and 0xff) - 128) / 128f
     AudioFormat.ENCODING_PCM_16BIT -> buffer.getShort(offset) / 32_768f
-    else -> error("Nicht unterstütztes PCM-Format für den Songmodus ($encoding).")
+    else -> error("Nicht unterstütztes PCM-Format für die Stimmisolierung ($encoding).")
 }
 
 private fun songBytesPerSample(encoding: Int): Int = when (encoding) {
     AudioFormat.ENCODING_PCM_FLOAT, AudioFormat.ENCODING_PCM_32BIT -> 4
     AudioFormat.ENCODING_PCM_8BIT -> 1
     AudioFormat.ENCODING_PCM_16BIT -> 2
-    else -> error("Nicht unterstütztes PCM-Format für den Songmodus ($encoding).")
+    else -> error("Nicht unterstütztes PCM-Format für die Stimmisolierung ($encoding).")
 }
 
 private fun MediaFormat.intOr(key: String, default: Int): Int =

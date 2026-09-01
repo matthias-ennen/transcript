@@ -25,7 +25,7 @@ internal fun decodeAndSeparateSongChunk(
         shouldCancel = shouldCancel,
         onProgress = onProgress
     )
-    if (shouldCancel()) throw java.util.concurrent.CancellationException("Song-Aufbereitung abgebrochen.")
+    if (shouldCancel()) throw java.util.concurrent.CancellationException("Stimmisolierung abgebrochen.")
 
     val samples = readPreparedSongSamples(
         track = preparedTrack,

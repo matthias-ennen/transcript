@@ -37,7 +37,7 @@ internal class SongSeparatorEngine private constructor(
 ) : Closeable {
 
     fun separateVocals(interleavedStereo44100: FloatArray): FloatArray {
-        require(interleavedStereo44100.size % 2 == 0) { "Song-Audio muss Stereo sein." }
+        require(interleavedStereo44100.size % 2 == 0) { "Audio für die Stimmisolierung muss Stereo sein." }
         return when (model) {
             SongSeparationModel.QUICK -> separateUmx(interleavedStereo44100)
             SongSeparationModel.BALANCED -> separateSpleeter(interleavedStereo44100)
@@ -267,7 +267,7 @@ internal fun spleeterTensorPlan(modelShape: LongArray, requiredSplits: Int): Spl
         check(declaredSplits <= Int.MAX_VALUE) { "Spleeter-Splitzahl ist zu groß." }
         val fixed = declaredSplits.toInt()
         check(requiredSplits <= fixed) {
-            "Der Songabschnitt benötigt $requiredSplits Spleeter-Blöcke, das Modell akzeptiert aber nur $fixed."
+            "Der Audioabschnitt der Stimmisolierung benötigt $requiredSplits Spleeter-Blöcke, das Modell akzeptiert aber nur $fixed."
         }
         fixed
     } else {

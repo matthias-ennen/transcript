@@ -135,9 +135,9 @@ internal object SongPlaybackSourceRuntime {
 }
 
 internal fun preparedSongSampleCount(durationMs: Long): Int {
-    require(durationMs > 0L) { "Ungültige Songdauer." }
+    require(durationMs > 0L) { "Ungültige Audiodauer für die Stimmisolierung." }
     val count = durationMs * SONG_PREPARED_SAMPLES_PER_MS
-    check(count <= Int.MAX_VALUE.toLong()) { "Der Song ist für die lokale Aufbereitung zu lang." }
+    check(count <= Int.MAX_VALUE.toLong()) { "Das Audio ist für die lokale Stimmisolierung zu lang." }
     return count.toInt()
 }
 
@@ -146,8 +146,8 @@ internal fun preparedSongSampleRange(
     endMs: Long,
     totalSamples: Int
 ): SongSampleRange {
-    require(startMs >= 0L && endMs > startMs) { "Ungültiger Song-Audioabschnitt." }
-    require(totalSamples > 0) { "Die vorbereitete Gesangsspur ist leer." }
+    require(startMs >= 0L && endMs > startMs) { "Ungültiger Audioabschnitt für die Stimmisolierung." }
+    require(totalSamples > 0) { "Die vorbereitete Stimmisolierung ist leer." }
     val start = (startMs * SONG_PREPARED_SAMPLES_PER_MS)
         .coerceIn(0L, totalSamples.toLong())
         .toInt()
@@ -203,7 +203,7 @@ internal fun ensurePreparedSongTrack(
 
     val expectedBytes = WAV_HEADER_BYTES + sampleCount.toLong() * WAV_BYTES_PER_SAMPLE
     check(directory.usableSpace >= expectedBytes + PREPARED_STORAGE_RESERVE_BYTES) {
-        "Für die Gesangsspur werden mindestens " +
+        "Für die Stimmisolierung werden mindestens " +
             "${(expectedBytes + PREPARED_STORAGE_RESERVE_BYTES) / (1024L * 1024L)} MB " +
             "freier Speicher benötigt."
     }
@@ -232,12 +232,12 @@ internal fun ensurePreparedSongTrack(
             writeMonoPcm16WavHeader(output, sampleCount)
             engine.use {
                 starts.forEachIndexed { index, absoluteStartMs ->
-                    if (shouldCancel()) throw CancellationException("Gesangstrennung abgebrochen.")
+                    if (shouldCancel()) throw CancellationException("Stimmisolierung abgebrochen.")
                     val absoluteEndMs = minOf(
                         absoluteStartMs + SONG_SEPARATOR_WINDOW_MS,
                         audioInfo.durationMs
                     )
-                    val decoded = songStage("Song-Audio konnte nicht dekodiert werden") {
+                    val decoded = songStage("Audio für die Stimmisolierung konnte nicht dekodiert werden") {
                         decodeSongAudioChunk(
                             context = context,
                             uri = uri,
@@ -252,7 +252,7 @@ internal fun ensurePreparedSongTrack(
                         wantedFrames = KIM_SAMPLES_PER_CHANNEL
                     )
                     val vocals = songStage(
-                        "Gesangstrennung mit ${configuration.model.modelLabel} fehlgeschlagen"
+                        "Stimmisolierung mit ${configuration.model.modelLabel} fehlgeschlagen"
                     ) {
                         engine.separateVocals(padded)
                     }
@@ -264,7 +264,7 @@ internal fun ensurePreparedSongTrack(
                         (absoluteStartMs * SONG_PREPARED_SAMPLES_PER_MS).toInt()
                     val outputOffset = windowStartSample - bufferStartSample
                     check(outputOffset in 0 until mixed.size) {
-                        "Die Gesangsspur konnte nicht lückenlos zusammengesetzt werden."
+                        "Die Stimmisolierung konnte nicht lückenlos zusammengesetzt werden."
                     }
                     overlapAddPrepared(
                         destination = mixed,
@@ -281,7 +281,7 @@ internal fun ensurePreparedSongTrack(
                     }
                     val finalizeCount = finalizeUntil - bufferStartSample
                     check(finalizeCount in 0..mixed.size) {
-                        "Die Gesangsspur hat eine ungültige Überlappungsgrenze."
+                        "Die Stimmisolierung hat eine ungültige Überlappungsgrenze."
                     }
                     for (sampleIndex in 0 until finalizeCount) {
                         val value = if (weights[sampleIndex] > 1e-6f) {
@@ -313,10 +313,10 @@ internal fun ensurePreparedSongTrack(
         throw failure
     }
 
-    check(writtenSamples == sampleCount) { "Die Gesangsspur hat nicht die erwartete Länge." }
+    check(writtenSamples == sampleCount) { "Die Stimmisolierung hat nicht die erwartete Länge." }
     check(maximumPeak > 0.000001f) {
         temporaryTarget.delete()
-        "Die Gesangstrennung lieferte kein verwertbares Audiosignal."
+        "Die Stimmisolierung lieferte kein verwertbares Audiosignal."
     }
 
     moveAtomically(temporaryTarget, target)
@@ -342,8 +342,8 @@ internal fun readPreparedSongSamples(
     endMs: Long
 ): FloatArray {
     val range = preparedSongSampleRange(startMs, endMs, track.sampleCount)
-    check(range.sampleCount > 0) { "Der angeforderte Bereich der Gesangsspur ist leer." }
-    check(preparedTrackFileIsComplete(track)) { "Die vorbereitete Gesangsspur ist unvollständig." }
+    check(range.sampleCount > 0) { "Der angeforderte Bereich der Stimmisolierung ist leer." }
+    check(preparedTrackFileIsComplete(track)) { "Die vorbereitete Stimmisolierung ist unvollständig." }
 
     val output = FloatArray(range.sampleCount)
     RandomAccessFile(track.file, "r").use { input ->
