@@ -119,6 +119,7 @@ internal class OnnxSongSeparatorRuntime private constructor(
                 if (lowMemoryMode) {
                     setCPUArenaAllocator(false)
                     setMemoryPatternOptimization(false)
+                    addConfigEntry("session.disable_prepacking", "1")
                 }
             }
             val environment = OrtEnvironment.getEnvironment()
