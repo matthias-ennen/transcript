@@ -20,7 +20,7 @@ enum class SongSeparationModel(
         id = "umxhq",
         qualityLabel = "Schnell",
         modelLabel = "Open-Unmix UMXHQ",
-        description = "Kompakte Gesangstrennung mit geringem Speicherbedarf für schnelle lokale Verarbeitung.",
+        description = "Kompakte Stimmisolierung mit geringem Speicherbedarf für schnelle lokale Verarbeitung.",
         downloadSizeLabel = "17 MB",
         artifacts = listOf(
             SongModelArtifact(
@@ -36,7 +36,7 @@ enum class SongSeparationModel(
         id = "spleeter-2stems-fp16",
         qualityLabel = "Ausgewogen",
         modelLabel = "Deezer Spleeter 2-stem FP16",
-        description = "Empfohlener Kompromiss aus Trennqualität, Geschwindigkeit und Speicherbedarf.",
+        description = "Empfohlener Kompromiss aus Isolierungsqualität, Geschwindigkeit und Speicherbedarf.",
         downloadSizeLabel = "39,4 MB",
         artifacts = listOf(
             SongModelArtifact(
@@ -58,7 +58,7 @@ enum class SongSeparationModel(
         id = "kim-vocal-2",
         qualityLabel = "Hohe Qualität",
         modelLabel = "Kim Vocal 2 · Mel-Band RoFormer",
-        description = "Großes Qualitätsmodell für bestmögliche Gesangsisolation bei höherem Ressourcenbedarf.",
+        description = "Großes Qualitätsmodell für bestmögliche Stimmisolierung bei höherem Ressourcenbedarf.",
         downloadSizeLabel = "747 MB",
         artifacts = listOf(
             SongModelArtifact(
