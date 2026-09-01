@@ -1,5 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
+import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.TranscriptionMode
 import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperDecoding
 import de.matthiasennen.transcript.ui.main.WhisperSettings
@@ -41,6 +43,23 @@ class TranscriptionJobConfigurationTest {
         val configuration = TranscriptionJobConfiguration("large-v3-q5", "de", settings)
 
         assertEquals(configuration.normalized(), TranscriptionJobConfiguration.decode(configuration.encode()))
+    }
+
+    @Test
+    fun `voice isolation snapshot keeps vad enabled across worker restart`() {
+        val configuration = TranscriptionJobConfiguration(
+            modelId = "base",
+            language = "auto",
+            whisperSettings = WhisperSettings(vadMode = WhisperVadMode.ON),
+            transcriptionMode = TranscriptionMode.SONG,
+            songSeparationModelId = SongSeparationModel.HIGH_QUALITY.id
+        )
+
+        val restored = TranscriptionJobConfiguration.decode(configuration.encode())
+
+        assertEquals(TranscriptionMode.SONG, restored.transcriptionMode)
+        assertEquals(SongSeparationModel.HIGH_QUALITY.id, restored.songSeparationModelId)
+        assertEquals(WhisperVadMode.ON, restored.whisperSettings.vadMode)
     }
 
     @Test

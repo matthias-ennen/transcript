@@ -212,6 +212,13 @@ private fun DiagnosticsLogCard(entries: List<String>) {
     }
 }
 
+internal fun userFacingVoiceIsolationTerminology(text: String): String = text
+    .replace("Songmodell-Download", "Download des Modells zur Stimmisolierung")
+    .replace("Alle Songmodelle", "Alle Modelle zur Stimmisolierung")
+    .replace("für den Songmodus", "für die Stimmisolierung")
+    .replace("Gesangstrennung", "Stimmisolierung")
+    .replace("Gesangsspur", "Stimmisolierung")
+
 @Composable
 internal fun LiveStatusLine(
     state: TranscriptUiState,
@@ -235,17 +242,24 @@ internal fun LiveStatusLine(
             estimateStatus != null
     val isActiveOperation = state.isBusy || state.isRecording || state.isPlaying ||
         state.isWaveformLoading || state.isAiModelPreloading
-    val primaryStatus = if (alternatesReadyStatus) {
-        state.mediaReadyStatus ?: state.status
-    } else {
-        state.status
-    }
+    val primaryStatus = userFacingVoiceIsolationTerminology(
+        if (alternatesReadyStatus) {
+            state.mediaReadyStatus ?: state.status
+        } else {
+            state.status
+        }
+    )
     val activityStatus = state.activityDetail
         ?.trim()
+        ?.let(::userFacingVoiceIsolationTerminology)
         ?.takeIf { it.isNotEmpty() && it != primaryStatus }
     val runtimeStatus = state.runtimeStatus()
+        ?.let(::userFacingVoiceIsolationTerminology)
+    val normalizedSupplementalStatus = supplementalStatus
+        ?.let(::userFacingVoiceIsolationTerminology)
     val alternateStatus = when {
-        !supplementalStatus.isNullOrBlank() && supplementalStatus != primaryStatus -> supplementalStatus
+        !normalizedSupplementalStatus.isNullOrBlank() && normalizedSupplementalStatus != primaryStatus ->
+            normalizedSupplementalStatus
         state.isTranscribing && runtimeStatus != null -> runtimeStatus
         announcesChangedModelEstimate -> estimateStatus
         alternatesReadyStatus -> estimateStatus
@@ -254,7 +268,7 @@ internal fun LiveStatusLine(
         else -> null
     }
     val alternateCycleKey = when {
-        !supplementalStatus.isNullOrBlank() -> "supplemental"
+        !normalizedSupplementalStatus.isNullOrBlank() -> "supplemental"
         state.isTranscribing -> "transcription-runtime"
         announcesChangedModelEstimate -> "model-estimate"
         alternatesReadyStatus -> "ready-estimate"
@@ -309,7 +323,7 @@ internal fun LiveStatusLine(
         }
     }
     val isActive = isActiveOperation || alternatesReadyStatus || announcesChangedModelEstimate ||
-        !supplementalStatus.isNullOrBlank() || visibleKind == StatusMessageKind.IMPORTANT
+        !normalizedSupplementalStatus.isNullOrBlank() || visibleKind == StatusMessageKind.IMPORTANT
     val transition = rememberInfiniteTransition(label = "status-pulse")
     val alpha = if (isActive) {
         transition.animateFloat(

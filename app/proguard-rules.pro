@@ -36,3 +36,6 @@
 -keep,allowoptimization class com.whispercpp.whisper.NativeWhisperProgressListener {
     void onProgress(int);
 }
+
+# ONNX Runtime Java/JNI bridge is reflectively/native loaded and must survive R8.
+-keep class ai.onnxruntime.** { *; }

@@ -12,12 +12,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +33,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.R
+import de.matthiasennen.transcript.song.SongPlaybackSource
+import de.matthiasennen.transcript.song.SongPlaybackSourceRuntime
 
 @Composable
 fun AudioControls(
@@ -38,7 +46,23 @@ fun AudioControls(
     onSegmentRepeatClick: () -> Unit,
     onSeek: (Float) -> Unit
 ) {
-    val displayedWaveform = if (state.isRecording) state.liveWaveform else state.waveform
+    val preparedSongTrack = if (state.isRecording) {
+        null
+    } else {
+        SongPlaybackSourceRuntime.preparedFor(state.selectedAudio)
+    }
+    var playbackSource by remember(
+        state.selectedAudio?.toString(),
+        preparedSongTrack?.file?.absolutePath
+    ) {
+        mutableStateOf(SongPlaybackSourceRuntime.selectionFor(state.selectedAudio))
+    }
+    val displayedWaveform = when {
+        state.isRecording -> state.liveWaveform
+        playbackSource == SongPlaybackSource.VOCALS && preparedSongTrack != null ->
+            preparedSongTrack.waveformPeaks
+        else -> state.waveform
+    }
     val progress = if (state.audioDurationMs > 0L) {
         state.playbackPositionMs.toFloat() / state.audioDurationMs
     } else {
@@ -47,6 +71,9 @@ fun AudioControls(
 
     val segmentTransportEnabled = state.completedModel != null &&
         state.segments.isNotEmpty() && !state.isRecording && !state.isBusy
+    val sourceSelectionEnabled = !state.isBusy && !state.isRecording && !state.isRecordingStopping
+    val originalSelectionEnabled = sourceSelectionEnabled && state.selectedAudio != null
+    val isolationSelectionEnabled = originalSelectionEnabled && preparedSongTrack != null
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -119,6 +146,40 @@ fun AudioControls(
             }
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AudioSourceButton(
+                label = "Original",
+                selected = playbackSource == SongPlaybackSource.ORIGINAL,
+                enabled = originalSelectionEnabled,
+                onClick = {
+                    if (SongPlaybackSourceRuntime.select(
+                            SongPlaybackSource.ORIGINAL,
+                            state.selectedAudio
+                        )
+                    ) {
+                        playbackSource = SongPlaybackSource.ORIGINAL
+                    }
+                }
+            )
+            AudioSourceButton(
+                label = "Stimmisolierung",
+                selected = playbackSource == SongPlaybackSource.VOCALS,
+                enabled = isolationSelectionEnabled,
+                onClick = {
+                    if (SongPlaybackSourceRuntime.select(
+                            SongPlaybackSource.VOCALS,
+                            state.selectedAudio
+                        )
+                    ) {
+                        playbackSource = SongPlaybackSource.VOCALS
+                    }
+                }
+            )
+        }
+
         Column(modifier = Modifier.fillMaxWidth()) {
             Waveform(
                 values = displayedWaveform,
@@ -147,6 +208,32 @@ fun AudioControls(
                     style = MaterialTheme.typography.labelSmall
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.AudioSourceButton(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    if (selected) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(label)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(label)
         }
     }
 }

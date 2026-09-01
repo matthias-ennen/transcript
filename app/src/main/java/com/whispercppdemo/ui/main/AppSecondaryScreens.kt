@@ -35,6 +35,8 @@ import de.matthiasennen.transcript.BuildConfig
 import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.download.SileroVadModel
+import de.matthiasennen.transcript.song.SongModelInstallation
+import de.matthiasennen.transcript.song.SongSeparationModel
 
 @Composable
 fun SettingsScreen(
@@ -44,11 +46,18 @@ fun SettingsScreen(
     onOpenAiPerformance: () -> Unit,
     onOpenWhisperSettings: () -> Unit,
     onOpenVadSettings: () -> Unit,
+    onVadModeChanged: (WhisperVadMode) -> Unit,
+    voiceIsolationEnabled: Boolean,
+    onVoiceIsolationEnabledChanged: (Boolean) -> Unit,
     onSelectModel: (WhisperModel) -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
     onDownloadVadModel: () -> Unit,
     onDeleteVadModel: () -> Unit,
+    onSelectSongModel: (SongSeparationModel) -> Unit,
+    onDownloadSongModel: (SongSeparationModel) -> Unit,
+    onDeleteSongModel: (SongSeparationModel) -> Unit,
+    onDeleteAllSongModels: () -> Unit,
     onAiEnabledChanged: (Boolean) -> Unit,
     onAiAutomaticChanged: (Boolean) -> Unit,
     onSelectAiModel: (AiModel) -> Unit,
@@ -64,6 +73,8 @@ fun SettingsScreen(
     var aiModelToDelete by remember { mutableStateOf<AiModel?>(null) }
     var confirmDeleteAllAi by remember { mutableStateOf(false) }
     var confirmDeleteVad by remember { mutableStateOf(false) }
+    var songModelToDelete by remember { mutableStateOf<SongSeparationModel?>(null) }
+    var confirmDeleteAllSongModels by remember { mutableStateOf(false) }
     val totalBytes = state.modelInstallations.sumOf(ModelInstallation::storedBytes)
 
     LaunchedEffect(Unit) {
@@ -122,6 +133,19 @@ fun SettingsScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Silero VAD", style = MaterialTheme.typography.headlineSmall)
+                ChoiceSetting(
+                    "Aktivierung",
+                    state.whisperSettings.vadMode,
+                    listOf(
+                        WhisperVadMode.OFF to "Aus",
+                        WhisperVadMode.AUTOMATIC to "Automatisch",
+                        WhisperVadMode.ON to "Ein"
+                    )
+                ) { onVadModeChanged(it) }
+                Text(
+                    "Erkennt Bereiche mit Sprache und Pausen. In Automatisch prüft Silero die vorbereitete Audiospur und verwendet VAD nur bei einem klaren Nutzen; Ein verwendet VAD immer, Aus nie.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 TextButton(onClick = onOpenVadSettings, contentPadding = PaddingValues(0.dp)) {
                     Text("VAD-Einstellungen", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
                 }
@@ -135,7 +159,7 @@ fun SettingsScreen(
                     ) {
                         Text(SileroVadModel.modelLabel, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Erkennt Sprach- und Pausenbereiche, damit Whisper längere stille Abschnitte gezielt überspringen kann.",
+                            "Lokales Modell zur Erkennung von Sprach- und Pausenbereichen.",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
@@ -169,6 +193,53 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Stimmisolierung", style = MaterialTheme.typography.headlineSmall)
+                ChoiceSetting(
+                    "Aktivierung",
+                    voiceIsolationEnabled,
+                    listOf(false to "Aus", true to "Ein")
+                ) { onVoiceIsolationEnabledChanged(it) }
+                Text(
+                    "Isoliert Stimmen aus Musik und erstellt vor der Transkription eine aufbereitete Stimmspur. Wenn zusätzlich VAD aktiv ist, arbeitet VAD anschließend auf dieser isolierten Spur.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "Belegter Speicher: ${formatDownloadSize(state.songModelInstallations.sumOf(SongModelInstallation::storedBytes))}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                state.songModelInstallations.forEach { installation ->
+                    SongModelStorageCard(
+                        installation = installation,
+                        selected = installation.model == state.selectedSongSeparationModel,
+                        enabled = !state.isBusy && !state.isRecording,
+                        isDownloading = state.downloadingSongModel == installation.model,
+                        downloadedBytes = state.songDownloadedBytes,
+                        totalBytes = state.songDownloadTotalBytes,
+                        onSelect = { onSelectSongModel(installation.model) },
+                        onDownload = { onDownloadSongModel(installation.model) },
+                        onDelete = { songModelToDelete = installation.model }
+                    )
+                }
+                Text(
+                    "Ausgewogen ist die empfohlene Stufe. Modelle zur Stimmisolierung werden nur auf ausdrücklichen Wunsch heruntergeladen.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedButton(
+                    onClick = { confirmDeleteAllSongModels = true },
+                    enabled = state.songModelInstallations.any { it.storedBytes > 0L } &&
+                        !state.isBusy && !state.isRecording,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Alle Modelle zur Stimmisolierung löschen")
                 }
             }
         }
@@ -260,6 +331,25 @@ fun SettingsScreen(
         )
     }
 
+    songModelToDelete?.let { model ->
+        AlertDialog(
+            onDismissRequest = { songModelToDelete = null },
+            title = { Text("Modell zur Stimmisolierung löschen?") },
+            text = {
+                Text("${model.modelLabel} und ein eventuell angefangener Download werden entfernt.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    songModelToDelete = null
+                    onDeleteSongModel(model)
+                }) { Text("Löschen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { songModelToDelete = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
     aiModelToDelete?.let { model ->
         AlertDialog(
             onDismissRequest = { aiModelToDelete = null },
@@ -313,6 +403,25 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDeleteAllAi = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (confirmDeleteAllSongModels) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAllSongModels = false },
+            title = { Text("Alle Modelle zur Stimmisolierung löschen?") },
+            text = {
+                Text("Alle installierten Modelle zur Stimmisolierung und unvollständigen Downloads werden entfernt.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteAllSongModels = false
+                    onDeleteAllSongModels()
+                }) { Text("Alle löschen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteAllSongModels = false }) { Text("Abbrechen") }
             }
         )
     }
@@ -478,6 +587,81 @@ private fun AiModelStorageCard(
                     enabled = enabled,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    Text("Löschen")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SongModelStorageCard(
+    installation: SongModelInstallation,
+    selected: Boolean,
+    enabled: Boolean,
+    isDownloading: Boolean,
+    downloadedBytes: Long,
+    totalBytes: Long,
+    onSelect: () -> Unit,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val model = installation.model
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = if (selected && installation.isInstalled) BorderStroke(2.dp, Color.White) else null
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                buildString {
+                    append(model.qualityLabel)
+                    if (model.recommended) append(" · Empfohlen")
+                },
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(model.modelLabel, style = MaterialTheme.typography.bodyMedium)
+            Text(model.description, style = MaterialTheme.typography.bodySmall)
+            Text(
+                when {
+                    isDownloading && totalBytes > 0L ->
+                        "Download · ${formatDownloadSize(downloadedBytes)} von ${formatDownloadSize(totalBytes)}"
+                    isDownloading -> "Download wird vorbereitet …"
+                    installation.isInstalled ->
+                        "Installiert · ${formatDownloadSize(installation.installedBytes)}${if (selected) " · Ausgewählt" else ""}"
+                    installation.partialBytes > 0L ->
+                        "Download angefangen · ${formatDownloadSize(installation.partialBytes)} von ${model.downloadSizeLabel}"
+                    else -> "Nicht installiert · Download ${model.downloadSizeLabel}"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (isDownloading) {
+                if (totalBytes > 0L) {
+                    LinearProgressIndicator(
+                        progress = (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+            if (!installation.isInstalled) {
+                Button(
+                    onClick = onDownload,
+                    enabled = enabled && !isDownloading,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (installation.partialBytes > 0L) "Download fortsetzen" else "Herunterladen")
+                }
+            } else if (!selected) {
+                Button(onClick = onSelect, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                    Text("Auswählen")
+                }
+            }
+            if (installation.storedBytes > 0L && !isDownloading) {
+                OutlinedButton(onClick = onDelete, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                     Text("Löschen")
                 }
             }

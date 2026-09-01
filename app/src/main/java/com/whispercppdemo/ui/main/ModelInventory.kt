@@ -4,6 +4,8 @@ import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiModelInstallation
 import de.matthiasennen.transcript.download.SileroVadModel
 import de.matthiasennen.transcript.download.VadModelInstallation
+import de.matthiasennen.transcript.song.SongModelInstallation
+import de.matthiasennen.transcript.song.SongSeparationModel
 import java.io.File
 
 /**
@@ -16,11 +18,13 @@ internal class ModelInventory(filesDirectory: File) {
     private val whisperDirectory = File(filesDirectory, "models")
     private val vadDirectory = File(filesDirectory, "vad-models")
     private val aiDirectory = File(filesDirectory, "ai-models")
+    private val songDirectory = File(filesDirectory, "song-models")
 
     fun ensureDirectories() {
         whisperDirectory.mkdirs()
         vadDirectory.mkdirs()
         aiDirectory.mkdirs()
+        songDirectory.mkdirs()
     }
 
     fun whisperFile(model: WhisperModel): File = File(whisperDirectory, model.fileName)
@@ -35,6 +39,12 @@ internal class ModelInventory(filesDirectory: File) {
     fun aiFile(model: AiModel): File = File(aiDirectory, model.fileName)
 
     fun aiPartialFile(model: AiModel): File = File(aiDirectory, "${model.fileName}.part")
+
+    fun songFile(model: SongSeparationModel, artifactFileName: String): File =
+        File(File(songDirectory, model.id).apply { mkdirs() }, artifactFileName)
+
+    fun songPartialFile(model: SongSeparationModel, artifactFileName: String): File =
+        File(File(songDirectory, model.id).apply { mkdirs() }, "${artifactFileName}.part")
 
     fun whisperInstallations(): List<ModelInstallation> = WhisperModel.entries.map { model ->
         val file = whisperFile(model)
@@ -65,6 +75,25 @@ internal class ModelInventory(filesDirectory: File) {
         )
     }
 
+    fun songInstallations(): List<SongModelInstallation> = SongSeparationModel.entries.map { model ->
+        val installedBytes = model.artifacts.sumOf { artifact ->
+            songFile(model, artifact.fileName).takeIf(File::isFile)?.length() ?: 0L
+        }
+        val partialBytes = model.artifacts.sumOf { artifact ->
+            songPartialFile(model, artifact.fileName).takeIf(File::isFile)?.length() ?: 0L
+        }
+        val installed = model.artifacts.all { artifact ->
+            val file = songFile(model, artifact.fileName)
+            file.isFile && file.length() == artifact.expectedBytes
+        }
+        SongModelInstallation(
+            model = model,
+            isInstalled = installed,
+            installedBytes = installedBytes,
+            partialBytes = partialBytes
+        )
+    }
+
     fun deleteWhisper(model: WhisperModel, genericErrors: Boolean = false) = deletePair(
         complete = whisperFile(model),
         partial = whisperPartialFile(model),
@@ -89,6 +118,21 @@ internal class ModelInventory(filesDirectory: File) {
         partialError = if (genericErrors) "Der unvollständige KI-Download konnte nicht gelöscht werden."
         else "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
     )
+
+    fun deleteSong(model: SongSeparationModel) {
+        model.artifacts.forEach { artifact ->
+            deletePair(
+                complete = songFile(model, artifact.fileName),
+                partial = songPartialFile(model, artifact.fileName),
+                completeError = "${model.modelLabel} konnte nicht gelöscht werden.",
+                partialError = "Der unvollständige Download von ${model.modelLabel} konnte nicht gelöscht werden."
+            )
+        }
+        val directory = File(songDirectory, model.id)
+        check(!directory.exists() || directory.list()?.isNotEmpty() == true || directory.delete()) {
+            "Der Modellordner von ${model.modelLabel} konnte nicht gelöscht werden."
+        }
+    }
 
     private fun deletePair(
         complete: File,

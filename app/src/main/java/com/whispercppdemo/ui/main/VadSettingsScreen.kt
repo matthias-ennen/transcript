@@ -36,23 +36,10 @@ fun VadSettingsScreen(
     ) {
         LiveStatusLine(state)
         ExpandableSettingsCard("vad", "Spracherkennung und Pausen (VAD)", preferences) {
-            ChoiceSetting(
-                "VAD-Modus",
-                settings.vadMode,
-                listOf(
-                    WhisperVadMode.OFF to "Aus",
-                    WhisperVadMode.AUTOMATIC to "Automatisch",
-                    WhisperVadMode.ON to "Ein"
-                )
-            ) { onSettingsChanged(settings.copy(vadMode = it)) }
             Text(
                 if (state.vadModelInstallation.isInstalled) "${SileroVadModel.modelLabel} ist installiert und einsatzbereit."
                 else "Silero VAD ist nicht installiert. Whisper arbeitet ohne VAD.",
                 style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                "Automatisch prüft die Audiodatei speicherschonend und verwendet VAD nur bei einem klaren Nutzen. Aus bleibt aus; Ein verwendet VAD immer.",
-                style = MaterialTheme.typography.bodySmall
             )
             NumberSetting("Empfindlichkeit", settings.vadThresholdPercent, "10–90 Prozent; niedriger lässt mehr Audio durch") {
                 onSettingsChanged(settings.copy(vadThresholdPercent = it))
@@ -72,7 +59,10 @@ fun VadSettingsScreen(
             NumberSetting("Überlappung", settings.vadOverlapMs, "0–1000 ms zwischen Sprachbereichen") {
                 onSettingsChanged(settings.copy(vadOverlapMs = it))
             }
-            Text("Für Musik, Gesang oder schwierige Aufnahmen kann VAD ausgeschaltet werden.", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Bei aktivierter Stimmisolierung arbeitet VAD auf der bereits aufbereiteten Stimmspur.",
+                style = MaterialTheme.typography.bodySmall
+            )
             OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
                 Text("Auf Standard zurücksetzen")
             }

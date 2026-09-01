@@ -73,6 +73,10 @@ import de.matthiasennen.transcript.ai.AiModel
 import de.matthiasennen.transcript.ai.AiTranscriptAnalysisCoordinator
 import de.matthiasennen.transcript.ai.AiTranscriptAnalysisService
 import de.matthiasennen.transcript.ai.transcriptTextForAiAnalysis
+import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.TranscriptionModePreferences
+import de.matthiasennen.transcript.song.TranscriptionModeRuntime
 import kotlinx.coroutines.launch
 
 private enum class PendingTranscriptAction {
@@ -92,6 +96,13 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var appLanguage by remember {
         mutableStateOf(AppLanguagePreference.load(context))
     }
+    val transcriptionModePreferences = remember(context) { TranscriptionModePreferences(context) }
+    var transcriptionMode by remember {
+        mutableStateOf(transcriptionModePreferences.loadManualMode())
+    }
+    LaunchedEffect(Unit) {
+        TranscriptionModeRuntime.current = transcriptionMode
+    }
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::selectAudio)
@@ -99,6 +110,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
     var pendingModelDownload by remember { mutableStateOf<WhisperModel?>(null) }
     var pendingAiModelDownload by remember { mutableStateOf<AiModel?>(null) }
     var pendingVadModelDownload by remember { mutableStateOf(false) }
+    var pendingSongModelDownload by remember { mutableStateOf<SongSeparationModel?>(null) }
     var pendingRecording by remember { mutableStateOf(false) }
     var pendingRecordingAfterFolderSelection by remember { mutableStateOf(false) }
     var pendingTranscription by remember { mutableStateOf(false) }
@@ -120,6 +132,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         pendingModelDownload?.let(viewModel::downloadModel)
         pendingAiModelDownload?.let(viewModel::downloadAiModel)
         if (pendingVadModelDownload) viewModel.downloadVadModel()
+        pendingSongModelDownload?.let(viewModel::downloadSongSeparationModel)
         if (pendingRecording) {
             if (granted) viewModel.startRecording()
             else viewModel.reportRecordingNotificationPermissionDenied()
@@ -128,6 +141,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
         pendingModelDownload = null
         pendingAiModelDownload = null
         pendingVadModelDownload = false
+        pendingSongModelDownload = null
         pendingRecording = false
         pendingTranscription = false
     }
@@ -226,6 +240,19 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
                 onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
                 onOpenVadSettings = { page = AppPage.VAD_SETTINGS },
+                onVadModeChanged = { mode ->
+                    viewModel.updateWhisperSettings(
+                        state.whisperSettings.copy(vadMode = mode),
+                        WhisperSettingsPage.VAD
+                    )
+                },
+                voiceIsolationEnabled = transcriptionMode == TranscriptionMode.SONG,
+                onVoiceIsolationEnabledChanged = { enabled ->
+                    val mode = if (enabled) TranscriptionMode.SONG else TranscriptionMode.SPEECH
+                    transcriptionMode = mode
+                    TranscriptionModeRuntime.current = mode
+                    transcriptionModePreferences.saveManualMode(mode)
+                },
                 onSelectModel = viewModel::selectModel,
                 onDeleteModel = viewModel::deleteModel,
                 onDeleteAllModels = viewModel::deleteAllModels,
@@ -238,6 +265,23 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                     } else viewModel.downloadVadModel()
                 },
                 onDeleteVadModel = viewModel::deleteVadModel,
+                onSelectSongModel = viewModel::selectSongSeparationModel,
+                onDownloadSongModel = { model ->
+                    if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        pendingSongModelDownload = model
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.downloadSongSeparationModel(model)
+                    }
+                },
+                onDeleteSongModel = viewModel::deleteSongSeparationModel,
+                onDeleteAllSongModels = viewModel::deleteAllSongSeparationModels,
                 onAiEnabledChanged = viewModel::setAiPostProcessingEnabled,
                 onAiAutomaticChanged = viewModel::setAutomaticAiPostProcessingEnabled,
                 onSelectAiModel = viewModel::selectAiModel,
@@ -319,6 +363,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
             AppPage.MAIN -> MainContent(
                 viewModel = viewModel,
                 state = state,
+                transcriptionMode = transcriptionMode,
                 openSettings = { page = AppPage.SETTINGS },
                 innerPadding = innerPadding,
                 audioPicker = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
@@ -398,6 +443,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
 private fun MainContent(
     viewModel: MainScreenViewModel,
     state: TranscriptUiState,
+    transcriptionMode: TranscriptionMode,
     openSettings: () -> Unit,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     audioPicker: () -> Unit,
@@ -415,6 +461,7 @@ private fun MainContent(
         var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
         var showTranscriptShareDialog by remember { mutableStateOf(false) }
         var showMissingAiModelDialog by remember { mutableStateOf(false) }
+        var showMissingSongModelDialog by remember { mutableStateOf(false) }
         val scrollState = rememberScrollState()
         val scrollScope = rememberCoroutineScope()
         var transcriptHeadingBottomPx by remember { mutableStateOf<Float?>(null) }
@@ -490,6 +537,30 @@ private fun MainContent(
             )
         }
 
+        if (showMissingSongModelDialog) {
+            AlertDialog(
+                onDismissRequest = { showMissingSongModelDialog = false },
+                title = { Text("Modell zur Stimmisolierung fehlt") },
+                text = {
+                    Text(
+                        "Für die Stimmisolierung muss zuerst in den Einstellungen ein passendes " +
+                            "Modell heruntergeladen und ausgewählt werden."
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showMissingSongModelDialog = false
+                        openSettings()
+                    }) { Text("Zu den Einstellungen") }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showMissingSongModelDialog = false }) {
+                        Text("Abbrechen")
+                    }
+                }
+            )
+        }
+
         pendingTranscriptAction?.let { pendingAction ->
             val question = when (pendingAction) {
                 PendingTranscriptAction.SELECT_AUDIO ->
@@ -510,7 +581,13 @@ private fun MainContent(
                     when (pendingAction) {
                         PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
                         PendingTranscriptAction.START_RECORDING -> requestRecording()
-                        PendingTranscriptAction.TRANSCRIBE -> requestTranscription()
+                        PendingTranscriptAction.TRANSCRIBE -> {
+                            if (transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled) {
+                                showMissingSongModelDialog = true
+                            } else {
+                                requestTranscription()
+                            }
+                        }
                     }
                 },
                 onDismiss = { pendingTranscriptAction = null }
@@ -606,6 +683,8 @@ private fun MainContent(
                         }
                     } else if (state.hasUnsavedTranscriptChanges) {
                         pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
+                    } else if (transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled) {
+                        showMissingSongModelDialog = true
                     } else {
                         requestTranscription()
                     }

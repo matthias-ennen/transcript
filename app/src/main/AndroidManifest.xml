@@ -75,6 +75,11 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".song.SongModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".ai.AiPostProcessingService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
