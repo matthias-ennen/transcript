@@ -12,6 +12,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.whispercpp.whisper.WhisperSegment
+import de.matthiasennen.transcript.song.exportKimMemoryDiagnosticsToDownloads
 import de.matthiasennen.transcript.ui.main.WhisperModel
 import de.matthiasennen.transcript.ui.main.StatusMessageKind
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -169,9 +170,24 @@ object TranscriptionCoordinator {
                             )
                         } == true
                     } == true
+                    val kimDiagnostics = if (
+                        exit.reason == ApplicationExitInfo.REASON_LOW_MEMORY
+                    ) {
+                        exportKimMemoryDiagnosticsToDownloads(context)
+                    } else {
+                        null
+                    }
+                    val failureMessage = buildString {
+                        append(workerExitMessage(exit))
+                        kimDiagnostics?.let { exported ->
+                            append(" Kim-Speicherdiagnose gespeichert unter ")
+                            append(exported.relativePath)
+                            append('.')
+                        }
+                    }
                     val failure = TranscriptionState.Failed(
                         fileName = envelope.state.fileName(),
-                        message = workerExitMessage(exit),
+                        message = failureMessage,
                         canResume = canResumeAfterWorkerExit(
                             checkpoint = checkpoint,
                             preparedAudioUsable = preparedAudioUsable,
@@ -247,6 +263,14 @@ object TranscriptionCoordinator {
             receiverRegistered = true
         }
         refreshFromDisk(appContext)
+        if (observedEnvelope?.state?.isActive() != true) {
+            exportKimMemoryDiagnosticsToDownloads(appContext)?.let { exported ->
+                Log.i(
+                    WATCHDOG_LOG_TAG,
+                    "Existing Kim memory diagnostics exported to ${exported.relativePath}"
+                )
+            }
+        }
     }
 
     fun publish(context: Context, state: TranscriptionState, workerStartedAtEpochMs: Long) {
