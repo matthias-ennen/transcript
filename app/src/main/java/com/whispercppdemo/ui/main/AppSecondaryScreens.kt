@@ -46,6 +46,9 @@ fun SettingsScreen(
     onOpenAiPerformance: () -> Unit,
     onOpenWhisperSettings: () -> Unit,
     onOpenVadSettings: () -> Unit,
+    onVadModeChanged: (WhisperVadMode) -> Unit,
+    voiceIsolationEnabled: Boolean,
+    onVoiceIsolationEnabledChanged: (Boolean) -> Unit,
     onSelectModel: (WhisperModel) -> Unit,
     onDeleteModel: (WhisperModel) -> Unit,
     onDeleteAllModels: () -> Unit,
@@ -130,6 +133,19 @@ fun SettingsScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Silero VAD", style = MaterialTheme.typography.headlineSmall)
+                ChoiceSetting(
+                    "Aktivierung",
+                    state.whisperSettings.vadMode,
+                    listOf(
+                        WhisperVadMode.OFF to "Aus",
+                        WhisperVadMode.AUTOMATIC to "Automatisch",
+                        WhisperVadMode.ON to "Ein"
+                    )
+                ) { onVadModeChanged(it) }
+                Text(
+                    "Erkennt Bereiche mit Sprache und Pausen. In Automatisch prüft Silero die vorbereitete Audiospur und verwendet VAD nur bei einem klaren Nutzen; Ein verwendet VAD immer, Aus nie.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 TextButton(onClick = onOpenVadSettings, contentPadding = PaddingValues(0.dp)) {
                     Text("VAD-Einstellungen", color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)
                 }
@@ -143,7 +159,7 @@ fun SettingsScreen(
                     ) {
                         Text(SileroVadModel.modelLabel, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Erkennt Sprach- und Pausenbereiche, damit Whisper längere stille Abschnitte gezielt überspringen kann.",
+                            "Lokales Modell zur Erkennung von Sprach- und Pausenbereichen.",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
@@ -186,9 +202,14 @@ fun SettingsScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Gesangstrennung / Songmodus", style = MaterialTheme.typography.headlineSmall)
+                Text("Stimmisolierung", style = MaterialTheme.typography.headlineSmall)
+                ChoiceSetting(
+                    "Aktivierung",
+                    voiceIsolationEnabled,
+                    listOf(false to "Aus", true to "Ein")
+                ) { onVoiceIsolationEnabledChanged(it) }
                 Text(
-                    "Diese Modelle isolieren den Gesang lokal vor der Whisper-Transkription. Im normalen Sprachmodus werden sie nicht benötigt.",
+                    "Isoliert Stimmen aus Musik und erstellt vor der Transkription eine aufbereitete Stimmspur. Wenn zusätzlich VAD aktiv ist, arbeitet VAD anschließend auf dieser isolierten Spur.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
@@ -209,7 +230,7 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    "Ausgewogen ist die empfohlene Stufe. Songmodelle werden nur auf ausdrücklichen Wunsch heruntergeladen.",
+                    "Ausgewogen ist die empfohlene Stufe. Modelle zur Stimmisolierung werden nur auf ausdrücklichen Wunsch heruntergeladen.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 OutlinedButton(
@@ -218,7 +239,7 @@ fun SettingsScreen(
                         !state.isBusy && !state.isRecording,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Alle Songmodelle löschen")
+                    Text("Alle Modelle zur Stimmisolierung löschen")
                 }
             }
         }
@@ -313,7 +334,7 @@ fun SettingsScreen(
     songModelToDelete?.let { model ->
         AlertDialog(
             onDismissRequest = { songModelToDelete = null },
-            title = { Text("Songmodell löschen?") },
+            title = { Text("Modell zur Stimmisolierung löschen?") },
             text = {
                 Text("${model.modelLabel} und ein eventuell angefangener Download werden entfernt.")
             },
@@ -389,9 +410,9 @@ fun SettingsScreen(
     if (confirmDeleteAllSongModels) {
         AlertDialog(
             onDismissRequest = { confirmDeleteAllSongModels = false },
-            title = { Text("Alle Songmodelle löschen?") },
+            title = { Text("Alle Modelle zur Stimmisolierung löschen?") },
             text = {
-                Text("Alle installierten Songmodelle und unvollständigen Downloads werden entfernt.")
+                Text("Alle installierten Modelle zur Stimmisolierung und unvollständigen Downloads werden entfernt.")
             },
             confirmButton = {
                 TextButton(onClick = {
