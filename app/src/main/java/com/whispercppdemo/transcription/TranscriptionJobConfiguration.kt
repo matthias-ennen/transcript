@@ -9,7 +9,6 @@ import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperDecoding
 import de.matthiasennen.transcript.ui.main.WhisperSettings
 import de.matthiasennen.transcript.ui.main.WhisperTimestampMode
-import de.matthiasennen.transcript.ui.main.WhisperVadMode
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -29,34 +28,25 @@ data class TranscriptionJobConfiguration(
     val transcriptionMode: TranscriptionMode = TranscriptionModeRuntime.current,
     val songSeparationModelId: String = SongSeparationRuntime.currentModel.id
 ) {
-    fun normalized(): TranscriptionJobConfiguration {
-        val normalizedSettings = whisperSettings.normalized().let { settings ->
-            if (transcriptionMode == TranscriptionMode.SONG) {
-                settings.copy(vadMode = WhisperVadMode.OFF)
-            } else {
-                settings
+    fun normalized(): TranscriptionJobConfiguration = copy(
+        modelId = modelId.trim(),
+        language = language.trim().ifBlank { "auto" },
+        whisperSettings = whisperSettings.normalized(),
+        songSeparationModelId = songSeparationModelId.trim().ifBlank {
+            SongSeparationModel.BALANCED.id
+        }
+    ).also {
+        require(it.modelId.isNotBlank()) { "Whisper-Modell fehlt in der Auftragskonfiguration." }
+        if (it.transcriptionMode == TranscriptionMode.SONG) {
+            require(SongSeparationModel.entries.any { model -> model.id == it.songSeparationModelId }) {
+                "Unbekanntes Modell für die Stimmisolierung."
             }
         }
-        return copy(
-            modelId = modelId.trim(),
-            language = language.trim().ifBlank { "auto" },
-            whisperSettings = normalizedSettings,
-            songSeparationModelId = songSeparationModelId.trim().ifBlank {
-                SongSeparationModel.BALANCED.id
-            }
-        ).also {
-            require(it.modelId.isNotBlank()) { "Whisper-Modell fehlt in der Auftragskonfiguration." }
-            if (it.transcriptionMode == TranscriptionMode.SONG) {
-                require(SongSeparationModel.entries.any { model -> model.id == it.songSeparationModelId }) {
-                    "Unbekanntes Modell für die Gesangstrennung."
-                }
-            }
-            SongWorkerRuntime.update(
-                mode = it.transcriptionMode,
-                modelId = it.songSeparationModelId,
-                threads = it.whisperSettings.threads
-            )
-        }
+        SongWorkerRuntime.update(
+            mode = it.transcriptionMode,
+            modelId = it.songSeparationModelId,
+            threads = it.whisperSettings.threads
+        )
     }
 
     fun encode(): String {
