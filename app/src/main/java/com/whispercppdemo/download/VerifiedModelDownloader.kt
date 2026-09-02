@@ -11,10 +11,12 @@ data class VerifiedModelDownload(
     val modelLabel: String,
     val downloadUrl: String,
     val expectedBytes: Long,
-    val sha256: String,
+    val sha256: String?,
     val destination: File,
     val partial: File,
-    val failureLabel: String
+    val failureLabel: String,
+    val minimumBytes: Long = expectedBytes,
+    val exactBytes: Boolean = true
 )
 
 data class DownloadProgress(
@@ -30,14 +32,20 @@ object VerifiedModelDownloader {
         onProgress: (DownloadProgress) -> Unit,
         onVerifying: (Long) -> Unit
     ) {
-        if (download.destination.isFile && sha256(download.destination) == download.sha256) return
+        if (download.destination.isFile && isComplete(download.destination, download)) return
 
-        if (download.partial.isFile && download.partial.length() >= download.expectedBytes) {
-            if (sha256(download.partial) == download.sha256) {
+        if (
+            download.partial.isFile &&
+            download.exactBytes &&
+            download.partial.length() >= download.expectedBytes
+        ) {
+            if (isComplete(download.partial, download)) {
                 replace(download.partial, download.destination, download.failureLabel)
                 return
             }
-            check(download.partial.delete()) { "Der beschädigte ${download.failureLabel}-Zwischendownload konnte nicht gelöscht werden." }
+            check(download.partial.delete()) {
+                "Der beschädigte ${download.failureLabel}-Zwischendownload konnte nicht gelöscht werden."
+            }
         }
 
         var existingBytes = download.partial.takeIf(File::isFile)?.length() ?: 0L
@@ -90,14 +98,32 @@ object VerifiedModelDownloader {
             connection.disconnect()
         }
 
-        check(download.partial.length() >= download.expectedBytes) {
+        check(download.partial.length() >= download.minimumBytes) {
             "Das heruntergeladene ${download.failureLabel} ist unvollständig."
         }
+        if (download.exactBytes) {
+            check(download.partial.length() == download.expectedBytes) {
+                "Das heruntergeladene ${download.failureLabel} hat eine unerwartete Dateigröße."
+            }
+        }
         onVerifying(download.partial.length())
-        check(sha256(download.partial) == download.sha256) {
-            "Die Prüfsumme des ${download.failureLabel} stimmt nicht."
+        download.sha256?.let { expectedSha256 ->
+            check(sha256(download.partial) == expectedSha256) {
+                "Die Prüfsumme des ${download.failureLabel} stimmt nicht."
+            }
         }
         replace(download.partial, download.destination, download.failureLabel)
+    }
+
+    private fun isComplete(file: File, download: VerifiedModelDownload): Boolean {
+        val sizeMatches = if (download.exactBytes) {
+            file.length() == download.expectedBytes
+        } else {
+            file.length() >= download.minimumBytes
+        }
+        if (!sizeMatches) return false
+        val expectedSha256 = download.sha256 ?: return true
+        return sha256(file) == expectedSha256
     }
 
     private fun openConnection(url: String, startByte: Long): HttpURLConnection =

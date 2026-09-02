@@ -26,6 +26,19 @@ set(
     )
 
 find_library(LOG_LIB log)
+find_library(DL_LIB dl)
+
+# Native source-separation shim. It deliberately does not link CrispASR at build
+# time: the pinned Android runtime is staged into jniLibs by CI and dlopen'd only
+# when the Native/GGUF Kim variant is selected.
+add_library(
+    transcript_song_native
+    SHARED
+    ${CMAKE_SOURCE_DIR}/song_native_jni.c
+)
+target_compile_options(transcript_song_native PRIVATE -O3 -fvisibility=hidden -ffunction-sections -fdata-sections)
+target_link_options(transcript_song_native PRIVATE -Wl,--gc-sections)
+target_link_libraries(transcript_song_native ${LOG_LIB} ${DL_LIB})
 
 include(FetchContent)
 

@@ -17,30 +17,42 @@ internal data class KimMemoryDiagnosticsExport(
     val relativePath: String
 )
 
+private data class KimDiagnosticSource(
+    val prefix: String,
+    val file: File
+)
+
 /**
- * Copies the crash-safe Kim memory log from private app storage into a user-visible
- * Downloads/Transcript file. The private source is deleted only after a verified
- * successful copy, so a hard worker-process kill cannot destroy the evidence.
+ * Copies the newest crash-safe Kim memory log from private app storage into a
+ * user-visible Downloads/Transcript file. Both the legacy ONNX runtime and the
+ * Native/GGUF runtime use this path. The private source is deleted only after a
+ * verified successful copy, so a hard worker-process kill cannot destroy the evidence.
  */
 internal fun exportKimMemoryDiagnosticsToDownloads(
     context: Context
 ): KimMemoryDiagnosticsExport? {
-    val source = File(
-        context.filesDir,
-        "song-models/kim-vocal-2/kim-memory-diagnostics.log"
-    )
-    if (!source.isFile || source.length() <= 0L) return null
+    val candidates = listOf(
+        KimDiagnosticSource(
+            prefix = "kim-onnx",
+            file = File(context.filesDir, "song-models/kim-vocal-2/kim-memory-diagnostics.log")
+        ),
+        KimDiagnosticSource(
+            prefix = "kim-native",
+            file = File(context.filesDir, "song-models/kim-vocal-2-native/kim-memory-diagnostics.log")
+        )
+    ).filter { it.file.isFile && it.file.length() > 0L }
+    val source = candidates.maxByOrNull { it.file.lastModified() } ?: return null
 
     val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
-        .format(Date(source.lastModified().coerceAtLeast(1L)))
-    val fileName = "kim-memory-diagnostics-$timestamp.txt"
+        .format(Date(source.file.lastModified().coerceAtLeast(1L)))
+    val fileName = "${source.prefix}-memory-diagnostics-$timestamp.txt"
     val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/Transcript/$fileName"
 
     return runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             exportWithMediaStore(
                 context = context,
-                source = source,
+                source = source.file,
                 fileName = fileName
             )
         } else {
@@ -50,13 +62,13 @@ internal fun exportKimMemoryDiagnosticsToDownloads(
                 "Transcript"
             ).apply { mkdirs() }
             val destination = File(directory, fileName)
-            source.copyTo(destination, overwrite = true)
-            check(destination.isFile && destination.length() == source.length()) {
+            source.file.copyTo(destination, overwrite = true)
+            check(destination.isFile && destination.length() == source.file.length()) {
                 "Kim-Diagnosedatei wurde nicht vollständig nach Downloads kopiert."
             }
         }
 
-        source.delete()
+        source.file.delete()
         KimMemoryDiagnosticsExport(
             fileName = fileName,
             relativePath = relativePath
