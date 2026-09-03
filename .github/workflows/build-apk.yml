@@ -116,6 +116,16 @@ jobs:
           git -C "$crisp_src" submodule update --init --recursive --depth 1
           test "$(git -C "$crisp_src" rev-parse HEAD)" = "$CRISPASR_COMMIT"
 
+          crisp_vulkan_cpp="$crisp_src/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+          test -f "$crisp_vulkan_cpp"
+          raw_features2_calls="$(grep -cE '^[[:space:]]*vkGetPhysicalDeviceFeatures2\(' "$crisp_vulkan_cpp" || true)"
+          test "$raw_features2_calls" -eq 3
+          sed -i \
+            's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
+            "$crisp_vulkan_cpp"
+          dispatcher_features2_calls="$(grep -cF 'VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(' "$crisp_vulkan_cpp" || true)"
+          test "$dispatcher_features2_calls" -eq 3
+
           cmake -S "$crisp_src" -B "$crisp_build" \
             -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
