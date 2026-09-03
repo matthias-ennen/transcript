@@ -56,31 +56,82 @@ jobs:
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
 
-      - name: Stage pinned CrispASR Android runtime
+      - name: Build pinned CrispASR Android runtime with OpenBLAS
         env:
           CRISPASR_VERSION: "0.8.31"
-          CRISPASR_ARCHIVE_SHA256: "78b03fe6ea86b62b7f16e168b0d932d1ced2d705b1e9999de73c4510fdc5b6c4"
+          CRISPASR_COMMIT: "5244a1e39d2037761a74ef4564ae56362e89a9c9"
+          OPENBLAS_VERSION: "0.3.34"
+          OPENBLAS_ARCHIVE_SHA256: "cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed"
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/crispasr-android-arm64-v8a.tar.gz"
-          unpack="$RUNNER_TEMP/crispasr-android"
+          ndk="$ANDROID_HOME/ndk/27.2.12479018"
+          toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          openblas_archive="$RUNNER_TEMP/OpenBLAS-${OPENBLAS_VERSION}.tar.gz"
+          openblas_src="$RUNNER_TEMP/OpenBLAS-${OPENBLAS_VERSION}"
+          openblas_prefix="$RUNNER_TEMP/openblas-android"
+          crisp_src="$RUNNER_TEMP/crispasr-src"
+          crisp_build="$RUNNER_TEMP/crispasr-build-android"
           jni_dir="lib/src/main/jniLibs/arm64-v8a"
-          url="https://github.com/CrispStrobe/CrispASR/releases/download/v${CRISPASR_VERSION}/crispasr-android-arm64-v8a.tar.gz"
 
-          curl --fail --location --retry 3 --retry-delay 2 --output "$archive" "$url"
-          echo "${CRISPASR_ARCHIVE_SHA256}  ${archive}" | sha256sum --check -
-          mkdir -p "$unpack" "$jni_dir"
-          tar -xzf "$archive" -C "$unpack"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            --output "$openblas_archive" \
+            "https://github.com/OpenMathLib/OpenBLAS/releases/download/v${OPENBLAS_VERSION}/OpenBLAS-${OPENBLAS_VERSION}.tar.gz"
+          echo "${OPENBLAS_ARCHIVE_SHA256}  ${openblas_archive}" | sha256sum --check -
+          tar -xzf "$openblas_archive" -C "$RUNNER_TEMP"
 
-          core="$(find "$unpack" \( -type f -o -type l \) -name 'libcrispasr.so' -print -quit)"
+          make -C "$openblas_src" -j "$(nproc)" \
+            TARGET=ARMV8 BINARY=64 \
+            HOSTCC=gcc \
+            CC="$toolchain/aarch64-linux-android26-clang" \
+            AR="$toolchain/llvm-ar" \
+            RANLIB="$toolchain/llvm-ranlib" \
+            NOFORTRAN=1 ONLY_CBLAS=1 NO_SHARED=1 \
+            USE_THREAD=0 \
+            CFLAGS="-O3 -fPIC"
+          make -C "$openblas_src" \
+            PREFIX="$openblas_prefix" \
+            TARGET=ARMV8 BINARY=64 \
+            HOSTCC=gcc \
+            CC="$toolchain/aarch64-linux-android26-clang" \
+            AR="$toolchain/llvm-ar" \
+            RANLIB="$toolchain/llvm-ranlib" \
+            NOFORTRAN=1 ONLY_CBLAS=1 NO_SHARED=1 \
+            USE_THREAD=0 \
+            install
+          test -f "$openblas_prefix/lib/libopenblas.a"
+          test -f "$openblas_prefix/include/cblas.h"
+          "$toolchain/llvm-nm" -g --defined-only "$openblas_prefix/lib/libopenblas.a" \
+            | grep -F 'cblas_sgemm'
+
+          git clone --depth 1 --branch "v${CRISPASR_VERSION}" \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/CrispStrobe/CrispASR.git "$crisp_src"
+          test "$(git -C "$crisp_src" rev-parse HEAD)" = "$CRISPASR_COMMIT"
+
+          cmake -S "$crisp_src" -B "$crisp_build" \
+            -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCRISPASR_BUILD_TESTS=OFF \
+            -DCRISPASR_BUILD_EXAMPLES=OFF \
+            -DCRISPASR_BUILD_SERVER=OFF \
+            -DCRISPASR_OPUS=OFF \
+            -DCRISPASR_MEL_BLAS=ON \
+            -DMBR_OPENBLAS="$openblas_prefix/lib/libopenblas.a" \
+            -DCBLAS_INCLUDE_DIR="$openblas_prefix/include" \
+            2>&1 | tee "$RUNNER_TEMP/crispasr-configure.log"
+          grep -F 'mel-band-roformer: linking OpenBLAS' "$RUNNER_TEMP/crispasr-configure.log"
+          cmake --build "$crisp_build" --config Release -j "$(nproc)" --target crispasr-lib
+
+          mkdir -p "$jni_dir"
+          core="$(find "$crisp_build/src" \( -type f -o -type l \) -name 'libcrispasr.so' -print -quit)"
           if [ -z "$core" ]; then
-            core="$(find "$unpack" \( -type f -o -type l \) -name 'libwhisper.so' -print -quit)"
+            core="$(find "$crisp_build/src" \( -type f -o -type l \) -name 'libwhisper.so' -print -quit)"
           fi
           test -n "$core"
 
-          # CrispASR historically aliases its C ABI library to libwhisper.so.
-          # Transcript already owns that SONAME, so package a private renamed copy
-          # and load it explicitly from the source-separation shim.
           cp -L "$core" "$jni_dir/libcrispasr-transcript.so"
           patchelf --set-soname libcrispasr-transcript.so "$jni_dir/libcrispasr-transcript.so"
 
@@ -90,10 +141,15 @@ jobs:
               libcrispasr.so*|libwhisper.so*) continue ;;
             esac
             cp -L "$library" "$jni_dir/$base"
-          done < <(find "$unpack" \( -type f -o -type l \) -name 'lib*.so*' -print)
+          done < <(find "$crisp_build/src" \( -type f -o -type l \) -name 'lib*.so*' -print)
+          while IFS= read -r library; do
+            cp -L "$library" "$jni_dir/$(basename "$library")"
+          done < <(find "$crisp_build/ggml/src" \( -type f -o -type l \) -name 'libggml*.so*' -print)
 
           readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_open_explicit'
           readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_separate'
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'openblas_set_num_threads'
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'cblas_sgemm'
           readelf -d "$jni_dir/libcrispasr-transcript.so" | grep -E 'SONAME|NEEDED'
           find "$jni_dir" -maxdepth 1 -type f -name 'lib*.so*' -printf '%f\n' | sort
 
@@ -155,6 +211,8 @@ jobs:
           unzip -p "$apk" lib/arm64-v8a/libcrispasr-transcript.so > "$audit_dir/libcrispasr-transcript.so"
           readelf -d "$audit_dir/libcrispasr-transcript.so" | grep -F 'libcrispasr-transcript.so'
           readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_separate'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'openblas_set_num_threads'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'cblas_sgemm'
 
       - name: Verify KleidiAI runtime payload
         run: |

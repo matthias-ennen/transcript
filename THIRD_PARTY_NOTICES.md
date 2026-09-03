@@ -52,15 +52,28 @@ enthalten.
 
 - Projekt: <https://github.com/CrispStrobe/CrispASR>
 - Version: v0.8.31
+- Gepinnter Commit: `5244a1e39d2037761a74ef4564ae56362e89a9c9`
 - Lizenz: MIT
 - Verwendung: Native Android-ARM64-Inferenz für die optionale Stimmisolierungsvariante `Kim Vocal 2 · Native/GGUF`
-- CI-Runtime-Archiv: `crispasr-android-arm64-v8a.tar.gz`
-- Archiv-SHA-256: `78b03fe6ea86b62b7f16e168b0d932d1ced2d705b1e9999de73c4510fdc5b6c4`
 
 Der vollständige Lizenztext ist in
 [`licenses/CrispASR-MIT.txt`](licenses/CrispASR-MIT.txt) enthalten. Die native
-Runtime wird beim reproduzierbaren CI-Build aus dem gepinnten v0.8.31-Release
-bezogen und nicht als Binärdatei im Repository gespeichert.
+Runtime wird beim reproduzierbaren CI-Build aus dem gepinnten CrispASR-Commit
+für Android ARM64 gebaut und nicht als Binärdatei im Repository gespeichert.
+
+## OpenBLAS
+
+- Projekt: <https://github.com/OpenMathLib/OpenBLAS>
+- Version: v0.3.34
+- Quellarchiv-SHA-256: `cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed`
+- Lizenz: BSD-3-Clause
+- Verwendung: Statisch eingebundene CBLAS/SGEMM-Beschleunigung für Kim Vocal 2 · Native/GGUF auf Android ARM64
+
+OpenBLAS wird ausschließlich im CI für Android ARM64 kompiliert. Der Build ist
+auf CBLAS ohne eigene Worker-Threads begrenzt; CrispASR parallelisiert die
+Zeit-/Frequenzblöcke selbst über OpenMP. Der vollständige Lizenztext ist in
+[`licenses/OpenBLAS-BSD-3-Clause.txt`](licenses/OpenBLAS-BSD-3-Clause.txt)
+enthalten.
 
 ## Kim Vocal 2 / Mel-Band RoFormer GGUF
 

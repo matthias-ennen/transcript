@@ -1,6 +1,7 @@
 package de.matthiasennen.transcript.song
 
 import android.os.Debug
+import android.os.SystemClock
 import android.util.Log
 import com.whispercpp.whisper.CrispSongSeparatorNative
 import java.io.Closeable
@@ -14,36 +15,58 @@ import java.util.Locale
  */
 internal class CrispSongSeparatorRuntime private constructor(
     private var sessionPtr: Long,
-    private val diagnosticFile: File
+    private val diagnosticFile: File,
+    private val threads: Int
 ) : Closeable {
     private var firstInferenceCompleted = false
+    private var inferenceCount = 0
 
     fun separateVocals(interleavedStereo44100: FloatArray): FloatArray {
         check(sessionPtr != 0L) { "Die native Kim-Session wurde bereits freigegeben." }
         require(interleavedStereo44100.isNotEmpty() && interleavedStereo44100.size % 2 == 0) {
             "Kim Vocal 2 Native/GGUF benötigt Stereo-Audio."
         }
+
+        val windowNumber = ++inferenceCount
+        val framesPerChannel = interleavedStereo44100.size / 2
+        val tensorBytes = interleavedStereo44100.size.toLong() * Float.SIZE_BYTES
         val isFirstInference = !firstInferenceCompleted
         if (isFirstInference) {
             logMemorySnapshot(
                 stage = "native-before-first-inference",
                 diagnosticFile = diagnosticFile,
-                tensorBytes = interleavedStereo44100.size.toLong() * Float.SIZE_BYTES
+                tensorBytes = tensorBytes,
+                details = "threads=$threads"
             )
         }
+        logMemorySnapshot(
+            stage = "native-window-$windowNumber-start",
+            diagnosticFile = diagnosticFile,
+            tensorBytes = tensorBytes,
+            details = "frames=$framesPerChannel | threads=$threads"
+        )
 
+        val startedAtMs = SystemClock.elapsedRealtime()
         val output = CrispSongSeparatorNative.separateVocals(sessionPtr, interleavedStereo44100)
             ?: error(nativeFailure("Kim Vocal 2 Native/GGUF konnte den Audioabschnitt nicht trennen."))
+        val elapsedMs = (SystemClock.elapsedRealtime() - startedAtMs).coerceAtLeast(0L)
         check(output.size == interleavedStereo44100.size) {
             "Kim Vocal 2 Native/GGUF lieferte ${output.size / 2} statt ${interleavedStereo44100.size / 2} Samples je Kanal."
         }
 
+        logMemorySnapshot(
+            stage = "native-window-$windowNumber-finished",
+            diagnosticFile = diagnosticFile,
+            tensorBytes = output.size.toLong() * Float.SIZE_BYTES,
+            details = "elapsedMs=$elapsedMs | frames=${output.size / 2} | threads=$threads"
+        )
         if (isFirstInference) {
             firstInferenceCompleted = true
             logMemorySnapshot(
                 stage = "native-after-first-inference",
                 diagnosticFile = diagnosticFile,
-                tensorBytes = output.size.toLong() * Float.SIZE_BYTES
+                tensorBytes = output.size.toLong() * Float.SIZE_BYTES,
+                details = "elapsedMs=$elapsedMs | threads=$threads"
             )
         }
         return output
@@ -73,9 +96,11 @@ internal class CrispSongSeparatorRuntime private constructor(
             }
             logMemorySnapshot("native-before-session-load", diagnosticFile)
 
-            // Memory stability comes before throughput for the first Android
-            // integration. We can raise this after the Xiaomi reference run.
-            val threads = requestedThreads.coerceIn(1, 1)
+            // OpenBLAS performs each SGEMM itself on one thread while CrispASR
+            // parallelises the time/frequency blocks with OpenMP. Bound that
+            // outer parallelism on Android so throughput improves without
+            // recreating the large memory spikes seen with the ONNX export.
+            val threads = requestedThreads.coerceIn(1, 4)
             val ptr = CrispSongSeparatorNative.open(modelFile.absolutePath, threads)
             check(ptr != 0L) {
                 nativeFailure("Kim Vocal 2 Native/GGUF konnte nicht geladen werden.")
@@ -85,8 +110,12 @@ internal class CrispSongSeparatorRuntime private constructor(
                 check(sampleRate == REQUIRED_SAMPLE_RATE) {
                     "Kim Vocal 2 Native/GGUF erwartet $sampleRate Hz statt $REQUIRED_SAMPLE_RATE Hz."
                 }
-                logMemorySnapshot("native-after-session-load", diagnosticFile)
-                return CrispSongSeparatorRuntime(ptr, diagnosticFile)
+                logMemorySnapshot(
+                    stage = "native-after-session-load",
+                    diagnosticFile = diagnosticFile,
+                    details = "threads=$threads"
+                )
+                return CrispSongSeparatorRuntime(ptr, diagnosticFile, threads)
             } catch (failure: Throwable) {
                 runCatching { CrispSongSeparatorNative.close(ptr) }
                 throw failure
@@ -102,7 +131,8 @@ internal class CrispSongSeparatorRuntime private constructor(
         private fun logMemorySnapshot(
             stage: String,
             diagnosticFile: File,
-            tensorBytes: Long = 0L
+            tensorBytes: Long = 0L,
+            details: String? = null
         ) {
             val runtime = Runtime.getRuntime()
             val javaUsed = runtime.totalMemory() - runtime.freeMemory()
@@ -127,6 +157,10 @@ internal class CrispSongSeparatorRuntime private constructor(
                     append(" | tensor=")
                     append(formatMiB(tensorBytes))
                     append(" MiB")
+                }
+                if (!details.isNullOrBlank()) {
+                    append(" | ")
+                    append(details)
                 }
             }
             Log.i(MEMORY_TAG, line)
