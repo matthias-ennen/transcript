@@ -46,14 +46,19 @@ internal fun decodeAndSeparateSongChunk(
     )
 }
 
-internal fun separatorWindowStarts(startMs: Long, endMs: Long): List<Long> {
+internal fun separatorWindowStarts(
+    startMs: Long,
+    endMs: Long,
+    model: SongSeparationModel = SongSeparationModel.HIGH_QUALITY
+): List<Long> {
     require(endMs > startMs)
+    val timing = songSeparatorTiming(model)
     val starts = mutableListOf<Long>()
     var position = startMs
     while (position < endMs) {
         starts += position
-        if (position + SONG_SEPARATOR_WINDOW_MS >= endMs) break
-        position += SONG_SEPARATOR_STEP_MS
+        if (position + timing.windowMs >= endMs) break
+        position += timing.stepMs
     }
     return starts
 }

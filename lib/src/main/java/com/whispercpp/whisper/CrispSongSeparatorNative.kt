@@ -14,7 +14,7 @@ object CrispSongSeparatorNative {
     }
 
     @Keep
-    external fun open(modelPath: String, threads: Int): Long
+    external fun open(modelPath: String, threads: Int, preferGpu: Boolean): Long
 
     @Keep
     external fun sampleRate(sessionPtr: Long): Int

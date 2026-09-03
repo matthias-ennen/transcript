@@ -13,7 +13,18 @@
 
 typedef void crispasr_session;
 
+typedef struct {
+    int32_t abi_version;
+    int32_t n_threads;
+    int32_t use_gpu;
+    int32_t verbosity;
+    int32_t flash_attn;
+    int32_t n_gpu_layers;
+    int32_t reserved[6];
+} crispasr_open_params_v1;
+
 typedef crispasr_session *(*open_explicit_fn)(const char *, const char *, int);
+typedef crispasr_session *(*open_with_params_fn)(const char *, const char *, const crispasr_open_params_v1 *);
 typedef void (*close_fn)(crispasr_session *);
 typedef int (*separate_fn)(crispasr_session *, const float *, int);
 typedef const char *(*stem_name_fn)(crispasr_session *, int);
@@ -22,6 +33,7 @@ typedef int (*sample_rate_fn)(crispasr_session *);
 
 static void *g_crispasr = NULL;
 static open_explicit_fn g_open_explicit = NULL;
+static open_with_params_fn g_open_with_params = NULL;
 static close_fn g_close = NULL;
 static separate_fn g_separate = NULL;
 static stem_name_fn g_stem_name = NULL;
@@ -59,7 +71,7 @@ static void *load_symbol(const char *name) {
 
 static int ensure_runtime_loaded(void) {
     pthread_mutex_lock(&g_runtime_mutex);
-    if (g_crispasr != NULL && g_open_explicit != NULL && g_close != NULL &&
+    if (g_crispasr != NULL && g_open_explicit != NULL && g_open_with_params != NULL && g_close != NULL &&
         g_separate != NULL && g_stem_name != NULL && g_stem != NULL &&
         g_sample_rate != NULL) {
         pthread_mutex_unlock(&g_runtime_mutex);
@@ -79,14 +91,15 @@ static int ensure_runtime_loaded(void) {
     }
 
     g_open_explicit = (open_explicit_fn) load_symbol("crispasr_session_open_explicit");
+    g_open_with_params = (open_with_params_fn) load_symbol("crispasr_session_open_with_params");
     g_close = (close_fn) load_symbol("crispasr_session_close");
     g_separate = (separate_fn) load_symbol("crispasr_session_separate");
     g_stem_name = (stem_name_fn) load_symbol("crispasr_session_separate_stem_name");
     g_stem = (stem_fn) load_symbol("crispasr_session_separate_stem");
     g_sample_rate = (sample_rate_fn) load_symbol("crispasr_session_separate_sample_rate");
 
-    const int ok = g_open_explicit != NULL && g_close != NULL && g_separate != NULL &&
-                   g_stem_name != NULL && g_stem != NULL && g_sample_rate != NULL;
+    const int ok = g_open_explicit != NULL && g_open_with_params != NULL && g_close != NULL &&
+                   g_separate != NULL && g_stem_name != NULL && g_stem != NULL && g_sample_rate != NULL;
     if (!ok) {
         dlclose(g_crispasr);
         g_crispasr = NULL;
@@ -102,7 +115,7 @@ static int is_vocals_name(const char *name) {
 
 JNIEXPORT jlong JNICALL
 Java_com_whispercpp_whisper_CrispSongSeparatorNative_open(
-        JNIEnv *env, jobject thiz, jstring model_path, jint threads) {
+        JNIEnv *env, jobject thiz, jstring model_path, jint threads, jboolean prefer_gpu) {
     (void) thiz;
     if (model_path == NULL) {
         set_error("GGUF-Modellpfad fehlt.");
@@ -116,10 +129,20 @@ Java_com_whispercpp_whisper_CrispSongSeparatorNative_open(
         return 0;
     }
     clear_error();
-    crispasr_session *session = g_open_explicit(
+
+    crispasr_open_params_v1 params;
+    memset(&params, 0, sizeof(params));
+    params.abi_version = 2;
+    params.n_threads = threads > 0 ? threads : 1;
+    params.use_gpu = prefer_gpu == JNI_TRUE ? 1 : 0;
+    params.verbosity = 0;
+    params.flash_attn = 0;
+    params.n_gpu_layers = -1;
+
+    crispasr_session *session = g_open_with_params(
         path,
         "mel-band-roformer",
-        threads > 0 ? threads : 1
+        &params
     );
     (*env)->ReleaseStringUTFChars(env, model_path, path);
     if (session == NULL) {

@@ -51,15 +51,16 @@ enthalten.
 ## CrispASR
 
 - Projekt: <https://github.com/CrispStrobe/CrispASR>
-- Version: v0.8.31
-- Gepinnter Commit: `5244a1e39d2037761a74ef4564ae56362e89a9c9`
+- Gepinnter Commit: `a8c0327e2cba08eebd7199e69092dad3dec604a0` (03.09.2026)
 - Lizenz: MIT
 - Verwendung: Native Android-ARM64-Inferenz für die optionale Stimmisolierungsvariante `Kim Vocal 2 · Native/GGUF`
+- Beschleunigung: Vulkan/GGML wird bevorzugt, wenn das Android-Gerät einen nutzbaren Vulkan-Backendpfad bereitstellt; OpenBLAS bleibt CPU-Fallback.
 
 Der vollständige Lizenztext ist in
 [`licenses/CrispASR-MIT.txt`](licenses/CrispASR-MIT.txt) enthalten. Die native
-Runtime wird beim reproduzierbaren CI-Build aus dem gepinnten CrispASR-Commit
-für Android ARM64 gebaut und nicht als Binärdatei im Repository gespeichert.
+Runtime wird beim reproduzierbaren CI-Build aus dem exakt gepinnten
+CrispASR-Commit für Android ARM64 gebaut und nicht als Binärdatei im Repository
+gespeichert.
 
 ## OpenBLAS
 
@@ -67,11 +68,11 @@ für Android ARM64 gebaut und nicht als Binärdatei im Repository gespeichert.
 - Version: v0.3.34
 - Quellarchiv-SHA-256: `cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed`
 - Lizenz: BSD-3-Clause
-- Verwendung: Statisch eingebundene CBLAS/SGEMM-Beschleunigung für Kim Vocal 2 · Native/GGUF auf Android ARM64
+- Verwendung: Statisch eingebundene CBLAS/SGEMM-Beschleunigung für den CPU-Fallback von Kim Vocal 2 · Native/GGUF auf Android ARM64
 
 OpenBLAS wird ausschließlich im CI für Android ARM64 kompiliert. Der Build ist
 auf CBLAS ohne eigene Worker-Threads begrenzt; CrispASR parallelisiert die
-Zeit-/Frequenzblöcke selbst über OpenMP. Der vollständige Lizenztext ist in
+Zeit-/Frequenzblöcke selbst. Der vollständige Lizenztext ist in
 [`licenses/OpenBLAS-BSD-3-Clause.txt`](licenses/OpenBLAS-BSD-3-Clause.txt)
 enthalten.
 
@@ -83,9 +84,12 @@ enthalten.
 - Lizenz der Kim-Vocal-Gewichte: MIT
 - Architektur-Referenz: `lucidrains/BS-RoFormer`, MIT
 - Verwendung: Optional herunterladbares F16-GGUF für die native Stimmisolierung
+- Inferenzfenster in Transcript: trainierte 352.800 Samples bei 44,1 kHz = 8 s; 25 % Überlappung, Schrittweite 6 s.
 
 Das GGUF wird nicht mit der APK ausgeliefert. Es wird erst nach Auswahl des
 Nutzers geladen. Für den Android-Integrationsstand wird die Datei auf plausible
 Größe und GGUF-Magic geprüft; die endgültige Release-Pinnung der konkreten
 Modelldatei inklusive SHA-256 bleibt vor Veröffentlichung als eigener
-Nachweis festzuhalten.
+Nachweis festzuhalten. Eine quantisierte Variante ersetzt das F16-GGUF nicht
+stillschweigend; sie erfordert eine separat geprüfte, identische Kim-Vocal-2-
+Gewichtsquelle und einen Qualitätsvergleich.

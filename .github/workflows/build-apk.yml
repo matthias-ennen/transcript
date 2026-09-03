@@ -56,10 +56,9 @@ jobs:
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
 
-      - name: Build pinned CrispASR Android runtime with OpenBLAS
+      - name: Build pinned CrispASR Android runtime with OpenBLAS and Vulkan
         env:
-          CRISPASR_VERSION: "0.8.31"
-          CRISPASR_COMMIT: "5244a1e39d2037761a74ef4564ae56362e89a9c9"
+          CRISPASR_COMMIT: "a8c0327e2cba08eebd7199e69092dad3dec604a0"
           OPENBLAS_VERSION: "0.3.34"
           OPENBLAS_ARCHIVE_SHA256: "cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed"
         run: |
@@ -103,9 +102,11 @@ jobs:
           "$toolchain/llvm-nm" -g --defined-only "$openblas_prefix/lib/libopenblas.a" \
             | grep -F 'cblas_sgemm'
 
-          git clone --depth 1 --branch "v${CRISPASR_VERSION}" \
-            --recurse-submodules --shallow-submodules \
-            https://github.com/CrispStrobe/CrispASR.git "$crisp_src"
+          git init "$crisp_src"
+          git -C "$crisp_src" remote add origin https://github.com/CrispStrobe/CrispASR.git
+          git -C "$crisp_src" fetch --depth 1 origin "$CRISPASR_COMMIT"
+          git -C "$crisp_src" checkout --detach FETCH_HEAD
+          git -C "$crisp_src" submodule update --init --recursive --depth 1
           test "$(git -C "$crisp_src" rev-parse HEAD)" = "$CRISPASR_COMMIT"
 
           cmake -S "$crisp_src" -B "$crisp_build" \
@@ -121,6 +122,7 @@ jobs:
             -DCRISPASR_MEL_BLAS=ON \
             -DMBR_OPENBLAS="$openblas_prefix/lib/libopenblas.a" \
             -DCBLAS_INCLUDE_DIR="$openblas_prefix/include" \
+            -DGGML_VULKAN=ON \
             2>&1 | tee "$RUNNER_TEMP/crispasr-configure.log"
           grep -F 'mel-band-roformer: linking OpenBLAS' "$RUNNER_TEMP/crispasr-configure.log"
           cmake --build "$crisp_build" --config Release -j "$(nproc)" --target crispasr-lib
@@ -146,11 +148,13 @@ jobs:
             cp -L "$library" "$jni_dir/$(basename "$library")"
           done < <(find "$crisp_build/ggml/src" \( -type f -o -type l \) -name 'libggml*.so*' -print)
 
-          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_open_explicit'
+          test -f "$jni_dir/libggml-vulkan.so"
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_open_with_params'
           readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_separate'
           readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'openblas_set_num_threads'
           readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'cblas_sgemm'
           readelf -d "$jni_dir/libcrispasr-transcript.so" | grep -E 'SONAME|NEEDED'
+          readelf -d "$jni_dir/libggml-vulkan.so" | grep -F 'libvulkan.so'
           find "$jni_dir" -maxdepth 1 -type f -name 'lib*.so*' -printf '%f\n' | sort
 
       - name: Set automatic APK version
@@ -206,13 +210,17 @@ jobs:
           apk="app/build/outputs/apk/debug/app-debug.apk"
           unzip -l "$apk" | grep -F 'lib/arm64-v8a/libtranscript_song_native.so'
           unzip -l "$apk" | grep -F 'lib/arm64-v8a/libcrispasr-transcript.so'
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libggml-vulkan.so'
           audit_dir="$RUNNER_TEMP/crispasr-apk-audit"
           mkdir -p "$audit_dir"
           unzip -p "$apk" lib/arm64-v8a/libcrispasr-transcript.so > "$audit_dir/libcrispasr-transcript.so"
+          unzip -p "$apk" lib/arm64-v8a/libggml-vulkan.so > "$audit_dir/libggml-vulkan.so"
           readelf -d "$audit_dir/libcrispasr-transcript.so" | grep -F 'libcrispasr-transcript.so'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_open_with_params'
           readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_separate'
           readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'openblas_set_num_threads'
           readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'cblas_sgemm'
+          readelf -d "$audit_dir/libggml-vulkan.so" | grep -F 'libvulkan.so'
 
       - name: Verify KleidiAI runtime payload
         run: |
