@@ -71,6 +71,10 @@ jobs:
           crisp_src="$RUNNER_TEMP/crispasr-src"
           crisp_build="$RUNNER_TEMP/crispasr-build-android"
           jni_dir="lib/src/main/jniLibs/arm64-v8a"
+          spirv_headers_config="$(dpkg -L spirv-headers | grep '/SPIRV-HeadersConfig.cmake$' | head -n 1)"
+          test -n "$spirv_headers_config"
+          test -f "$spirv_headers_config"
+          spirv_headers_dir="$(dirname "$spirv_headers_config")"
 
           curl --fail --location --retry 3 --retry-delay 2 \
             --output "$openblas_archive" \
@@ -122,6 +126,7 @@ jobs:
             -DCRISPASR_MEL_BLAS=ON \
             -DMBR_OPENBLAS="$openblas_prefix/lib/libopenblas.a" \
             -DCBLAS_INCLUDE_DIR="$openblas_prefix/include" \
+            -DSPIRV-Headers_DIR="$spirv_headers_dir" \
             -DGGML_VULKAN=ON \
             2>&1 | tee "$RUNNER_TEMP/crispasr-configure.log"
           grep -F 'mel-band-roformer: linking OpenBLAS' "$RUNNER_TEMP/crispasr-configure.log"
