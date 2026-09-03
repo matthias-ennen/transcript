@@ -42,6 +42,7 @@ jobs:
           cp -R /usr/include/vulkan llm/src/main/cpp/host-vulkan-headers/
           cp -R /usr/include/vk_video llm/src/main/cpp/host-vulkan-headers/vulkan/
           cp -R /usr/include/spirv llm/src/main/cpp/host-vulkan-headers/
+          test -f llm/src/main/cpp/host-vulkan-headers/vulkan/vulkan.hpp
           sed -i \
             's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
             third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp
@@ -75,6 +76,8 @@ jobs:
           test -n "$spirv_headers_config"
           test -f "$spirv_headers_config"
           spirv_headers_dir="$(dirname "$spirv_headers_config")"
+          vulkan_headers_dir="$GITHUB_WORKSPACE/llm/src/main/cpp/host-vulkan-headers"
+          test -f "$vulkan_headers_dir/vulkan/vulkan.hpp"
 
           curl --fail --location --retry 3 --retry-delay 2 \
             --output "$openblas_archive" \
@@ -127,10 +130,12 @@ jobs:
             -DMBR_OPENBLAS="$openblas_prefix/lib/libopenblas.a" \
             -DCBLAS_INCLUDE_DIR="$openblas_prefix/include" \
             -DSPIRV-Headers_DIR="$spirv_headers_dir" \
+            -DVulkan_INCLUDE_DIR="$vulkan_headers_dir" \
             -DGGML_VULKAN=ON \
             2>&1 | tee "$RUNNER_TEMP/crispasr-configure.log"
           grep -F 'mel-band-roformer: linking OpenBLAS' "$RUNNER_TEMP/crispasr-configure.log"
-          cmake --build "$crisp_build" --config Release -j "$(nproc)" --target crispasr-lib
+          cmake --build "$crisp_build" --config Release -j "$(nproc)" --target crispasr-lib \
+            2>&1 | tee "$RUNNER_TEMP/crispasr-build.log"
 
           mkdir -p "$jni_dir"
           core="$(find "$crisp_build/src" \( -type f -o -type l \) -name 'libcrispasr.so' -print -quit)"
@@ -161,6 +166,16 @@ jobs:
           readelf -d "$jni_dir/libcrispasr-transcript.so" | grep -E 'SONAME|NEEDED'
           readelf -d "$jni_dir/libggml-vulkan.so" | grep -F 'libvulkan.so'
           find "$jni_dir" -maxdepth 1 -type f -name 'lib*.so*' -printf '%f\n' | sort
+
+      - name: Upload CrispASR native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crispasr-native-build-log-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/crispasr-configure.log
+            ${{ runner.temp }}/crispasr-build.log
+          if-no-files-found: warn
 
       - name: Set automatic APK version
         run: |
