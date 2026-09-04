@@ -105,7 +105,7 @@ internal class CrispSongSeparatorRuntime private constructor(
         fun open(
             modelFile: File,
             requestedThreads: Int,
-            backend: SongSeparationBackend = SongSeparationBackend.AUTO
+            backend: SongSeparationBackend = SongWorkerRuntime.current().backend
         ): CrispSongSeparatorRuntime {
             require(modelFile.isFile) { "Separator-Modell fehlt: ${modelFile.name}" }
             val diagnosticFile = File(modelFile.parentFile, KIM_DIAGNOSTIC_FILE).also { file ->
