@@ -2,6 +2,7 @@ package de.matthiasennen.transcript.transcription
 
 import de.matthiasennen.transcript.song.SongSeparationBackend
 import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.SongSeparationPerformanceConfiguration
 import de.matthiasennen.transcript.song.TranscriptionMode
 import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
 import de.matthiasennen.transcript.ui.main.WhisperDecoding
@@ -57,13 +58,17 @@ class TranscriptionJobConfigurationTest {
             songSeparationThreads = 6,
             songSeparationBackend = SongSeparationBackend.CPU
         )
+        val expectedPerformance = SongSeparationPerformanceConfiguration(
+            threads = configuration.songSeparationThreads,
+            backend = configuration.songSeparationBackend
+        ).normalized(SongSeparationModel.NATIVE_GGUF)
 
         val restored = TranscriptionJobConfiguration.decode(configuration.encode())
 
         assertEquals(TranscriptionMode.SONG, restored.transcriptionMode)
         assertEquals(SongSeparationModel.NATIVE_GGUF.id, restored.songSeparationModelId)
-        assertEquals(6, restored.songSeparationThreads)
-        assertEquals(SongSeparationBackend.CPU, restored.songSeparationBackend)
+        assertEquals(expectedPerformance.threads, restored.songSeparationThreads)
+        assertEquals(expectedPerformance.backend, restored.songSeparationBackend)
         assertEquals(WhisperVadMode.ON, restored.whisperSettings.vadMode)
     }
 
