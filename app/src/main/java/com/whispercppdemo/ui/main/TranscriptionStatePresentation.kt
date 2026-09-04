@@ -1,36 +1,40 @@
 package de.matthiasennen.transcript.ui.main
 
 import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.TranscriptionModeRuntime
 import de.matthiasennen.transcript.transcription.TranscriptionState
 
 /** Pure mapping between a transcription-service envelope and the Compose render contract. */
 internal fun TranscriptUiState.presentStartingTranscription(
     starting: TranscriptionState.Starting
-): TranscriptUiState = copy(
-    isBusy = true,
-    isTranscribing = true,
-    isCancellationRequested = false,
-    progress = 0f,
-    error = null,
-    status = "Transkription wird im Hintergrund vorbereitet …",
-    statusKind = StatusMessageKind.IMPORTANT,
-    statusEventId = statusEventId + 1L,
-    activityDetail = starting.fileName,
-    pipelineTiming = TranscriptionPipelineTiming(
-        mode = transcriptionMode,
-        voiceIsolationModelLabel = selectedSongSeparationModel.modelLabel.takeIf {
-            transcriptionMode == TranscriptionMode.SONG
-        }
-    ),
-    cannaBotMode = CannaBotMode.WAITING
-)
+): TranscriptUiState {
+    val activeMode = TranscriptionModeRuntime.current
+    return copy(
+        isBusy = true,
+        isTranscribing = true,
+        isCancellationRequested = false,
+        progress = 0f,
+        error = null,
+        status = "Transkription wird im Hintergrund vorbereitet …",
+        statusKind = StatusMessageKind.IMPORTANT,
+        statusEventId = statusEventId + 1L,
+        activityDetail = starting.fileName,
+        pipelineTiming = TranscriptionPipelineTiming(
+            mode = activeMode,
+            voiceIsolationModelLabel = selectedSongSeparationModel.modelLabel.takeIf {
+                activeMode == TranscriptionMode.SONG
+            }
+        ),
+        cannaBotMode = CannaBotMode.WAITING
+    )
+}
 
 internal fun TranscriptUiState.presentRunningTranscription(
     state: TranscriptionState.Running,
     elapsedSeconds: Long
 ): TranscriptUiState {
     val contextualTiming = pipelineTiming.withContext(
-        mode = transcriptionMode,
+        mode = TranscriptionModeRuntime.current,
         voiceIsolationModelLabel = selectedSongSeparationModel.modelLabel
     )
     val phase = transcriptionPipelinePhase(
