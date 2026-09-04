@@ -1,6 +1,8 @@
 package de.matthiasennen.transcript.transcription
 
+import de.matthiasennen.transcript.song.SongSeparationBackend
 import de.matthiasennen.transcript.song.SongSeparationModel
+import de.matthiasennen.transcript.song.SongSeparationPerformanceConfiguration
 import de.matthiasennen.transcript.song.SongSeparationRuntime
 import de.matthiasennen.transcript.song.SongWorkerRuntime
 import de.matthiasennen.transcript.song.TranscriptionMode
@@ -17,7 +19,8 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 
 private const val CONFIGURATION_MAGIC = 0x54524346
-private const val CONFIGURATION_VERSION = 2
+private const val CONFIGURATION_VERSION = 3
+private const val SONG_CONFIGURATION_VERSION = 2
 private const val LEGACY_CONFIGURATION_VERSION = 1
 private const val MAX_CONFIGURATION_BYTES = 1024 * 1024
 
@@ -26,27 +29,40 @@ data class TranscriptionJobConfiguration(
     val language: String,
     val whisperSettings: WhisperSettings,
     val transcriptionMode: TranscriptionMode = TranscriptionModeRuntime.current,
-    val songSeparationModelId: String = SongSeparationRuntime.currentModel.id
+    val songSeparationModelId: String = SongSeparationRuntime.currentModel.id,
+    val songSeparationThreads: Int = SongSeparationRuntime.currentPerformance.threads,
+    val songSeparationBackend: SongSeparationBackend = SongSeparationRuntime.currentPerformance.backend
 ) {
-    fun normalized(): TranscriptionJobConfiguration = copy(
-        modelId = modelId.trim(),
-        language = language.trim().ifBlank { "auto" },
-        whisperSettings = whisperSettings.normalized(),
-        songSeparationModelId = songSeparationModelId.trim().ifBlank {
+    fun normalized(): TranscriptionJobConfiguration {
+        val normalizedModelId = songSeparationModelId.trim().ifBlank {
             SongSeparationModel.BALANCED.id
         }
-    ).also {
-        require(it.modelId.isNotBlank()) { "Whisper-Modell fehlt in der Auftragskonfiguration." }
-        if (it.transcriptionMode == TranscriptionMode.SONG) {
-            require(SongSeparationModel.entries.any { model -> model.id == it.songSeparationModelId }) {
-                "Unbekanntes Modell für die Stimmisolierung."
+        val songModel = SongSeparationModel.fromId(normalizedModelId)
+        val songPerformance = SongSeparationPerformanceConfiguration(
+            threads = songSeparationThreads,
+            backend = songSeparationBackend
+        ).normalized(songModel)
+        return copy(
+            modelId = modelId.trim(),
+            language = language.trim().ifBlank { "auto" },
+            whisperSettings = whisperSettings.normalized(),
+            songSeparationModelId = normalizedModelId,
+            songSeparationThreads = songPerformance.threads,
+            songSeparationBackend = songPerformance.backend
+        ).also {
+            require(it.modelId.isNotBlank()) { "Whisper-Modell fehlt in der Auftragskonfiguration." }
+            if (it.transcriptionMode == TranscriptionMode.SONG) {
+                require(SongSeparationModel.entries.any { model -> model.id == it.songSeparationModelId }) {
+                    "Unbekanntes Modell für die Stimmisolierung."
+                }
             }
+            SongWorkerRuntime.update(
+                mode = it.transcriptionMode,
+                modelId = it.songSeparationModelId,
+                threads = it.songSeparationThreads,
+                backend = it.songSeparationBackend
+            )
         }
-        SongWorkerRuntime.update(
-            mode = it.transcriptionMode,
-            modelId = it.songSeparationModelId,
-            threads = it.whisperSettings.threads
-        )
     }
 
     fun encode(): String {
@@ -60,6 +76,8 @@ data class TranscriptionJobConfiguration(
                 output.writeWhisperSettings(value.whisperSettings)
                 output.writeSizedString(value.transcriptionMode.name)
                 output.writeSizedString(value.songSeparationModelId)
+                output.writeInt(value.songSeparationThreads)
+                output.writeSizedString(value.songSeparationBackend.name)
             }
             buffer.toByteArray()
         }
@@ -80,28 +98,45 @@ data class TranscriptionJobConfiguration(
                     "Unbekannte Transkriptionskonfiguration."
                 }
                 val version = input.readInt()
-                check(version == CONFIGURATION_VERSION || version == LEGACY_CONFIGURATION_VERSION) {
+                check(
+                    version == CONFIGURATION_VERSION ||
+                        version == SONG_CONFIGURATION_VERSION ||
+                        version == LEGACY_CONFIGURATION_VERSION
+                ) {
                     "Veraltete Transkriptionskonfiguration."
                 }
                 val modelId = input.readSizedString()
                 val language = input.readSizedString()
                 val whisperSettings = input.readWhisperSettings()
-                val transcriptionMode = if (version >= CONFIGURATION_VERSION) {
+                val transcriptionMode = if (version >= SONG_CONFIGURATION_VERSION) {
                     input.readEnum<TranscriptionMode>()
                 } else {
                     TranscriptionMode.SPEECH
                 }
-                val songSeparationModelId = if (version >= CONFIGURATION_VERSION) {
+                val songSeparationModelId = if (version >= SONG_CONFIGURATION_VERSION) {
                     input.readSizedString()
                 } else {
                     SongSeparationModel.BALANCED.id
+                }
+                val legacySongThreads = whisperSettings.threads.coerceIn(1, 8)
+                val songSeparationThreads = if (version >= CONFIGURATION_VERSION) {
+                    input.readInt()
+                } else {
+                    legacySongThreads
+                }
+                val songSeparationBackend = if (version >= CONFIGURATION_VERSION) {
+                    input.readEnum<SongSeparationBackend>()
+                } else {
+                    SongSeparationBackend.AUTO
                 }
                 TranscriptionJobConfiguration(
                     modelId = modelId,
                     language = language,
                     whisperSettings = whisperSettings,
                     transcriptionMode = transcriptionMode,
-                    songSeparationModelId = songSeparationModelId
+                    songSeparationModelId = songSeparationModelId,
+                    songSeparationThreads = songSeparationThreads,
+                    songSeparationBackend = songSeparationBackend
                 ).normalized().also {
                     check(input.available() == 0) {
                         "Die Transkriptionskonfiguration enthält unerwartete Daten."
