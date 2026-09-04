@@ -46,6 +46,7 @@ fun SettingsScreen(
     onOpenAiPerformance: () -> Unit,
     onOpenWhisperSettings: () -> Unit,
     onOpenVadSettings: () -> Unit,
+    onOpenSongIsolationSettings: () -> Unit,
     onVadModeChanged: (WhisperVadMode) -> Unit,
     voiceIsolationEnabled: Boolean,
     onVoiceIsolationEnabledChanged: (Boolean) -> Unit,
@@ -212,6 +213,17 @@ fun SettingsScreen(
                     "Isoliert Stimmen aus Musik und erstellt vor der Transkription eine aufbereitete Stimmspur. Wenn zusätzlich VAD aktiv ist, arbeitet VAD anschließend auf dieser isolierten Spur.",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                TextButton(
+                    onClick = onOpenSongIsolationSettings,
+                    modifier = Modifier.align(Alignment.Start),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        "Stimmisolierungs-Leistung",
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                }
                 Text(
                     "Belegter Speicher: ${formatDownloadSize(state.songModelInstallations.sumOf(SongModelInstallation::storedBytes))}",
                     style = MaterialTheme.typography.titleMedium
