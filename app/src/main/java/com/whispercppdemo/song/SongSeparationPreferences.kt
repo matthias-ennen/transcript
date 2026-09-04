@@ -1,13 +1,13 @@
 package de.matthiasennen.transcript.song
 
 import android.content.Context
+import java.io.File
 
 private const val PREFERENCES_NAME = "song_separation_preferences"
 private const val SELECTED_MODEL_KEY = "selected_song_separation_model"
 private const val PERFORMANCE_THREADS_PREFIX = "performance_threads_"
 private const val PERFORMANCE_BACKEND_PREFIX = "performance_backend_"
 
-/** Backend request for the native separator. ONNX separators currently run on CPU. */
 enum class SongSeparationBackend(val label: String) {
     AUTO("Automatisch / Vulkan wenn verfügbar"),
     CPU("CPU"),
@@ -37,8 +37,6 @@ data class SongSeparationPerformanceConfiguration(
 fun defaultSongSeparationPerformance(
     model: SongSeparationModel
 ): SongSeparationPerformanceConfiguration = when (model) {
-    // Keep the existing conservative one-thread behavior as the default. The
-    // advanced settings page deliberately lets the user benchmark higher values.
     SongSeparationModel.QUICK,
     SongSeparationModel.BALANCED -> SongSeparationPerformanceConfiguration(
         threads = 1,
@@ -54,11 +52,6 @@ fun defaultSongSeparationPerformance(
     )
 }
 
-/**
- * Volatile mirror used only while a new immutable worker configuration is created.
- * The encoded TranscriptionJobConfiguration remains the source of truth afterwards,
- * including service/process restarts.
- */
 object SongSeparationRuntime {
     @Volatile
     var currentModel: SongSeparationModel = SongSeparationModel.BALANCED
@@ -76,7 +69,8 @@ object SongSeparationRuntime {
 }
 
 class SongSeparationPreferences(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val applicationContext = context.applicationContext
+    private val preferences = applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
     fun loadSelectedModel(): SongSeparationModel {
         val model = SongSeparationModel.fromId(preferences.getString(SELECTED_MODEL_KEY, null))
@@ -104,6 +98,7 @@ class SongSeparationPreferences(context: Context) {
         model: SongSeparationModel,
         performance: SongSeparationPerformanceConfiguration
     ): SongSeparationPerformanceConfiguration {
+        val previous = loadPerformance(model)
         val normalized = performance.normalized(model)
         preferences.edit()
             .putInt(PERFORMANCE_THREADS_PREFIX + model.id, normalized.threads)
@@ -112,10 +107,12 @@ class SongSeparationPreferences(context: Context) {
         if (SongSeparationRuntime.currentModel == model) {
             SongSeparationRuntime.use(model, normalized)
         }
+        if (previous != normalized) invalidatePreparedSongTracks()
         return normalized
     }
 
     fun resetPerformance(model: SongSeparationModel): SongSeparationPerformanceConfiguration {
+        val previous = loadPerformance(model)
         preferences.edit()
             .remove(PERFORMANCE_THREADS_PREFIX + model.id)
             .remove(PERFORMANCE_BACKEND_PREFIX + model.id)
@@ -124,6 +121,12 @@ class SongSeparationPreferences(context: Context) {
         if (SongSeparationRuntime.currentModel == model) {
             SongSeparationRuntime.use(model, defaults)
         }
+        if (previous != defaults) invalidatePreparedSongTracks()
         return defaults
+    }
+
+    private fun invalidatePreparedSongTracks() {
+        val directory = File(applicationContext.filesDir, "song-prepared")
+        directory.listFiles().orEmpty().forEach { file -> runCatching(file::delete) }
     }
 }
