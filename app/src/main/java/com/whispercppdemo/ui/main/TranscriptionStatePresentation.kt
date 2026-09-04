@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript.ui.main
 
+import de.matthiasennen.transcript.song.TranscriptionMode
 import de.matthiasennen.transcript.transcription.TranscriptionState
 
 /** Pure mapping between a transcription-service envelope and the Compose render contract. */
@@ -15,35 +16,54 @@ internal fun TranscriptUiState.presentStartingTranscription(
     statusKind = StatusMessageKind.IMPORTANT,
     statusEventId = statusEventId + 1L,
     activityDetail = starting.fileName,
+    pipelineTiming = TranscriptionPipelineTiming(
+        mode = transcriptionMode,
+        voiceIsolationModelLabel = selectedSongSeparationModel.modelLabel.takeIf {
+            transcriptionMode == TranscriptionMode.SONG
+        }
+    ),
     cannaBotMode = CannaBotMode.WAITING
 )
 
 internal fun TranscriptUiState.presentRunningTranscription(
     state: TranscriptionState.Running,
     elapsedSeconds: Long
-): TranscriptUiState = copy(
-    isBusy = true,
-    isTranscribing = true,
-    isCancellationRequested = false,
-    progress = state.progress,
-    elapsedSeconds = elapsedSeconds,
-    status = state.status,
-    statusKind = state.statusKind,
-    statusEventId = statusEventId + 1L,
-    activityDetail = state.activityDetail,
-    diagnostics = state.diagnostics,
-    rawWhisperSegments = emptyList(),
-    segments = state.committedSegments,
-    transcriptSectionMinutes = whisperSettings.sectionMinutes.coerceIn(1, 5),
-    segmentOrigins = emptyMap(),
-    transcriptView = TranscriptViewMode.EDITED,
-    detectedLanguage = state.detectedLanguage,
-    completedModel = state.model,
-    transcriptionDurationSeconds = null,
-    vadProcessingSummary = null,
-    error = null,
-    cannaBotMode = CannaBotMode.RUNNING
-)
+): TranscriptUiState {
+    val contextualTiming = pipelineTiming.withContext(
+        mode = transcriptionMode,
+        voiceIsolationModelLabel = selectedSongSeparationModel.modelLabel
+    )
+    val phase = transcriptionPipelinePhase(
+        status = state.status,
+        activityDetail = state.activityDetail,
+        mode = contextualTiming.mode,
+        fallback = contextualTiming.activePhase
+    )
+    return copy(
+        isBusy = true,
+        isTranscribing = true,
+        isCancellationRequested = false,
+        progress = state.progress,
+        elapsedSeconds = elapsedSeconds,
+        status = state.status,
+        statusKind = state.statusKind,
+        statusEventId = statusEventId + 1L,
+        activityDetail = state.activityDetail,
+        diagnostics = state.diagnostics,
+        rawWhisperSegments = emptyList(),
+        segments = state.committedSegments,
+        transcriptSectionMinutes = whisperSettings.sectionMinutes.coerceIn(1, 5),
+        segmentOrigins = emptyMap(),
+        transcriptView = TranscriptViewMode.EDITED,
+        detectedLanguage = state.detectedLanguage,
+        completedModel = state.model,
+        transcriptionDurationSeconds = null,
+        vadProcessingSummary = null,
+        pipelineTiming = contextualTiming.advanceTo(elapsedSeconds, phase),
+        error = null,
+        cannaBotMode = CannaBotMode.RUNNING
+    )
+}
 
 internal data class CompletedTranscriptionPresentation(
     val state: TranscriptUiState,
@@ -90,6 +110,7 @@ internal fun TranscriptUiState.presentCompletedTranscription(
             completedModel = completed.model,
             transcriptionDurationSeconds = completed.transcriptionDurationSeconds,
             vadProcessingSummary = completed.vadSummary,
+            pipelineTiming = pipelineTiming.complete(completed.transcriptionDurationSeconds),
             error = null,
             status = if (completed.segments.isEmpty()) {
                 "Es wurde kein Text erkannt."
@@ -127,6 +148,7 @@ internal fun TranscriptUiState.presentCancelledTranscription(): TranscriptUiStat
     completedModel = null,
     transcriptionDurationSeconds = null,
     vadProcessingSummary = null,
+    pipelineTiming = TranscriptionPipelineTiming(),
     error = null,
     status = "Transkription angehalten · Der Zwischenstand bleibt erhalten.",
     statusKind = StatusMessageKind.COMPLETION,
