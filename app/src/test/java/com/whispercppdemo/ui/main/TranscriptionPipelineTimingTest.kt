@@ -1,6 +1,8 @@
 package de.matthiasennen.transcript.ui.main
 
 import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.TranscriptionModeRuntime
+import de.matthiasennen.transcript.transcription.TranscriptionState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -66,5 +68,26 @@ class TranscriptionPipelineTimingTest {
         assertEquals(21L, timing.whisperSeconds)
         assertEquals(25L, timing.totalSeconds)
         assertEquals("Whisper", timing.bottleneckLabel())
+    }
+
+    @Test
+    fun `starting presentation uses active runtime mode for voice isolation`() {
+        val previousMode = TranscriptionModeRuntime.current
+        try {
+            TranscriptionModeRuntime.current = TranscriptionMode.SONG
+            val presented = TranscriptUiState(
+                transcriptionMode = TranscriptionMode.SPEECH
+            ).presentStartingTranscription(
+                TranscriptionState.Starting("song.mp3")
+            )
+
+            assertEquals(TranscriptionMode.SONG, presented.pipelineTiming.mode)
+            assertEquals(
+                presented.selectedSongSeparationModel.modelLabel,
+                presented.pipelineTiming.voiceIsolationModelLabel
+            )
+        } finally {
+            TranscriptionModeRuntime.current = previousMode
+        }
     }
 }
