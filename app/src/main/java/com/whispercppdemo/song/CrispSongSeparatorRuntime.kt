@@ -17,6 +17,7 @@ internal class CrispSongSeparatorRuntime private constructor(
     private var sessionPtr: Long,
     private val diagnosticFile: File,
     private val threads: Int,
+    private val requestedBackend: SongSeparationBackend,
     private val gpuRequested: Boolean
 ) : Closeable {
     private var firstInferenceCompleted = false
@@ -38,14 +39,14 @@ internal class CrispSongSeparatorRuntime private constructor(
                 stage = "native-before-first-inference",
                 diagnosticFile = diagnosticFile,
                 tensorBytes = tensorBytes,
-                details = "threads=$threads | gpuRequested=$gpuRequested"
+                details = diagnosticDetails()
             )
         }
         logMemorySnapshot(
             stage = "native-window-$windowNumber-start",
             diagnosticFile = diagnosticFile,
             tensorBytes = tensorBytes,
-            details = "frames=$framesPerChannel | threads=$threads | gpuRequested=$gpuRequested"
+            details = "frames=$framesPerChannel | ${diagnosticDetails()}"
         )
 
         val startedAtMs = SystemClock.elapsedRealtime()
@@ -61,7 +62,7 @@ internal class CrispSongSeparatorRuntime private constructor(
             stage = "native-window-$windowNumber-finished",
             diagnosticFile = diagnosticFile,
             tensorBytes = output.size.toLong() * Float.SIZE_BYTES,
-            details = "elapsedMs=$elapsedMs | frames=${output.size / 2} | threads=$threads | gpuRequested=$gpuRequested"
+            details = "elapsedMs=$elapsedMs | frames=${output.size / 2} | ${diagnosticDetails()}"
         )
         if (isFirstInference) {
             firstInferenceCompleted = true
@@ -69,7 +70,7 @@ internal class CrispSongSeparatorRuntime private constructor(
                 stage = "native-after-first-inference",
                 diagnosticFile = diagnosticFile,
                 tensorBytes = output.size.toLong() * Float.SIZE_BYTES,
-                details = "elapsedMs=$elapsedMs | threads=$threads | gpuRequested=$gpuRequested"
+                details = "elapsedMs=$elapsedMs | ${diagnosticDetails()}"
             )
         }
         return output
@@ -85,7 +86,7 @@ internal class CrispSongSeparatorRuntime private constructor(
                     stage = "native-summary",
                     diagnosticFile = diagnosticFile,
                     details = "windows=$inferenceCount | totalInferenceMs=$totalInferenceMs | " +
-                        "averageWindowMs=$averageMs | threads=$threads | gpuRequested=$gpuRequested"
+                        "averageWindowMs=$averageMs | ${diagnosticDetails()}"
                 )
             }
             runCatching { CrispSongSeparatorNative.close(ptr) }
@@ -93,12 +94,19 @@ internal class CrispSongSeparatorRuntime private constructor(
         }
     }
 
+    private fun diagnosticDetails(): String =
+        "threads=$threads | backendRequested=${requestedBackend.name} | gpuRequested=$gpuRequested"
+
     companion object {
         private const val KIM_DIAGNOSTIC_FILE = "kim-memory-diagnostics.log"
         private const val MEMORY_TAG = "KimVocal2NativeMemory"
         private const val REQUIRED_SAMPLE_RATE = 44_100
 
-        fun open(modelFile: File, requestedThreads: Int): CrispSongSeparatorRuntime {
+        fun open(
+            modelFile: File,
+            requestedThreads: Int,
+            backend: SongSeparationBackend = SongSeparationBackend.AUTO
+        ): CrispSongSeparatorRuntime {
             require(modelFile.isFile) { "Separator-Modell fehlt: ${modelFile.name}" }
             val diagnosticFile = File(modelFile.parentFile, KIM_DIAGNOSTIC_FILE).also { file ->
                 runCatching {
@@ -108,11 +116,11 @@ internal class CrispSongSeparatorRuntime private constructor(
             }
             logMemorySnapshot("native-before-session-load", diagnosticFile)
 
-            // OpenBLAS remains the CPU fallback. The pinned CrispASR runtime is
-            // now also built with Vulkan; on a usable Android GPU it selects the
-            // fused Mel-Band-RoFormer graph, otherwise it falls back to CPU.
-            val threads = requestedThreads.coerceIn(1, 4)
-            val preferGpu = true
+            // CPU can now be forced for reproducible comparisons. AUTO and VULKAN
+            // request the Vulkan-capable CrispASR path; CrispASR may still fall back
+            // when the device cannot provide a usable Vulkan implementation.
+            val threads = requestedThreads.coerceIn(1, 8)
+            val preferGpu = backend != SongSeparationBackend.CPU
             val ptr = CrispSongSeparatorNative.open(
                 modelPath = modelFile.absolutePath,
                 threads = threads,
@@ -129,12 +137,13 @@ internal class CrispSongSeparatorRuntime private constructor(
                 logMemorySnapshot(
                     stage = "native-after-session-load",
                     diagnosticFile = diagnosticFile,
-                    details = "threads=$threads | gpuRequested=$preferGpu"
+                    details = "threads=$threads | backendRequested=${backend.name} | gpuRequested=$preferGpu"
                 )
                 return CrispSongSeparatorRuntime(
                     sessionPtr = ptr,
                     diagnosticFile = diagnosticFile,
                     threads = threads,
+                    requestedBackend = backend,
                     gpuRequested = preferGpu
                 )
             } catch (failure: Throwable) {
