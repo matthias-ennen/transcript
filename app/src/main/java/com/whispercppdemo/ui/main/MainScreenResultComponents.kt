@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
 import de.matthiasennen.transcript.download.DownloadStorageIssue
+import de.matthiasennen.transcript.song.TranscriptionMode
 
 @Composable
 internal fun CannaBotQuestionDialog(
@@ -279,6 +280,9 @@ internal fun TranscriptResultSummary(state: TranscriptUiState) {
                 Text("Erkannte Sprache: ${whisperLanguageDisplayName(it)}")
             }
             state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
+
+            TranscriptionPipelineResult(state)
+
             state.vadProcessingSummary?.let { summary ->
                 val mode = when (summary.requestedMode) {
                     WhisperVadMode.OFF -> "Aus"
@@ -307,4 +311,73 @@ internal fun TranscriptResultSummary(state: TranscriptUiState) {
             Text("Textabschnitte: ${state.segments.count { it.text.isNotBlank() }}")
         }
     }
+}
+
+@Composable
+private fun TranscriptionPipelineResult(state: TranscriptUiState) {
+    val timing = state.pipelineTiming
+    Text(
+        "Transkriptions-Pipeline",
+        modifier = Modifier.padding(top = 6.dp),
+        style = MaterialTheme.typography.labelLarge
+    )
+    if (timing.totalSeconds <= 0L) {
+        Text(
+            "Für dieses gespeicherte Ergebnis sind keine Pipeline-Laufzeiten verfügbar.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        return
+    }
+
+    if (timing.mode == TranscriptionMode.SONG) {
+        Text("Audioaufbereitung · in Stimmisolierung enthalten")
+        Text(
+            "Stimmisolierung · ${timing.voiceIsolationModelLabel ?: "Modell unbekannt"} · " +
+                formatClock(timing.voiceIsolationSeconds)
+        )
+    } else {
+        Text("Audioaufbereitung · ${formatClock(timing.audioPreparationSeconds)}")
+        Text("Stimmisolierung · Aus")
+    }
+
+    val vadSummary = state.vadProcessingSummary
+    when (vadSummary?.requestedMode) {
+        WhisperVadMode.OFF -> Text("VAD / Segmentierung · Aus")
+        WhisperVadMode.AUTOMATIC -> Text(
+            "VAD / Segmentierung · ${formatClock(timing.vadSeconds)} · Automatik · " +
+                if (vadSummary.usedVad) "verwendet" else "vollständiges Audio"
+        )
+        WhisperVadMode.ON -> Text("VAD / Segmentierung · Ein · in Whisper integriert")
+        null -> Text("VAD / Segmentierung · keine Messdaten")
+    }
+
+    Text(
+        "Whisper · ${state.completedModel?.modelLabel ?: "Modell unbekannt"} · " +
+            formatClock(timing.whisperSeconds)
+    )
+    Text("Gesamt · ${formatClock(timing.totalSeconds)}", style = MaterialTheme.typography.labelLarge)
+
+    val audioDurationMs = vadSummary?.originalDurationMs
+        ?.takeIf { it > 0L }
+        ?: state.audioDurationMs.takeIf { it > 0L }
+    if (audioDurationMs != null) {
+        Text(
+            "Geschwindigkeit",
+            modifier = Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.labelLarge
+        )
+        Text(
+            "Audio: ${formatClock(audioDurationMs / 1_000L)} · " +
+                "Verarbeitung: ${formatClock(timing.totalSeconds)}"
+        )
+        Text("Echtzeitfaktor: ${formatRealtimeFactor(timing.totalSeconds, audioDurationMs)}")
+        timing.bottleneckLabel()?.let { Text("Engpass: $it") }
+    }
+}
+
+private fun formatRealtimeFactor(totalSeconds: Long, audioDurationMs: Long): String {
+    if (totalSeconds <= 0L || audioDurationMs <= 0L) return "–"
+    val factor = totalSeconds * 1_000.0 / audioDurationMs.toDouble()
+    val tenths = kotlin.math.round(factor * 10.0).toLong().coerceAtLeast(0L)
+    return "${tenths / 10},${tenths % 10}×"
 }
