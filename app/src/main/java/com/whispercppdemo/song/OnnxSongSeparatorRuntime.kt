@@ -93,7 +93,10 @@ internal class OnnxSongSeparatorRuntime private constructor(
             require(modelFile.isFile) { "Separator-Modell fehlt: ${modelFile.name}" }
 
             val lowMemoryMode = modelFile.name == KIM_MODEL_FILE
-            val safeThreads = if (lowMemoryMode) 1 else intraOpThreads.coerceIn(1, 8)
+            // The low-memory allocator switches remain active for the large Kim
+            // model. Thread count is now explicitly user-tunable; its default
+            // remains one thread so existing Android stability is preserved.
+            val safeThreads = intraOpThreads.coerceIn(1, 8)
             val diagnosticFile = if (lowMemoryMode) {
                 File(modelFile.parentFile, KIM_DIAGNOSTIC_FILE).also { file ->
                     runCatching {
