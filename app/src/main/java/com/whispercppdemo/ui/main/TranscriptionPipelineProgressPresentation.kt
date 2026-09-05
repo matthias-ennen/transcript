@@ -23,12 +23,14 @@ internal fun transcriptionPipelineProgressPresentation(
     val phaseIndex = phases.indexOf(phase).takeIf { it >= 0 } ?: 0
     val safeProgress = running.progress.coerceIn(0f, 1f)
     val percent = (safeProgress * 100f).roundToInt().coerceIn(0, 100)
-    val phaseLabel = phase.displayLabel(mode, vadMode)
+    val phaseLabel = phase.displayLabel(vadMode)
     val unitDetail = when (phase) {
         TranscriptionPipelinePhase.VOICE_ISOLATION ->
-            running.activityDetail.takeIf { it.isNotBlank() }
-                ?: running.status.takeIf { it.isNotBlank() }
-                ?: "Gesamte Stimmspur wird erzeugt."
+            listOf(running.status, running.activityDetail)
+                .filter(String::isNotBlank)
+                .distinct()
+                .joinToString(" · ")
+                .ifBlank { "Gesamte Stimmspur wird erzeugt." }
         TranscriptionPipelinePhase.AUDIO_PREPARATION,
         TranscriptionPipelinePhase.VAD,
         TranscriptionPipelinePhase.WHISPER -> sectionProgressDetail(running, safeProgress)
@@ -54,7 +56,6 @@ internal fun activePipelinePhases(
 }
 
 private fun TranscriptionPipelinePhase.displayLabel(
-    mode: TranscriptionMode,
     vadMode: WhisperVadMode
 ): String = when (this) {
     TranscriptionPipelinePhase.VOICE_ISOLATION -> "Stimmisolierung"
