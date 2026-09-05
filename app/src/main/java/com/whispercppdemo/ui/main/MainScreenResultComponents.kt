@@ -319,6 +319,31 @@ internal fun TranscriptResultSummary(state: TranscriptUiState) {
                 )
                 TranscriptionPipelineResult(state)
                 AdvancedVadDiagnostics(state)
+                OutlinedButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(
+                            android.content.Context.CLIPBOARD_SERVICE
+                        ) as? android.content.ClipboardManager
+                        clipboard?.setPrimaryClip(
+                            android.content.ClipData.newPlainText(
+                                "Transkriptionsdiagnose",
+                                buildTranscriptionDiagnosticsReport(state)
+                            )
+                        )
+                        if (clipboard != null) {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Diagnose kopiert.",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Text("Diagnose kopieren")
+                }
             }
         }
     }
