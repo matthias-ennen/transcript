@@ -8,14 +8,23 @@ import org.junit.Test
 
 class TranscriptionPipelineTimingTest {
     @Test
-    fun `song preparation is attributed to voice isolation`() {
+    fun `song voice isolation and audio preparation are separate phases`() {
         assertEquals(
             TranscriptionPipelinePhase.VOICE_ISOLATION,
             transcriptionPipelinePhase(
-                status = "Audio wird vorbereitet · Abschnitt 1 von 1",
-                activityDetail = "Dekodierung auf PCM 16 kHz Mono; Whisper ist noch nicht geladen.",
+                status = "Stimmisolierung · Kim Vocal 2 · Native/GGUF",
+                activityDetail = "Fenster 23 von 60 · 38 %",
                 mode = TranscriptionMode.SONG,
                 fallback = null
+            )
+        )
+        assertEquals(
+            TranscriptionPipelinePhase.AUDIO_PREPARATION,
+            transcriptionPipelinePhase(
+                status = "Audio wird vorbereitet · Abschnitt 2 von 6",
+                activityDetail = "Dekodierung auf PCM 16 kHz Mono; Whisper ist noch nicht geladen.",
+                mode = TranscriptionMode.SONG,
+                fallback = TranscriptionPipelinePhase.VOICE_ISOLATION
             )
         )
     }
@@ -53,6 +62,48 @@ class TranscriptionPipelineTimingTest {
                 fallback = null
             )
         )
+    }
+
+    @Test
+    fun `song automatic vad exposes four user visible pipeline steps`() {
+        assertEquals(
+            listOf(
+                TranscriptionPipelinePhase.VOICE_ISOLATION,
+                TranscriptionPipelinePhase.AUDIO_PREPARATION,
+                TranscriptionPipelinePhase.VAD,
+                TranscriptionPipelinePhase.WHISPER
+            ),
+            activePipelinePhases(TranscriptionMode.SONG, WhisperVadMode.AUTOMATIC)
+        )
+    }
+
+    @Test
+    fun `section progress presentation keeps phase and subsection visible`() {
+        val running = TranscriptionState.Running(
+            fileName = "six-minutes.mp3",
+            model = WhisperModel.BASE,
+            progress = 2.5f / 6f,
+            sectionNumber = 3,
+            sectionCount = 6,
+            startedAtEpochMs = 1L,
+            elapsedSeconds = 10L,
+            status = "Abschnitt 3 von 6 wird transkribiert · 50 %",
+            activityDetail = "Whisper verarbeitet 02:00 bis 03:00.",
+            diagnostics = emptyList(),
+            committedSegments = emptyList(),
+            detectedLanguage = null
+        )
+
+        val presented = transcriptionPipelineProgressPresentation(
+            running = running,
+            mode = TranscriptionMode.SONG,
+            vadMode = WhisperVadMode.AUTOMATIC,
+            phase = TranscriptionPipelinePhase.WHISPER
+        )
+
+        assertEquals(4, presented.phaseNumber)
+        assertEquals(4, presented.phaseCount)
+        assertEquals("Abschnitt 3 von 6 · 50 %", presented.detailLine)
     }
 
     @Test
