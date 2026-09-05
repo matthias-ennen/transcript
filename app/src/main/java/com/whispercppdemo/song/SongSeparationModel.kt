@@ -84,7 +84,7 @@ enum class SongSeparationModel(
     NATIVE_GGUF(
         id = "kim-vocal-2-native",
         qualityLabel = "Native/GGUF",
-        modelLabel = "Kim Vocal 2 · Mel-Band RoFormer",
+        modelLabel = "Kim Vocal 2 · Native/GGUF",
         description = "Native F16-GGUF-Ausführung derselben Kim-Vocal-2-Gewichte über CrispASR; für Android ARM64 speicherschonender als der große ONNX-Export.",
         downloadSizeLabel = "ca. 457 MB",
         artifacts = listOf(
@@ -102,7 +102,7 @@ enum class SongSeparationModel(
     HIGH_QUALITY(
         id = "kim-vocal-2",
         qualityLabel = "Hohe Qualität",
-        modelLabel = "Kim Vocal 2 · Mel-Band RoFormer",
+        modelLabel = "Kim Vocal 2 · ONNX",
         description = "Großes Qualitätsmodell für bestmögliche Stimmisolierung bei höherem Ressourcenbedarf.",
         downloadSizeLabel = "747 MB",
         artifacts = listOf(
