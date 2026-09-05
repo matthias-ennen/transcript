@@ -1,7 +1,7 @@
 package de.matthiasennen.transcript.transcription
 
+import android.app.ApplicationExitInfo
 import de.matthiasennen.transcript.ui.main.WhisperSettings
-
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
@@ -151,6 +151,47 @@ class WorkerWatchdogTest {
         assertFalse(
             shouldRetryUnresponsiveWorkerOnCpu(
                 heartbeat = vulkanInference,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = true
+            )
+        )
+    }
+
+    @Test
+    fun `native vulkan crash retries once on cpu`() {
+        val vulkanLoading = heartbeat(
+            heartbeatAtEpochMs = now - 1_000L,
+            lastProgressAtEpochMs = now - 1_000L
+        ).copy(phase = "model_loading", backend = "VULKAN_REQUESTED")
+
+        assertTrue(
+            shouldRetryCrashedWorkerOnCpu(
+                exit = WorkerExit(ApplicationExitInfo.REASON_CRASH_NATIVE, null),
+                heartbeat = vulkanLoading,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false
+            )
+        )
+        assertFalse(
+            shouldRetryCrashedWorkerOnCpu(
+                exit = WorkerExit(ApplicationExitInfo.REASON_CRASH_NATIVE, null),
+                heartbeat = vulkanLoading.copy(backend = "CPU"),
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false
+            )
+        )
+        assertFalse(
+            shouldRetryCrashedWorkerOnCpu(
+                exit = WorkerExit(ApplicationExitInfo.REASON_LOW_MEMORY, null),
+                heartbeat = vulkanLoading,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false
+            )
+        )
+        assertFalse(
+            shouldRetryCrashedWorkerOnCpu(
+                exit = WorkerExit(ApplicationExitInfo.REASON_CRASH_NATIVE, null),
+                heartbeat = vulkanLoading,
                 expectedJobId = "job-large-model",
                 cpuRetryAlreadyUsed = true
             )
