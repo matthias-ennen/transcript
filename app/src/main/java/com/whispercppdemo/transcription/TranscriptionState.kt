@@ -80,6 +80,23 @@ internal fun shouldRetryUnresponsiveWorkerOnCpu(
     return gpuBackend && heartbeat.phase in setOf("model_loading", "inference")
 }
 
+internal fun shouldRetryCrashedWorkerOnCpu(
+    exit: WorkerExit,
+    heartbeat: WorkerHeartbeat?,
+    expectedJobId: String,
+    cpuRetryAlreadyUsed: Boolean
+): Boolean {
+    if (
+        exit.reason != ApplicationExitInfo.REASON_CRASH_NATIVE &&
+        exit.reason != ApplicationExitInfo.REASON_CRASH
+    ) return false
+    return shouldRetryUnresponsiveWorkerOnCpu(
+        heartbeat = heartbeat,
+        expectedJobId = expectedJobId,
+        cpuRetryAlreadyUsed = cpuRetryAlreadyUsed
+    )
+}
+
 internal fun canResumeAfterWorkerExit(
     checkpoint: TranscriptionCheckpoint?,
     preparedAudioUsable: Boolean,
@@ -170,38 +187,65 @@ object TranscriptionCoordinator {
                             )
                         } == true
                     } == true
-                    val kimDiagnostics = if (
-                        exit.reason == ApplicationExitInfo.REASON_LOW_MEMORY
-                    ) {
-                        exportKimMemoryDiagnosticsToDownloads(context)
-                    } else {
-                        null
-                    }
-                    val failureMessage = buildString {
-                        append(workerExitMessage(exit))
-                        kimDiagnostics?.let { exported ->
-                            append(" Kim-Speicherdiagnose gespeichert unter ")
-                            append(exported.relativePath)
-                            append('.')
+                    val cpuRetryAlreadyUsed = checkpoint != null && runCatching {
+                        TranscriptionControlReceiver.cpuRetryFile(context).readText()
+                    }.getOrDefault("") == checkpoint.request.jobId
+                    val retryOnCpu = checkpoint != null && shouldRetryCrashedWorkerOnCpu(
+                        exit = exit,
+                        heartbeat = heartbeat,
+                        expectedJobId = checkpoint.request.jobId,
+                        cpuRetryAlreadyUsed = cpuRetryAlreadyUsed
+                    )
+                    if (retryOnCpu) {
+                        if (watchdogRecoveryRequestedForStart != envelope.workerStartedAtEpochMs) {
+                            watchdogRecoveryRequestedForStart = envelope.workerStartedAtEpochMs
+                            Log.w(
+                                WATCHDOG_LOG_TAG,
+                                "Native GPU worker crash detected; CPU recovery requested: " +
+                                    "workerStart=${envelope.workerStartedAtEpochMs} " +
+                                    "phase=${heartbeat?.phase} backend=${heartbeat?.backend} " +
+                                    "reason=${exit.reason}"
+                            )
+                            context.sendBroadcast(
+                                Intent(context, TranscriptionControlReceiver::class.java).apply {
+                                    action = ACTION_RECOVER_TRANSCRIPTION_ON_CPU
+                                }
+                            )
                         }
-                    }
-                    val failure = TranscriptionState.Failed(
-                        fileName = envelope.state.fileName(),
-                        message = failureMessage,
-                        canResume = canResumeAfterWorkerExit(
-                            checkpoint = checkpoint,
-                            preparedAudioUsable = preparedAudioUsable,
+                    } else {
+                        val kimDiagnostics = if (
+                            exit.reason == ApplicationExitInfo.REASON_LOW_MEMORY
+                        ) {
+                            exportKimMemoryDiagnosticsToDownloads(context)
+                        } else {
+                            null
+                        }
+                        val failureMessage = buildString {
+                            append(workerExitMessage(exit))
+                            kimDiagnostics?.let { exported ->
+                                append(" Kim-Speicherdiagnose gespeichert unter ")
+                                append(exported.relativePath)
+                                append('.')
+                            }
+                        }
+                        val failure = TranscriptionState.Failed(
+                            fileName = envelope.state.fileName(),
+                            message = failureMessage,
+                            canResume = canResumeAfterWorkerExit(
+                                checkpoint = checkpoint,
+                                preparedAudioUsable = preparedAudioUsable,
+                                committedSegments = running?.committedSegments.orEmpty()
+                            ),
                             committedSegments = running?.committedSegments.orEmpty()
-                        ),
-                        committedSegments = running?.committedSegments.orEmpty()
-                    )
-                    val failedEnvelope = envelope.copy(
-                        state = failure,
-                        updatedAtEpochMs = System.currentTimeMillis()
-                    )
-                    stateStore(context).write(failedEnvelope)
-                    observedEnvelope = failedEnvelope
-                    mutableState.value = failure
+                        )
+                        val failedEnvelope = envelope.copy(
+                            state = failure,
+                            updatedAtEpochMs = System.currentTimeMillis()
+                        )
+                        stateStore(context).write(failedEnvelope)
+                        observedEnvelope = failedEnvelope
+                        mutableState.value = failure
+                    }
                 } else {
                     when (
                         evaluateWorkerWatchdog(
