@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
 import de.matthiasennen.transcript.download.DownloadStorageIssue
 import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.transcription.VadProcessingSummary
 
 @Composable
 internal fun CannaBotQuestionDialog(
