@@ -95,12 +95,10 @@ internal fun transcriptionPipelinePhase(
         "transkrib" in statusText || "whisper" in statusText ->
             TranscriptionPipelinePhase.WHISPER
         "vad" in statusText -> TranscriptionPipelinePhase.VAD
+        "stimmisolierung" in statusText || "separator" in detailText ->
+            TranscriptionPipelinePhase.VOICE_ISOLATION
         "audio wird vorbereitet" in statusText || "dekodierung" in detailText ->
-            if (mode == TranscriptionMode.SONG) {
-                TranscriptionPipelinePhase.VOICE_ISOLATION
-            } else {
-                TranscriptionPipelinePhase.AUDIO_PREPARATION
-            }
+            TranscriptionPipelinePhase.AUDIO_PREPARATION
         fallback != null -> fallback
         mode == TranscriptionMode.SONG -> TranscriptionPipelinePhase.VOICE_ISOLATION
         else -> TranscriptionPipelinePhase.AUDIO_PREPARATION
