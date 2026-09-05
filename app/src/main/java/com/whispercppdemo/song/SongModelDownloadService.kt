@@ -104,9 +104,9 @@ class SongModelDownloadService : Service() {
         model.artifacts.forEach { artifact ->
             val destination = File(directory, artifact.fileName)
             val partial = File(directory, "${artifact.fileName}.part")
-            val alreadyComplete = destination.isFile && destination.length() == artifact.expectedBytes
+            val alreadyComplete = artifact.isInstalledFile(destination)
             if (alreadyComplete) {
-                completedBytes += artifact.expectedBytes
+                completedBytes += destination.length()
                 return@forEach
             }
 
@@ -119,39 +119,50 @@ class SongModelDownloadService : Service() {
                     sha256 = artifact.sha256,
                     destination = destination,
                     partial = partial,
-                    failureLabel = "Stimmisolierungsmodell"
+                    failureLabel = "Stimmisolierungsmodell",
+                    minimumBytes = artifact.minimumBytes,
+                    exactBytes = artifact.exactBytes
                 ),
                 onProgress = { progress: DownloadProgress ->
-                    val aggregate = (baseBytes + progress.downloadedBytes)
-                        .coerceAtMost(model.totalDownloadBytes)
+                    val total = maxOf(model.totalDownloadBytes, baseBytes + progress.totalBytes)
+                    val aggregate = (baseBytes + progress.downloadedBytes).coerceAtMost(total)
                     SongModelDownloadCoordinator.update(
                         SongModelDownloadState.Running(
                             model = model,
                             downloadedBytes = aggregate,
-                            totalBytes = model.totalDownloadBytes,
+                            totalBytes = total,
                             resumed = progress.resumed
                         )
                     )
                     update(
                         model,
                         aggregate,
-                        model.totalDownloadBytes,
+                        total,
                         if (progress.resumed) "Download wird fortgesetzt …" else "Download läuft …"
                     )
                 },
                 onVerifying = { bytes ->
-                    val aggregate = (baseBytes + bytes).coerceAtMost(model.totalDownloadBytes)
+                    val aggregate = baseBytes + bytes
+                    val total = maxOf(model.totalDownloadBytes, aggregate)
                     SongModelDownloadCoordinator.update(
                         SongModelDownloadState.Verifying(
                             model = model,
                             downloadedBytes = aggregate,
-                            totalBytes = model.totalDownloadBytes
+                            totalBytes = total
                         )
                     )
-                    update(model, aggregate, model.totalDownloadBytes, "Download wird geprüft …")
+                    update(model, aggregate, total, "Download wird geprüft …")
                 }
             )
-            completedBytes += artifact.expectedBytes
+
+            check(artifact.isInstalledFile(destination)) {
+                if (artifact.fileName.endsWith(".gguf", ignoreCase = true)) {
+                    "Das heruntergeladene Stimmisolierungsmodell ist keine gültige GGUF-Datei."
+                } else {
+                    "Das heruntergeladene Stimmisolierungsmodell ist unvollständig."
+                }
+            }
+            completedBytes += destination.length()
         }
     }
 

@@ -83,8 +83,7 @@ internal class ModelInventory(filesDirectory: File) {
             songPartialFile(model, artifact.fileName).takeIf(File::isFile)?.length() ?: 0L
         }
         val installed = model.artifacts.all { artifact ->
-            val file = songFile(model, artifact.fileName)
-            file.isFile && file.length() == artifact.expectedBytes
+            artifact.isInstalledFile(songFile(model, artifact.fileName))
         }
         SongModelInstallation(
             model = model,

@@ -28,12 +28,13 @@ internal data class SpleeterTensorPlan(
 
 /**
  * Keeps the selected separator loaded while bounded song chunks are processed.
- * Closing this engine releases every ONNX session before Whisper is loaded.
+ * Closing this engine releases every separator runtime before Whisper is loaded.
  */
 internal class SongSeparatorEngine private constructor(
     val model: SongSeparationModel,
-    private val primary: OnnxSongSeparatorRuntime,
-    private val secondary: OnnxSongSeparatorRuntime?
+    private val primary: OnnxSongSeparatorRuntime?,
+    private val secondary: OnnxSongSeparatorRuntime?,
+    private val nativeRuntime: CrispSongSeparatorRuntime?
 ) : Closeable {
 
     fun separateVocals(interleavedStereo44100: FloatArray): FloatArray {
@@ -41,11 +42,15 @@ internal class SongSeparatorEngine private constructor(
         return when (model) {
             SongSeparationModel.QUICK -> separateUmx(interleavedStereo44100)
             SongSeparationModel.BALANCED -> separateSpleeter(interleavedStereo44100)
+            SongSeparationModel.NATIVE_GGUF -> checkNotNull(nativeRuntime) {
+                "Native Kim-Runtime fehlt."
+            }.separateVocals(interleavedStereo44100)
             SongSeparationModel.HIGH_QUALITY -> separateKim(interleavedStereo44100)
         }
     }
 
     private fun separateUmx(audio: FloatArray): FloatArray {
+        val runtime = requirePrimary()
         val spectrogram = SongStft.forward(
             interleavedStereo = audio,
             fftSize = UMX_FFT,
@@ -62,7 +67,7 @@ internal class SongSeparatorEngine private constructor(
                 }
             }
         }
-        val estimate = primary.runFloat(
+        val estimate = runtime.runFloat(
             input = input,
             shape = longArrayOf(1, 2, spectrogram.bins.toLong(), spectrogram.frames.toLong())
         )
@@ -78,6 +83,7 @@ internal class SongSeparatorEngine private constructor(
     }
 
     private fun separateSpleeter(audio: FloatArray): FloatArray {
+        val vocalsRuntime = requirePrimary()
         val accompaniment = checkNotNull(secondary) { "Spleeter-Accompaniment-Modell fehlt." }
         val spectrogram = SongStft.forward(
             interleavedStereo = audio,
@@ -87,7 +93,7 @@ internal class SongSeparatorEngine private constructor(
         )
         val paddedFrames = roundUp(spectrogram.frames, SPLEETER_FRAME_BLOCK)
         val requiredSplits = paddedFrames / SPLEETER_FRAME_BLOCK
-        val vocalsPlan = spleeterTensorPlan(primary.inputShape(), requiredSplits)
+        val vocalsPlan = spleeterTensorPlan(vocalsRuntime.inputShape(), requiredSplits)
         val accompanimentPlan = spleeterTensorPlan(accompaniment.inputShape(), requiredSplits)
         check(
             vocalsPlan.layout == accompanimentPlan.layout &&
@@ -113,7 +119,7 @@ internal class SongSeparatorEngine private constructor(
                 }
             }
         }
-        val vocalsSpec = primary.runFloat(input, plan.shape)
+        val vocalsSpec = vocalsRuntime.runFloat(input, plan.shape)
         val accompanimentSpec = accompaniment.runFloat(input, plan.shape)
         check(vocalsSpec.size == input.size && accompanimentSpec.size == input.size) {
             "Spleeter lieferte eine unerwartete Tensorgröße."
@@ -144,6 +150,7 @@ internal class SongSeparatorEngine private constructor(
     }
 
     private fun separateKim(audio: FloatArray): FloatArray {
+        val runtime = requirePrimary()
         require(audio.size / 2 == KIM_SAMPLES_PER_CHANNEL) {
             "Kim Vocal 2 benötigt exakt $KIM_SAMPLES_PER_CHANNEL Samples je Kanal pro Chunk."
         }
@@ -169,7 +176,7 @@ internal class SongSeparatorEngine private constructor(
                 }
             }
         }
-        val mask = primary.runFloat(
+        val mask = runtime.runFloat(
             input = input,
             shape = longArrayOf(1, packedBins.toLong(), KIM_FRAMES.toLong(), 2)
         )
@@ -194,9 +201,13 @@ internal class SongSeparatorEngine private constructor(
         return SongStft.inverse(spectrogram.copy(real = real, imaginary = imaginary))
     }
 
+    private fun requirePrimary(): OnnxSongSeparatorRuntime =
+        checkNotNull(primary) { "ONNX-Separator-Runtime fehlt für ${model.modelLabel}." }
+
     override fun close() {
+        runCatching { nativeRuntime?.close() }
         runCatching { secondary?.close() }
-        primary.close()
+        primary?.close()
     }
 
     companion object {
@@ -204,7 +215,7 @@ internal class SongSeparatorEngine private constructor(
             val directory = File(modelDirectory, model.id)
             model.artifacts.forEach { artifact ->
                 val file = File(directory, artifact.fileName)
-                require(file.isFile && file.length() == artifact.expectedBytes) {
+                require(artifact.isInstalledFile(file)) {
                     "${model.modelLabel} ist nicht vollständig installiert."
                 }
             }
@@ -212,7 +223,8 @@ internal class SongSeparatorEngine private constructor(
                 SongSeparationModel.QUICK -> SongSeparatorEngine(
                     model = model,
                     primary = OnnxSongSeparatorRuntime.open(File(directory, "umxhq-vocals.onnx"), threads),
-                    secondary = null
+                    secondary = null,
+                    nativeRuntime = null
                 )
                 SongSeparationModel.BALANCED -> {
                     val vocals = OnnxSongSeparatorRuntime.open(File(directory, "vocals.fp16.onnx"), threads)
@@ -223,17 +235,28 @@ internal class SongSeparatorEngine private constructor(
                             secondary = OnnxSongSeparatorRuntime.open(
                                 File(directory, "accompaniment.fp16.onnx"),
                                 threads
-                            )
+                            ),
+                            nativeRuntime = null
                         )
                     } catch (failure: Throwable) {
                         vocals.close()
                         throw failure
                     }
                 }
+                SongSeparationModel.NATIVE_GGUF -> SongSeparatorEngine(
+                    model = model,
+                    primary = null,
+                    secondary = null,
+                    nativeRuntime = CrispSongSeparatorRuntime.open(
+                        File(directory, "mel-band-roformer-vocals-f16.gguf"),
+                        threads
+                    )
+                )
                 SongSeparationModel.HIGH_QUALITY -> SongSeparatorEngine(
                     model = model,
                     primary = OnnxSongSeparatorRuntime.open(File(directory, "kim-vocal-2.onnx"), threads),
-                    secondary = null
+                    secondary = null,
+                    nativeRuntime = null
                 )
             }
         }

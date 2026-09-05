@@ -65,6 +65,10 @@ endif()
 # step also routes Vulkan 1.1 feature queries through Vulkan-Hpp's dynamic
 # dispatcher because Android API 26 does not link that symbol directly.
 if(ANDROID_ABI STREQUAL "arm64-v8a" AND TARGET ggml-vulkan)
+    # Keep llama.cpp's loadable Vulkan backend discoverable by ggml's
+    # libggml-vulkan-*.so variant scan while avoiding the generic
+    # libggml-vulkan.so SONAME used by the independently pinned CrispASR runtime.
+    set_target_properties(ggml-vulkan PROPERTIES OUTPUT_NAME ggml-vulkan-transcript-llm)
     target_include_directories(ggml-vulkan PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/host-vulkan-headers")
 endif()
