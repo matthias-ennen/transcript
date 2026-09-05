@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ fun SettingsScreen(
     onRefreshDeviceStorage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var modelToDelete by remember { mutableStateOf<WhisperModel?>(null) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var aiModelToDelete by remember { mutableStateOf<AiModel?>(null) }
@@ -76,6 +78,9 @@ fun SettingsScreen(
     var confirmDeleteVad by remember { mutableStateOf(false) }
     var songModelToDelete by remember { mutableStateOf<SongSeparationModel?>(null) }
     var confirmDeleteAllSongModels by remember { mutableStateOf(false) }
+    var showAdvancedDiagnostics by remember(context) {
+        mutableStateOf(ResultDisplayPreferences.load(context))
+    }
     val totalBytes = state.modelInstallations.sumOf(ModelInstallation::storedBytes)
 
     LaunchedEffect(Unit) {
@@ -97,6 +102,29 @@ fun SettingsScreen(
             enabled = !state.isBusy && !state.isRecording,
             onChooseFolder = onChooseRecordingFolder
         )
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Anzeige & Diagnose", style = MaterialTheme.typography.titleLarge)
+                AiSettingSwitch(
+                    title = "Erweiterte Transkriptionsdiagnose",
+                    description = "Zeigt in der Ergebniskachel zusätzlich Geräteangaben, Pipeline-Zeiten, Geschwindigkeit, Engpass und ausführliche VAD-Messwerte. Für Tests und Fehlersuche.",
+                    checked = showAdvancedDiagnostics,
+                    enabled = true,
+                    onCheckedChange = { enabled ->
+                        showAdvancedDiagnostics = enabled
+                        ResultDisplayPreferences.save(context, enabled)
+                    }
+                )
+                Text(
+                    "Ausgeschaltet bleibt die Ergebniskachel kurz und anwenderfreundlich.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
