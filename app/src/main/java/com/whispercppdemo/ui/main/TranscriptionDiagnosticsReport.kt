@@ -50,14 +50,14 @@ internal fun buildTranscriptionDiagnosticsReport(state: TranscriptUiState): Stri
         appendLine("Für dieses gespeicherte Ergebnis sind keine Pipeline-Laufzeiten verfügbar.")
     } else {
         if (timing.mode == TranscriptionMode.SONG) {
-            appendLine("Audioaufbereitung · in Stimmisolierung enthalten")
             appendLine(
                 "Stimmisolierung · ${timing.voiceIsolationModelLabel ?: "Modell unbekannt"} · " +
                     diagnosticsClock(timing.voiceIsolationSeconds)
             )
-        } else {
             appendLine("Audioaufbereitung · ${diagnosticsClock(timing.audioPreparationSeconds)}")
+        } else {
             appendLine("Stimmisolierung · Aus")
+            appendLine("Audioaufbereitung · ${diagnosticsClock(timing.audioPreparationSeconds)}")
         }
 
         when (vadSummary?.requestedMode) {
