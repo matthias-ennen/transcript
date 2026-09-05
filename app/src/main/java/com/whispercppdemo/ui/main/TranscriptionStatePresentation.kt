@@ -15,7 +15,7 @@ internal fun TranscriptUiState.presentStartingTranscription(
         isCancellationRequested = false,
         progress = 0f,
         error = null,
-        status = "Transkription wird im Hintergrund vorbereitet …",
+        status = "Transkriptions-Pipeline wird vorbereitet …",
         statusKind = StatusMessageKind.IMPORTANT,
         statusEventId = statusEventId + 1L,
         activityDetail = starting.fileName,
@@ -43,16 +43,22 @@ internal fun TranscriptUiState.presentRunningTranscription(
         mode = contextualTiming.mode,
         fallback = contextualTiming.activePhase
     )
+    val pipelineProgress = transcriptionPipelineProgressPresentation(
+        running = state,
+        mode = contextualTiming.mode,
+        vadMode = whisperSettings.vadMode,
+        phase = phase
+    )
     return copy(
         isBusy = true,
         isTranscribing = true,
         isCancellationRequested = false,
-        progress = state.progress,
+        progress = pipelineProgress.phaseProgress,
         elapsedSeconds = elapsedSeconds,
-        status = state.status,
+        status = pipelineProgress.statusLine,
         statusKind = state.statusKind,
         statusEventId = statusEventId + 1L,
-        activityDetail = state.activityDetail,
+        activityDetail = pipelineProgress.detailLine,
         diagnostics = state.diagnostics,
         rawWhisperSegments = emptyList(),
         segments = state.committedSegments,
