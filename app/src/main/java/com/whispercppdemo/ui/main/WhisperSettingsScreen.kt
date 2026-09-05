@@ -60,13 +60,15 @@ fun WhisperSettingsScreen(
                 "Rechenbackend",
                 settings.backend,
                 listOf(
-                    WhisperComputeBackend.AUTO to "Automatisch",
+                    WhisperComputeBackend.AUTO to "Automatisch – stabil",
                     WhisperComputeBackend.CPU to "Nur CPU",
-                    WhisperComputeBackend.VULKAN to "GPU/Vulkan bevorzugen"
+                    WhisperComputeBackend.VULKAN to "GPU/Vulkan testen"
                 )
             ) { onSettingsChanged(settings.copy(backend = it)) }
             Text(
-                "Automatisch und Vulkan erlauben die vorhandene GPU-Unterstützung; ist sie nicht nutzbar, verwendet whisper.cpp die CPU.",
+                "Automatisch verwendet den geräteübergreifend stabilen CPU-Pfad. " +
+                    "GPU/Vulkan ist optional; falls der native GPU-Pfad auf einem Gerät abstürzt, " +
+                    "setzt Transcript den Lauf einmal automatisch auf CPU fort.",
                 style = MaterialTheme.typography.bodySmall
             )
             ResetButton { onResetGroup(WhisperSettingsGroup.COMPUTE) }
