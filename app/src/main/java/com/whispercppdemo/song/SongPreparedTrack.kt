@@ -21,15 +21,13 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 
 internal const val SONG_PREPARED_SAMPLE_RATE = 16_000
-internal const val SONG_SEPARATOR_STEP_MS = 8_000L
-internal const val SONG_SEPARATOR_WINDOW_MS = 11_000L
 
 private const val SONG_PREPARED_SAMPLES_PER_MS = SONG_PREPARED_SAMPLE_RATE / 1_000L
 private const val WAV_HEADER_BYTES = 44L
 private const val WAV_BYTES_PER_SAMPLE = 2L
 private const val WAVEFORM_BAR_COUNT = 180
 private const val PREPARED_MANIFEST_MAGIC = 0x53564754
-private const val PREPARED_MANIFEST_VERSION = 1
+private const val PREPARED_MANIFEST_VERSION = 2
 private const val PREPARED_STORAGE_RESERVE_BYTES = 32L * 1024L * 1024L
 private const val MAX_STORED_WAVEFORM_BARS = 1_000
 
@@ -158,11 +156,11 @@ internal fun preparedSongSampleRange(
 }
 
 /**
- * Creates one continuous 16-kHz mono vocal WAV for the complete song. The
- * separator works in overlapping 11-second windows, but finalized samples are
- * written only once on the absolute original timeline. Consequently the WAV is
- * exactly as long as the source duration and can be shared by playback and all
- * later Whisper section slices.
+ * Creates one continuous 16-kHz mono vocal WAV for the complete song. Each
+ * separator keeps its own overlap/window contract: the legacy ONNX path remains
+ * at 11 s / 8 s, while Kim Native/GGUF uses its trained 8 s window with a 6 s
+ * step (25 % overlap). Finalized samples are written only once on the absolute
+ * original timeline, so the WAV stays exactly as long as the source duration.
  */
 internal fun ensurePreparedSongTrack(
     context: Context,
@@ -210,8 +208,9 @@ internal fun ensurePreparedSongTrack(
 
     val temporaryTarget = File(directory, "${target.name}.part").also(File::delete)
     val modelDirectory = File(context.filesDir, "song-models")
-    val starts = separatorWindowStarts(0L, audioInfo.durationMs)
-    val fullWindowSamples = (SONG_SEPARATOR_WINDOW_MS * SONG_PREPARED_SAMPLES_PER_MS).toInt()
+    val separatorTiming = songSeparatorTiming(configuration.model)
+    val starts = separatorWindowStarts(0L, audioInfo.durationMs, configuration.model)
+    val fullWindowSamples = (separatorTiming.windowMs * SONG_PREPARED_SAMPLES_PER_MS).toInt()
     val mixed = FloatArray(fullWindowSamples)
     val weights = FloatArray(fullWindowSamples)
     val waveform = SongPreparedWaveform(sampleCount)
@@ -234,7 +233,7 @@ internal fun ensurePreparedSongTrack(
                 starts.forEachIndexed { index, absoluteStartMs ->
                     if (shouldCancel()) throw CancellationException("Stimmisolierung abgebrochen.")
                     val absoluteEndMs = minOf(
-                        absoluteStartMs + SONG_SEPARATOR_WINDOW_MS,
+                        absoluteStartMs + separatorTiming.windowMs,
                         audioInfo.durationMs
                     )
                     val decoded = songStage("Audio für die Stimmisolierung konnte nicht dekodiert werden") {
@@ -249,7 +248,7 @@ internal fun ensurePreparedSongTrack(
                     val actualFrames44100 = decoded.interleavedStereo44100.size / 2
                     val padded = padStereoForSeparator(
                         source = decoded.interleavedStereo44100,
-                        wantedFrames = KIM_SAMPLES_PER_CHANNEL
+                        wantedFrames = separatorTiming.inputFrames44100
                     )
                     val vocals = songStage(
                         "Stimmisolierung mit ${configuration.model.modelLabel} fehlgeschlagen"

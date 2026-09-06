@@ -26,6 +26,35 @@ set(
     )
 
 find_library(LOG_LIB log)
+find_library(DL_LIB dl)
+
+# Native source-separation shim. It deliberately does not link CrispASR at build
+# time: the pinned Android runtime is staged into jniLibs by CI and dlopen'd only
+# when the Native/GGUF Kim variant is selected.
+add_library(
+    transcript_song_native
+    SHARED
+    ${CMAKE_SOURCE_DIR}/song_native_jni.c
+)
+target_compile_options(transcript_song_native PRIVATE -O3 -fvisibility=hidden -ffunction-sections -fdata-sections)
+target_link_options(transcript_song_native PRIVATE -Wl,--gc-sections)
+target_link_libraries(transcript_song_native ${LOG_LIB} ${DL_LIB})
+
+# CrispASR's pinned Android binary depends on the NDK OpenMP shared runtime.
+# Register that runtime as an imported dependency of our native shim so AGP
+# packages libomp.so into the APK without checking a toolchain binary into git.
+if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+    file(GLOB NDK_LIBOMP_CANDIDATES
+        "${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/*/lib/clang/*/lib/linux/aarch64/libomp.so")
+    list(LENGTH NDK_LIBOMP_CANDIDATES NDK_LIBOMP_COUNT)
+    if (NDK_LIBOMP_COUNT EQUAL 0)
+        message(FATAL_ERROR "Android NDK libomp.so was not found for CrispASR")
+    endif()
+    list(GET NDK_LIBOMP_CANDIDATES 0 NDK_LIBOMP_PATH)
+    add_library(crispasr_omp SHARED IMPORTED)
+    set_target_properties(crispasr_omp PROPERTIES IMPORTED_LOCATION "${NDK_LIBOMP_PATH}")
+    target_link_libraries(transcript_song_native crispasr_omp)
+endif()
 
 include(FetchContent)
 
@@ -73,6 +102,20 @@ function(build_library target_name)
         FetchContent_Declare(ggml SOURCE_DIR ${WHISPER_LIB_DIR}/ggml)
     endif()
     FetchContent_MakeAvailable(ggml)
+
+    # CrispASR ships its independently pinned GGML runtime under the upstream
+    # libggml*.so names. Keep Whisper's copy under private SONAMEs so both
+    # runtimes can coexist in one APK without Gradle merge conflicts or loader
+    # ambiguity. The Whisper targets link against these renamed outputs directly.
+    if (TARGET ggml-base)
+        set_target_properties(ggml-base PROPERTIES OUTPUT_NAME whisper-ggml-base)
+    endif()
+    if (TARGET ggml-cpu)
+        set_target_properties(ggml-cpu PROPERTIES OUTPUT_NAME whisper-ggml-cpu)
+    endif()
+    if (TARGET ggml)
+        set_target_properties(ggml PROPERTIES OUTPUT_NAME whisper-ggml)
+    endif()
     if (TARGET ggml-vulkan)
         # llama.cpp packages its independently pinned Vulkan backend under the
         # upstream name. Give Whisper's copy a unique SONAME so both runtimes

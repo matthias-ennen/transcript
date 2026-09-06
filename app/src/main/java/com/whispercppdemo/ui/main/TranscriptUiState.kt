@@ -120,6 +120,7 @@ data class TranscriptUiState(
     val completedModel: WhisperModel? = null,
     val transcriptionDurationSeconds: Long? = null,
     val vadProcessingSummary: VadProcessingSummary? = null,
+    val pipelineTiming: TranscriptionPipelineTiming = TranscriptionPipelineTiming(),
     val error: String? = null,
     val cannaBotMode: CannaBotMode = CannaBotMode.IDLE,
     val cannaBotCue: CannaBotCue = CannaBotCue.NONE,

@@ -81,6 +81,13 @@ class WhisperSettingsTest {
     }
 
     @Test
+    fun `automatic backend uses portable cpu path`() {
+        assertFalse(WhisperSettings(backend = WhisperComputeBackend.AUTO).toNativeConfiguration().useGpu)
+        assertFalse(WhisperSettings(backend = WhisperComputeBackend.CPU).toNativeConfiguration().useGpu)
+        assertTrue(WhisperSettings(backend = WhisperComputeBackend.VULKAN).toNativeConfiguration().useGpu)
+    }
+
+    @Test
     fun `native configuration reflects decoding and backend`() {
         val configuration = WhisperSettings(
             backend = WhisperComputeBackend.CPU,

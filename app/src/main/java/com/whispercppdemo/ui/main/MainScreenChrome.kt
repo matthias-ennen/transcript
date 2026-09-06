@@ -33,11 +33,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /** Navigation and top-bar composition for the app shell. */
-internal enum class AppPage { MAIN, SETTINGS, AI_DIAGNOSTICS, AI_PERFORMANCE, WHISPER_SETTINGS, VAD_SETTINGS, ABOUT }
+internal enum class AppPage {
+    MAIN,
+    SETTINGS,
+    AI_DIAGNOSTICS,
+    AI_PERFORMANCE,
+    WHISPER_SETTINGS,
+    VAD_SETTINGS,
+    SONG_ISOLATION_SETTINGS,
+    ABOUT
+}
 
 private val advancedSettingsPages = listOf(
     AppPage.WHISPER_SETTINGS,
     AppPage.VAD_SETTINGS,
+    AppPage.SONG_ISOLATION_SETTINGS,
     AppPage.AI_PERFORMANCE,
     AppPage.AI_DIAGNOSTICS
 )
@@ -94,7 +104,8 @@ internal fun TranscriptTopBar(
                 page != AppPage.AI_DIAGNOSTICS &&
                 page != AppPage.AI_PERFORMANCE &&
                 page != AppPage.WHISPER_SETTINGS &&
-                page != AppPage.VAD_SETTINGS
+                page != AppPage.VAD_SETTINGS &&
+                page != AppPage.SONG_ISOLATION_SETTINGS
             ) {
                 IconButton(onClick = { onNavigate(AppPage.MAIN) }) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
@@ -127,7 +138,7 @@ internal fun TranscriptTopBar(
                     }
                 }
                 AppPage.AI_DIAGNOSTICS, AppPage.AI_PERFORMANCE, AppPage.WHISPER_SETTINGS,
-                AppPage.VAD_SETTINGS -> {
+                AppPage.VAD_SETTINGS, AppPage.SONG_ISOLATION_SETTINGS -> {
                     OutlinedButton(
                         onClick = { onNavigate(AppPage.SETTINGS) },
                         modifier = Modifier.padding(end = 8.dp).height(40.dp),
@@ -181,5 +192,6 @@ private val AppPage.title: String
         AppPage.AI_PERFORMANCE -> "KI-Leistung und Hardware"
         AppPage.WHISPER_SETTINGS -> "Whisper-Einstellungen"
         AppPage.VAD_SETTINGS -> "VAD-Einstellungen"
+        AppPage.SONG_ISOLATION_SETTINGS -> "Stimmisolierungs-Leistung"
         AppPage.ABOUT -> "Über die App"
     }

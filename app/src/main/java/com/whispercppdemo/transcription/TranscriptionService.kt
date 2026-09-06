@@ -26,6 +26,10 @@ import de.matthiasennen.transcript.media.decodeAudioChunk
 import de.matthiasennen.transcript.media.inspectAudioTrack
 import de.matthiasennen.transcript.media.CachedWaveform
 import de.matthiasennen.transcript.media.WaveformCache
+import de.matthiasennen.transcript.song.SongPlaybackSourceRuntime
+import de.matthiasennen.transcript.song.SongWorkerRuntime
+import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.song.separatorWindowStarts
 import de.matthiasennen.transcript.ui.main.WhisperModel
 import de.matthiasennen.transcript.ui.main.StatusMessageKind
 import de.matthiasennen.transcript.ui.main.WhisperComputeBackend
@@ -327,12 +331,9 @@ class TranscriptionService : Service() {
                     latestCheckpoint = checkpoint
                 } catch (throwable: Throwable) {
                     if (throwable is CancellationException || stopRequested.get()) throw throwable
-                    if (!cpuRetryUsed && shouldRetryOnCpu(throwable) &&
-                        nativeConfiguration.useGpu
-                    ) {
+                    if (!cpuRetryUsed && shouldRetryOnCpu(throwable) && nativeConfiguration.useGpu) {
                         cpuRetryUsed = true
-                        TranscriptionControlReceiver.cpuRetryFile(this)
-                            .writeText(effectiveRequest.jobId)
+                        TranscriptionControlReceiver.cpuRetryFile(this).writeText(effectiveRequest.jobId)
                         addDiagnostic("GPU/Vulkan-Fehler erkannt; derselbe Abschnitt wird einmal auf CPU wiederholt.")
                         activeWhisperContext?.release()
                         activeWhisperContext = WhisperContext.createContextFromFile(
@@ -376,10 +377,6 @@ class TranscriptionService : Service() {
                 transcriptionDurationSeconds = elapsedSeconds,
                 vadSummary = activeVadSummary
             )
-            // The local correction model can require several additional GB.
-            // Release Whisper before announcing completion so the ViewModel can
-            // safely start automatic AI post-processing without both models
-            // overlapping in memory.
             markWorkerProgress("model_release", sectionCount)
             val completedWhisperContext = activeWhisperContext
             activeWhisperContext = null
@@ -461,21 +458,95 @@ class TranscriptionService : Service() {
         val waveform = PreparedWaveformAccumulator(durationMs).apply {
             existing?.waveformPeaks?.let(::restore)
         }
+        val songConfiguration = SongWorkerRuntime.current()
+        val songMode = songConfiguration.mode == TranscriptionMode.SONG
+
         sections.drop(reusable.size).forEachIndexed { relativeIndex, section ->
             ensureContinues()
             val index = reusable.size + relativeIndex
             val sectionNumber = sectionOffset + index + 1
-            markWorkerProgress("decoding", sectionNumber)
-            publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint, 0f,
-                "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
-                "Dekodierung auf PCM 16 kHz Mono; Whisper ist noch nicht geladen.")
-            val chunk = decodeAudioChunk(this, uri, section.decodeStartMs, section.decodeEndMs,
-                stopRequested::get, onDecoderRestart = { stall ->
+            val preparedSongAlreadyAvailable = songMode &&
+                SongPlaybackSourceRuntime.preparedFor(uri) != null
+            val separatorWindows = if (songMode && !preparedSongAlreadyAvailable) {
+                separatorWindowStarts(0L, durationMs, songConfiguration.model)
+            } else {
+                emptyList()
+            }
+
+            if (songMode && !preparedSongAlreadyAvailable) {
+                markWorkerProgress("voice_isolation", 0)
+                publishRunning(
+                    request = request,
+                    model = model,
+                    section = section,
+                    sectionNumber = sectionNumber,
+                    sectionCount = totalSectionCount,
+                    checkpoint = checkpoint,
+                    progressWithinSection = 0f,
+                    status = "Stimmisolierung · ${songConfiguration.model.modelLabel}",
+                    detail = "Fenster 0 von ${separatorWindows.size} · 0 %",
+                    phaseProgressOverride = 0f
+                )
+            } else {
+                markWorkerProgress("decoding", sectionNumber)
+                publishRunning(
+                    request,
+                    model,
+                    section,
+                    sectionNumber,
+                    totalSectionCount,
+                    checkpoint,
+                    0f,
+                    "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
+                    "Dekodierung auf PCM 16 kHz Mono; Whisper ist noch nicht geladen."
+                )
+            }
+
+            val chunk = decodeAudioChunk(
+                this,
+                uri,
+                section.decodeStartMs,
+                section.decodeEndMs,
+                stopRequested::get,
+                onDecoderRestart = { stall ->
                     addDiagnostic("Decoder-Stillstand; kontrollierter Neustart. ${stall.message}")
-                }) { progress ->
-                publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint,
-                    progress, "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
-                    "Nur ein PCM-Abschnitt befindet sich im Arbeitsspeicher.")
+                }
+            ) { progress ->
+                if (songMode && !preparedSongAlreadyAvailable) {
+                    val safeProgress = progress.coerceIn(0f, 1f)
+                    val completedWindows = if (separatorWindows.isEmpty() || safeProgress <= 0f) {
+                        0
+                    } else {
+                        kotlin.math.ceil(safeProgress * separatorWindows.size)
+                            .toInt()
+                            .coerceIn(1, separatorWindows.size)
+                    }
+                    publishRunning(
+                        request = request,
+                        model = model,
+                        section = section,
+                        sectionNumber = sectionNumber,
+                        sectionCount = totalSectionCount,
+                        checkpoint = checkpoint,
+                        progressWithinSection = 0f,
+                        status = "Stimmisolierung · ${songConfiguration.model.modelLabel}",
+                        detail = "Fenster $completedWindows von ${separatorWindows.size} · " +
+                            "${(safeProgress * 100f).toInt().coerceIn(0, 100)} %",
+                        phaseProgressOverride = safeProgress
+                    )
+                } else {
+                    publishRunning(
+                        request,
+                        model,
+                        section,
+                        sectionNumber,
+                        totalSectionCount,
+                        checkpoint,
+                        progress,
+                        "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
+                        "Nur ein PCM-Abschnitt befindet sich im Arbeitsspeicher."
+                    )
+                }
             }
             ensureContinues()
             addDiagnostic(
@@ -491,12 +562,39 @@ class TranscriptionService : Service() {
             val stored = preparedAudioStore.writeSection(index, chunk.samples)
             prepared += PreparedAudioSection(index, section, stored.first, stored.second)
             preparedAudioStore.writeManifest(
-                PreparedAudioManifest(requestKey, durationMs, sectionDurationMs, false,
-                    prepared.toList(), waveform.normalized())
+                PreparedAudioManifest(
+                    requestKey,
+                    durationMs,
+                    sectionDurationMs,
+                    false,
+                    prepared.toList(),
+                    waveform.normalized()
+                )
             )
+
+            if (songMode && !preparedSongAlreadyAvailable) {
+                markWorkerProgress("decoding", sectionNumber)
+                publishRunning(
+                    request,
+                    model,
+                    section,
+                    sectionNumber,
+                    totalSectionCount,
+                    checkpoint,
+                    1f,
+                    "Audio wird vorbereitet · Abschnitt $sectionNumber von $totalSectionCount",
+                    "Stimmspur ist vollständig; PCM-Abschnitt $sectionNumber wurde gespeichert."
+                )
+            }
         }
-        return PreparedAudioManifest(requestKey, durationMs, sectionDurationMs, true,
-            prepared.toList(), waveform.normalized()).also {
+        return PreparedAudioManifest(
+            requestKey,
+            durationMs,
+            sectionDurationMs,
+            true,
+            prepared.toList(),
+            waveform.normalized()
+        ).also {
             preparedAudioStore.writeManifest(it)
             cachePreparedWaveform(uri, it)
             addDiagnostic("Audio vollständig vorbereitet; Decoder-Ressourcen sind freigegeben.")
@@ -508,8 +606,10 @@ class TranscriptionService : Service() {
             contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
         }.getOrNull() ?: -1L
         val cache = WaveformCache(File(cacheDir, "waveforms"))
-        cache.write(cache.key(uri.toString(), manifest.durationMs, length),
-            CachedWaveform(manifest.waveformPeaks, manifest.durationMs))
+        cache.write(
+            cache.key(uri.toString(), manifest.durationMs, length),
+            CachedWaveform(manifest.waveformPeaks, manifest.durationMs)
+        )
     }
 
     private suspend fun transcribePreparedSection(
@@ -527,14 +627,34 @@ class TranscriptionService : Service() {
         } else request.language
         val vadModelPath = activeVadModelPath
         val result = runCatching {
-            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint,
-                samples, language, whisperSettings, vadModelPath)
+            transcribeChunk(
+                request,
+                model,
+                section,
+                sectionNumber,
+                sectionCount,
+                checkpoint,
+                samples,
+                language,
+                whisperSettings,
+                vadModelPath
+            )
         }.recoverCatching { throwable ->
             if (vadModelPath == null || throwable is CancellationException || stopRequested.get()) throw throwable
             activeVadModelPath = null
             addDiagnostic("VAD-Fehler: Abschnitt $sectionNumber wird einmal ohne VAD wiederholt.")
-            transcribeChunk(request, model, section, sectionNumber, sectionCount, checkpoint,
-                samples, language, whisperSettings, null)
+            transcribeChunk(
+                request,
+                model,
+                section,
+                sectionNumber,
+                sectionCount,
+                checkpoint,
+                samples,
+                language,
+                whisperSettings,
+                null
+            )
         }.getOrThrow()
         ensureContinues()
         val absoluteSegments = selectAbsoluteSegments(result.segments, section, checkpoint.durationMs)
@@ -546,9 +666,17 @@ class TranscriptionService : Service() {
             segments = mergeCommittedSegments(checkpoint.segments, absoluteSegments)
         )
         checkpointStore.write(updated)
-        publishRunning(request, model, section, sectionNumber, sectionCount, updated, 1f,
+        publishRunning(
+            request,
+            model,
+            section,
+            sectionNumber,
+            sectionCount,
+            updated,
+            1f,
             "Abschnitt $sectionNumber von $sectionCount abgeschlossen und gesichert",
-            "Nächste Position: ${formatClock(updated.nextStartMs / 1_000L)}.")
+            "Nächste Position: ${formatClock(updated.nextStartMs / 1_000L)}."
+        )
         return updated
     }
 
@@ -564,28 +692,28 @@ class TranscriptionService : Service() {
         settings: WhisperSettings,
         vadModelPath: String?
     ) = checkNotNull(activeWhisperContext).transcribeSegments(
-            data = samples,
-            language = language,
-            configuration = settings.toNativeConfiguration(vadModelPath),
-            shouldCancel = stopRequested::get
-        ) { nativePercent ->
-            publishRunning(
-                request,
-                model,
-                section,
-                sectionNumber,
-                sectionCount,
-                checkpoint,
-                progressWithinSection = 0.15f + nativePercent / 100f * 0.85f,
-                status = "Abschnitt $sectionNumber von $sectionCount wird transkribiert · $nativePercent %",
-                detail = if (vadModelPath != null) {
-                    "Silero VAD filtert klare Pausen; Whisper verarbeitet anschließend den Sprachbereich."
-                } else {
-                    "Whisper verarbeitet ${formatClock(section.mainStartMs / 1_000L)} bis " +
-                        "${formatClock(section.mainEndMs / 1_000L)}."
-                }
-            )
-        }
+        data = samples,
+        language = language,
+        configuration = settings.toNativeConfiguration(vadModelPath),
+        shouldCancel = stopRequested::get
+    ) { nativePercent ->
+        publishRunning(
+            request,
+            model,
+            section,
+            sectionNumber,
+            sectionCount,
+            checkpoint,
+            progressWithinSection = 0.15f + nativePercent / 100f * 0.85f,
+            status = "Abschnitt $sectionNumber von $sectionCount wird transkribiert · $nativePercent %",
+            detail = if (vadModelPath != null) {
+                "Silero VAD filtert klare Pausen; Whisper verarbeitet anschließend den Sprachbereich."
+            } else {
+                "Whisper verarbeitet ${formatClock(section.mainStartMs / 1_000L)} bis " +
+                    "${formatClock(section.mainEndMs / 1_000L)}."
+            }
+        )
+    }
 
     private suspend fun resolveVadModelPath(
         request: TranscriptionRequest,
@@ -644,9 +772,17 @@ class TranscriptionService : Service() {
                 val section = prepared.section
                 val sectionNumber = sectionOffset + index + 1
                 markWorkerProgress("vad", sectionNumber)
-                publishRunning(request, model, section, sectionNumber, totalSectionCount, checkpoint,
-                    0f, "VAD-Automatik analysiert Abschnitt ${index + 1} von ${preparedSections.size}",
-                    "Silero liest den vorbereiteten PCM-Abschnitt; es findet keine zweite Dekodierung statt.")
+                publishRunning(
+                    request,
+                    model,
+                    section,
+                    sectionNumber,
+                    totalSectionCount,
+                    checkpoint,
+                    0f,
+                    "VAD-Automatik analysiert Abschnitt ${index + 1} von ${preparedSections.size}",
+                    "Silero liest den vorbereiteten PCM-Abschnitt; es findet keine zweite Dekodierung statt."
+                )
                 val samples = preparedAudioStore.readSection(prepared)
                 ensureContinues()
                 val speechSegments = vadContext.detectSegments(
@@ -663,6 +799,17 @@ class TranscriptionService : Service() {
                     segments = speechSegments,
                     chunkSampleCount = samples.size
                 )
+                publishRunning(
+                    request,
+                    model,
+                    section,
+                    sectionNumber,
+                    totalSectionCount,
+                    checkpoint,
+                    1f,
+                    "VAD-Automatik analysiert Abschnitt ${index + 1} von ${preparedSections.size}",
+                    "Silero-Analyse für Abschnitt ${index + 1} abgeschlossen."
+                )
             }
             analyzer.decide()
         } catch (cancellation: CancellationException) {
@@ -678,11 +825,18 @@ class TranscriptionService : Service() {
                 "Silero-Analyse ist fehlgeschlagen; Whisper verarbeitet das vollständige Audio."
             )
             preparedSections.lastOrNull()?.section?.let { finalSection ->
-                publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
-                    checkpoint, 1f,
+                publishRunning(
+                    request,
+                    model,
+                    finalSection,
+                    totalSectionCount,
+                    totalSectionCount,
+                    checkpoint,
+                    1f,
                     "VAD-Automatik: Whisper arbeitet ohne VAD",
                     "Silero-Analyse war nicht zuverlässig; der vollständige Ton bleibt erhalten.",
-                    StatusMessageKind.IMPORTANT)
+                    StatusMessageKind.IMPORTANT
+                )
             }
             return null
         } finally {
@@ -702,18 +856,36 @@ class TranscriptionService : Service() {
             val status = "VAD-Automatik aktiviert · ${decision.silencePercent} % Pause erkannt"
             addDiagnostic("VAD-Automatik: VAD wird verwendet ($summary; ${decision.reason}).")
             preparedSections.lastOrNull()?.section?.let { finalSection ->
-                publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
-                    checkpoint, 1f, status,
-                    "$summary · ${decision.reason}.", StatusMessageKind.IMPORTANT)
+                publishRunning(
+                    request,
+                    model,
+                    finalSection,
+                    totalSectionCount,
+                    totalSectionCount,
+                    checkpoint,
+                    1f,
+                    status,
+                    "$summary · ${decision.reason}.",
+                    StatusMessageKind.IMPORTANT
+                )
             }
             updateNotification(status, 0, true)
             return installedModelPath
         }
         addDiagnostic("VAD-Automatik: ohne VAD ($summary; ${decision.reason}).")
         preparedSections.lastOrNull()?.section?.let { finalSection ->
-            publishRunning(request, model, finalSection, totalSectionCount, totalSectionCount,
-                checkpoint, 1f, "VAD-Automatik: Whisper verarbeitet das vollständige Audio",
-                "$summary · ${decision.reason}.", StatusMessageKind.IMPORTANT)
+            publishRunning(
+                request,
+                model,
+                finalSection,
+                totalSectionCount,
+                totalSectionCount,
+                checkpoint,
+                1f,
+                "VAD-Automatik: Whisper verarbeitet das vollständige Audio",
+                "$summary · ${decision.reason}.",
+                StatusMessageKind.IMPORTANT
+            )
         }
         updateNotification("VAD-Automatik: Whisper arbeitet ohne VAD", 0, true)
         return null
@@ -729,16 +901,18 @@ class TranscriptionService : Service() {
         progressWithinSection: Float,
         status: String,
         detail: String,
-        statusKind: StatusMessageKind = StatusMessageKind.PROGRESS
+        statusKind: StatusMessageKind = StatusMessageKind.PROGRESS,
+        phaseProgressOverride: Float? = null
     ) {
         recordWorkerProgress()
         val now = SystemClock.elapsedRealtime()
-        val boundary = progressWithinSection <= 0f || progressWithinSection >= 1f
-        val uiSignature = "$sectionNumber|${(progressWithinSection * 200f).toInt()}|$status"
-        if (!uiUpdateThrottle.shouldPublish(now, uiSignature, force = boundary)) return
         val completedMs = section.mainStartMs +
             (section.mainDurationMs * progressWithinSection.coerceIn(0f, 1f)).toLong()
-        val progress = (completedMs.toFloat() / checkpoint.durationMs.toFloat()).coerceIn(0f, 1f)
+        val sectionProgress = (completedMs.toFloat() / checkpoint.durationMs.toFloat()).coerceIn(0f, 1f)
+        val progress = phaseProgressOverride?.coerceIn(0f, 1f) ?: sectionProgress
+        val boundary = progress <= 0f || progress >= 1f
+        val uiSignature = "$sectionNumber|${(progress * 200f).toInt()}|$status|$detail"
+        if (!uiUpdateThrottle.shouldPublish(now, uiSignature, force = boundary)) return
         publishState(
             TranscriptionState.Running(
                 fileName = request.fileName,
@@ -794,7 +968,10 @@ class TranscriptionService : Service() {
         heartbeatScheduler?.shutdownNow()
         heartbeatScheduler = Executors.newSingleThreadScheduledExecutor().also { scheduler ->
             scheduler.scheduleAtFixedRate(
-                { runCatching(::writeHeartbeat) }, 0L, 2L, TimeUnit.SECONDS
+                { runCatching(::writeHeartbeat) },
+                0L,
+                2L,
+                TimeUnit.SECONDS
             )
         }
     }
@@ -920,18 +1097,13 @@ class TranscriptionService : Service() {
         if (mayPublish) {
             runCatching {
                 getSystemService(NotificationManager::class.java).notify(
-                    if (isCompletion) {
-                        TRANSCRIPTION_COMPLETION_NOTIFICATION_ID
-                    } else {
-                        TRANSCRIPTION_NOTIFICATION_ID
-                    },
+                    if (isCompletion) TRANSCRIPTION_COMPLETION_NOTIFICATION_ID
+                    else TRANSCRIPTION_NOTIFICATION_ID,
                     notification
                 )
             }.onSuccess {
                 if (isCompletion) {
-                    preferences.edit()
-                        .putString(LAST_COMPLETED_JOB_ID, completionJobId)
-                        .apply()
+                    preferences.edit().putString(LAST_COMPLETED_JOB_ID, completionJobId).apply()
                 }
             }
         }
@@ -1060,15 +1232,14 @@ private fun userFacingError(
     if (unusableAudio != null) return unusableAudio.message.orEmpty()
     return when (throwable) {
         is AudioDecoderOutputOverflowException ->
-            "Der Audiodecoder hat ungewöhnlich viele zusätzliche Audiodaten geliefert." +
-                checkpointSuffix
+            "Der Audiodecoder hat ungewöhnlich viele zusätzliche Audiodaten geliefert." + checkpointSuffix
         is AudioDecoderStallException ->
-            "Die Audioaufbereitung blieb auch nach einem kontrollierten Decoder-Neustart stehen." +
-                checkpointSuffix
+            "Die Audioaufbereitung blieb auch nach einem kontrollierten Decoder-Neustart stehen." + checkpointSuffix
         is OutOfMemoryError ->
             "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß.$checkpointSuffix"
         else -> throwable.localizedMessage?.takeIf(String::isNotBlank)?.let { message ->
-            if (message.contains("allocate", ignoreCase = true) ||
+            if (
+                message.contains("allocate", ignoreCase = true) ||
                 message.contains("outofmemory", ignoreCase = true)
             ) {
                 "Der Sicherheitsabschnitt war für dieses Gerät noch zu groß.$checkpointSuffix"
@@ -1088,7 +1259,8 @@ private fun pcmEncodingLabel(encoding: Int): String = when (encoding) {
 }
 
 private fun formatLevel(value: Float): String =
-    if (value <= 0f) "−∞ dB" else "%.1f dB".format(20.0 * kotlin.math.log10(value.toDouble()))
+    if (value <= 0f) "−∞ dB"
+    else "%.1f dB".format(20.0 * kotlin.math.log10(value.toDouble()))
 
 private fun formatPercent(value: Float): String = "%.1f %%".format(value * 100f)
 

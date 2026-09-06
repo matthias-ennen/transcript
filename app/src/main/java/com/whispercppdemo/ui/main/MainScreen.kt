@@ -240,6 +240,7 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 onOpenAiPerformance = { page = AppPage.AI_PERFORMANCE },
                 onOpenWhisperSettings = { page = AppPage.WHISPER_SETTINGS },
                 onOpenVadSettings = { page = AppPage.VAD_SETTINGS },
+                onOpenSongIsolationSettings = { page = AppPage.SONG_ISOLATION_SETTINGS },
                 onVadModeChanged = { mode ->
                     viewModel.updateWhisperSettings(
                         state.whisperSettings.copy(vadMode = mode),
@@ -358,6 +359,11 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                         WhisperSettingsPage.VAD
                     )
                 },
+                modifier = Modifier.padding(innerPadding)
+            )
+            AppPage.SONG_ISOLATION_SETTINGS -> SongIsolationPerformanceScreen(
+                state = state,
+                onSelectSongModel = viewModel::selectSongSeparationModel,
                 modifier = Modifier.padding(innerPadding)
             )
             AppPage.MAIN -> MainContent(

@@ -37,11 +37,12 @@ jobs:
       - name: Install Vulkan shader build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes glslc libvulkan-dev spirv-headers
+          sudo apt-get install --yes glslc libvulkan-dev spirv-headers patchelf
           mkdir -p llm/src/main/cpp/host-vulkan-headers
           cp -R /usr/include/vulkan llm/src/main/cpp/host-vulkan-headers/
           cp -R /usr/include/vk_video llm/src/main/cpp/host-vulkan-headers/vulkan/
           cp -R /usr/include/spirv llm/src/main/cpp/host-vulkan-headers/
+          test -f llm/src/main/cpp/host-vulkan-headers/vulkan/vulkan.hpp
           sed -i \
             's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
             third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp
@@ -55,6 +56,136 @@ jobs:
             "build-tools;34.0.0" \
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
+
+      - name: Build pinned CrispASR Android runtime with OpenBLAS and Vulkan
+        env:
+          CRISPASR_COMMIT: "a8c0327e2cba08eebd7199e69092dad3dec604a0"
+          OPENBLAS_VERSION: "0.3.34"
+          OPENBLAS_ARCHIVE_SHA256: "cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed"
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_HOME/ndk/27.2.12479018"
+          toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          openblas_archive="$RUNNER_TEMP/OpenBLAS-${OPENBLAS_VERSION}.tar.gz"
+          openblas_src="$RUNNER_TEMP/OpenBLAS-${OPENBLAS_VERSION}"
+          openblas_prefix="$RUNNER_TEMP/openblas-android"
+          crisp_src="$RUNNER_TEMP/crispasr-src"
+          crisp_build="$RUNNER_TEMP/crispasr-build-android"
+          jni_dir="lib/src/main/jniLibs/arm64-v8a"
+          spirv_headers_config="$(dpkg -L spirv-headers | grep '/SPIRV-HeadersConfig.cmake$' | head -n 1)"
+          test -n "$spirv_headers_config"
+          test -f "$spirv_headers_config"
+          spirv_headers_dir="$(dirname "$spirv_headers_config")"
+          vulkan_headers_dir="$GITHUB_WORKSPACE/llm/src/main/cpp/host-vulkan-headers"
+          test -f "$vulkan_headers_dir/vulkan/vulkan.hpp"
+
+          curl --fail --location --retry 3 --retry-delay 2 \
+            --output "$openblas_archive" \
+            "https://github.com/OpenMathLib/OpenBLAS/releases/download/v${OPENBLAS_VERSION}/OpenBLAS-${OPENBLAS_VERSION}.tar.gz"
+          echo "${OPENBLAS_ARCHIVE_SHA256}  ${openblas_archive}" | sha256sum --check -
+          tar -xzf "$openblas_archive" -C "$RUNNER_TEMP"
+
+          make -C "$openblas_src" -j "$(nproc)" \
+            TARGET=ARMV8 BINARY=64 \
+            HOSTCC=gcc \
+            CC="$toolchain/aarch64-linux-android26-clang" \
+            AR="$toolchain/llvm-ar" \
+            RANLIB="$toolchain/llvm-ranlib" \
+            NOFORTRAN=1 ONLY_CBLAS=1 NO_SHARED=1 \
+            USE_THREAD=0 \
+            CFLAGS="-O3 -fPIC"
+          make -C "$openblas_src" \
+            PREFIX="$openblas_prefix" \
+            TARGET=ARMV8 BINARY=64 \
+            HOSTCC=gcc \
+            CC="$toolchain/aarch64-linux-android26-clang" \
+            AR="$toolchain/llvm-ar" \
+            RANLIB="$toolchain/llvm-ranlib" \
+            NOFORTRAN=1 ONLY_CBLAS=1 NO_SHARED=1 \
+            USE_THREAD=0 \
+            install
+          test -f "$openblas_prefix/lib/libopenblas.a"
+          test -f "$openblas_prefix/include/cblas.h"
+          "$toolchain/llvm-nm" -g --defined-only "$openblas_prefix/lib/libopenblas.a" \
+            | grep -F 'cblas_sgemm'
+
+          git init "$crisp_src"
+          git -C "$crisp_src" remote add origin https://github.com/CrispStrobe/CrispASR.git
+          git -C "$crisp_src" fetch --depth 1 origin "$CRISPASR_COMMIT"
+          git -C "$crisp_src" checkout --detach FETCH_HEAD
+          git -C "$crisp_src" submodule update --init --recursive --depth 1
+          test "$(git -C "$crisp_src" rev-parse HEAD)" = "$CRISPASR_COMMIT"
+
+          crisp_vulkan_cpp="$crisp_src/ggml/src/ggml-vulkan/ggml-vulkan.cpp"
+          test -f "$crisp_vulkan_cpp"
+          raw_features2_calls="$(grep -cE '^[[:space:]]*vkGetPhysicalDeviceFeatures2\(' "$crisp_vulkan_cpp" || true)"
+          test "$raw_features2_calls" -eq 3
+          sed -i \
+            's/vkGetPhysicalDeviceFeatures2(/VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(/g' \
+            "$crisp_vulkan_cpp"
+          dispatcher_features2_calls="$(grep -cF 'VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures2(' "$crisp_vulkan_cpp" || true)"
+          test "$dispatcher_features2_calls" -eq 3
+
+          cmake -S "$crisp_src" -B "$crisp_build" \
+            -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCRISPASR_BUILD_TESTS=OFF \
+            -DCRISPASR_BUILD_EXAMPLES=OFF \
+            -DCRISPASR_BUILD_SERVER=OFF \
+            -DCRISPASR_OPUS=OFF \
+            -DCRISPASR_MEL_BLAS=ON \
+            -DMBR_OPENBLAS="$openblas_prefix/lib/libopenblas.a" \
+            -DCBLAS_INCLUDE_DIR="$openblas_prefix/include" \
+            -DSPIRV-Headers_DIR="$spirv_headers_dir" \
+            -DVulkan_INCLUDE_DIR="$vulkan_headers_dir" \
+            -DGGML_VULKAN=ON \
+            2>&1 | tee "$RUNNER_TEMP/crispasr-configure.log"
+          grep -F 'mel-band-roformer: linking OpenBLAS' "$RUNNER_TEMP/crispasr-configure.log"
+          cmake --build "$crisp_build" --config Release -j "$(nproc)" --target crispasr-lib \
+            2>&1 | tee "$RUNNER_TEMP/crispasr-build.log"
+
+          mkdir -p "$jni_dir"
+          core="$(find "$crisp_build/src" \( -type f -o -type l \) -name 'libcrispasr.so' -print -quit)"
+          if [ -z "$core" ]; then
+            core="$(find "$crisp_build/src" \( -type f -o -type l \) -name 'libwhisper.so' -print -quit)"
+          fi
+          test -n "$core"
+
+          cp -L "$core" "$jni_dir/libcrispasr-transcript.so"
+          patchelf --set-soname libcrispasr-transcript.so "$jni_dir/libcrispasr-transcript.so"
+
+          while IFS= read -r library; do
+            base="$(basename "$library")"
+            case "$base" in
+              libcrispasr.so*|libwhisper.so*) continue ;;
+            esac
+            cp -L "$library" "$jni_dir/$base"
+          done < <(find "$crisp_build/src" \( -type f -o -type l \) -name 'lib*.so*' -print)
+          while IFS= read -r library; do
+            cp -L "$library" "$jni_dir/$(basename "$library")"
+          done < <(find "$crisp_build/ggml/src" \( -type f -o -type l \) -name 'libggml*.so*' -print)
+
+          test -f "$jni_dir/libggml-vulkan.so"
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_open_with_params'
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_separate'
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'openblas_set_num_threads'
+          readelf -Ws "$jni_dir/libcrispasr-transcript.so" | grep -F 'cblas_sgemm'
+          readelf -d "$jni_dir/libcrispasr-transcript.so" | grep -E 'SONAME|NEEDED'
+          readelf -d "$jni_dir/libggml-vulkan.so" | grep -F 'libvulkan.so'
+          find "$jni_dir" -maxdepth 1 -type f -name 'lib*.so*' -printf '%f\n' | sort
+
+      - name: Upload CrispASR native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crispasr-native-build-log-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/crispasr-configure.log
+            ${{ runner.temp }}/crispasr-build.log
+          if-no-files-found: warn
 
       - name: Set automatic APK version
         run: |
@@ -103,6 +234,23 @@ jobs:
             --method 'onProgress(I)V' \
             app/build/outputs/apk/release/app-release.apk \
             | grep -F 'onProgress'
+
+      - name: Verify Native/GGUF separation payload
+        run: |
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libtranscript_song_native.so'
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libcrispasr-transcript.so'
+          unzip -l "$apk" | grep -F 'lib/arm64-v8a/libggml-vulkan.so'
+          audit_dir="$RUNNER_TEMP/crispasr-apk-audit"
+          mkdir -p "$audit_dir"
+          unzip -p "$apk" lib/arm64-v8a/libcrispasr-transcript.so > "$audit_dir/libcrispasr-transcript.so"
+          unzip -p "$apk" lib/arm64-v8a/libggml-vulkan.so > "$audit_dir/libggml-vulkan.so"
+          readelf -d "$audit_dir/libcrispasr-transcript.so" | grep -F 'libcrispasr-transcript.so'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_open_with_params'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'crispasr_session_separate'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'openblas_set_num_threads'
+          readelf -Ws "$audit_dir/libcrispasr-transcript.so" | grep -F 'cblas_sgemm'
+          readelf -d "$audit_dir/libggml-vulkan.so" | grep -F 'libvulkan.so'
 
       - name: Verify KleidiAI runtime payload
         run: |

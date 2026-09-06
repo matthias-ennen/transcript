@@ -80,14 +80,10 @@ class ModelDownloadService : Service() {
     private fun downloadAndVerify(model: WhisperModel) {
         val directory = File(filesDir, "models").apply { mkdirs() }
         VerifiedModelDownloader.downloadAndVerify(
-            download = VerifiedModelDownload(
-                modelLabel = model.modelLabel,
-                downloadUrl = model.downloadUrl,
-                expectedBytes = model.minimumBytes,
-                sha256 = model.sha256,
-                destination = File(directory, model.fileName),
-                partial = partialFile(model),
-                failureLabel = "Whisper-Modell"
+            download = whisperVerifiedModelDownload(
+                model = model,
+                directory = directory,
+                partial = partialFile(model)
             ),
             onProgress = { progress ->
                 ModelDownloadCoordinator.update(ModelDownloadState.Running(model, progress.downloadedBytes, progress.totalBytes, progress.resumed))
@@ -155,8 +151,29 @@ class ModelDownloadService : Service() {
     }
 }
 
+internal fun whisperVerifiedModelDownload(
+    model: WhisperModel,
+    directory: File,
+    partial: File
+): VerifiedModelDownload = VerifiedModelDownload(
+    modelLabel = model.modelLabel,
+    downloadUrl = model.downloadUrl,
+    expectedBytes = model.minimumBytes,
+    sha256 = model.sha256,
+    destination = File(directory, model.fileName),
+    partial = partial,
+    failureLabel = "Whisper-Modell",
+    minimumBytes = model.minimumBytes,
+    exactBytes = false
+)
+
 internal fun contentRangeStart(value: String?): Long? = Regex("bytes\\s+(\\d+)-\\d+/(?:\\d+|\\*)", RegexOption.IGNORE_CASE)
     .matchEntire(value?.trim().orEmpty())?.groupValues?.get(1)?.toLongOrNull()
+
+internal fun contentRangeTotal(value: String?): Long? = Regex(
+    "bytes\\s+(?:\\d+-\\d+|\\*)/(\\d+)",
+    RegexOption.IGNORE_CASE
+).matchEntire(value?.trim().orEmpty())?.groupValues?.get(1)?.toLongOrNull()
 
 internal fun totalDownloadBytes(existingBytes: Long, remainingBytes: Long): Long =
     if (remainingBytes > 0L) existingBytes + remainingBytes else 0L

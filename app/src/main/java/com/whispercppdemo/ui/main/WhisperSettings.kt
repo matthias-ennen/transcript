@@ -56,7 +56,10 @@ data class WhisperSettings(
         val value = normalized()
         return WhisperConfiguration(
             threads = value.threads,
-            useGpu = value.backend != WhisperComputeBackend.CPU,
+            // AUTO deliberately uses the portable CPU path. Some Android Vulkan drivers
+            // can terminate the isolated native process before Kotlin can catch an error.
+            // VULKAN remains an explicit opt-in and has a process-level CPU recovery path.
+            useGpu = value.backend == WhisperComputeBackend.VULKAN,
             beamSearch = value.decoding == WhisperDecoding.BEAM_SEARCH,
             beamSize = value.beamSize,
             bestOf = value.bestOf,

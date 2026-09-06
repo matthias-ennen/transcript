@@ -83,7 +83,9 @@ class AiModelDownloadService : Service() {
                 sha256 = model.sha256,
                 destination = File(directory, model.fileName),
                 partial = partialFile(model),
-                failureLabel = "KI-Modell"
+                failureLabel = "KI-Modell",
+                minimumBytes = model.minimumBytes,
+                exactBytes = false
             ),
             onProgress = { progress: DownloadProgress ->
                 AiModelDownloadCoordinator.update(AiModelDownloadState.Running(model, progress.downloadedBytes, progress.totalBytes, progress.resumed))

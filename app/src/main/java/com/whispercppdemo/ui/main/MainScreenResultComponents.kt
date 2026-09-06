@@ -1,5 +1,6 @@
 package de.matthiasennen.transcript.ui.main
 
+import android.os.Build
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -25,9 +26,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import de.matthiasennen.transcript.ai.AiCorrectionTrace
 import de.matthiasennen.transcript.download.DownloadStorageIssue
+import de.matthiasennen.transcript.song.TranscriptionMode
+import de.matthiasennen.transcript.transcription.VadProcessingSummary
 
 @Composable
 internal fun CannaBotQuestionDialog(
@@ -268,43 +272,183 @@ internal fun ModelManagerCard(state: TranscriptUiState, onDownload: () -> Unit) 
 
 @Composable
 internal fun TranscriptResultSummary(state: TranscriptUiState) {
+    val context = LocalContext.current
+    val showAdvancedDiagnostics = remember(context) {
+        ResultDisplayPreferences.load(context)
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text("Ergebnis", style = MaterialTheme.typography.titleSmall)
-            state.completedModel?.let { Text("Modell: ${it.modelLabel}") }
-            state.detectedLanguage?.let {
-                Text("Erkannte Sprache: ${whisperLanguageDisplayName(it)}")
+            val whisperLabel = state.completedModel?.modelLabel
+            val languageLabel = state.detectedLanguage?.let(::whisperLanguageDisplayName)
+            when {
+                whisperLabel != null && languageLabel != null ->
+                    Text("Whisper: $whisperLabel · Sprache: $languageLabel")
+                whisperLabel != null -> Text("Whisper: $whisperLabel")
+                languageLabel != null -> Text("Sprache: $languageLabel")
             }
-            state.transcriptionDurationSeconds?.let { Text("Transkriptionszeit: ${formatClock(it)}") }
+
+            if (state.pipelineTiming.mode == TranscriptionMode.SONG) {
+                Text(
+                    "Stimmisolierung: ${state.pipelineTiming.voiceIsolationModelLabel ?: "Modell unbekannt"}"
+                )
+            } else {
+                Text("Stimmisolierung: Aus")
+            }
+
             state.vadProcessingSummary?.let { summary ->
-                val mode = when (summary.requestedMode) {
-                    WhisperVadMode.OFF -> "Aus"
-                    WhisperVadMode.AUTOMATIC -> "Automatisch"
-                    WhisperVadMode.ON -> "Ein"
-                }
-                Text("VAD: $mode · ${if (summary.usedVad) "verwendet" else "vollständiges Audio"}")
-                if (summary.measurementsAvailable) {
-                    Text(
-                        "Audio: ${formatClock(summary.originalDurationMs / 1_000L)} original · " +
-                            "${formatClock(summary.processedDurationMs / 1_000L)} verarbeitet · " +
-                            "${formatClock(summary.skippedDurationMs / 1_000L)} übersprungen"
-                    )
-                    val skippedPercent = if (summary.originalDurationMs > 0L) {
-                        (summary.skippedDurationMs * 100L / summary.originalDurationMs)
-                            .coerceIn(0L, 100L)
-                    } else {
-                        0L
-                    }
-                    Text("Pauseneinsparung: $skippedPercent % · ${summary.speechRegionCount} Sprachbereiche")
-                } else {
-                    Text("Audioeinsparung: In diesem Modus nicht separat vorgemessen.")
-                }
-                Text("VAD-Entscheidung: ${summary.reason}", style = MaterialTheme.typography.bodySmall)
-            }
+                Text("VAD: ${compactVadLabel(summary)}")
+            } ?: Text("VAD: keine Messdaten")
+
+            state.transcriptionDurationSeconds?.let { Text("Dauer: ${formatClock(it)}") }
             Text("Textabschnitte: ${state.segments.count { it.text.isNotBlank() }}")
+
+            if (showAdvancedDiagnostics) {
+                Text(
+                    "Diagnose",
+                    modifier = Modifier.padding(top = 8.dp),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Text(
+                    "Gerät: ${Build.MANUFACTURER} ${Build.MODEL} · " +
+                        "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                TranscriptionPipelineResult(state)
+                AdvancedVadDiagnostics(state)
+                OutlinedButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(
+                            android.content.Context.CLIPBOARD_SERVICE
+                        ) as? android.content.ClipboardManager
+                        clipboard?.setPrimaryClip(
+                            android.content.ClipData.newPlainText(
+                                "Transkriptionsdiagnose",
+                                buildTranscriptionDiagnosticsReport(state)
+                            )
+                        )
+                        if (clipboard != null) {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Diagnose kopiert.",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    Text("Diagnose kopieren")
+                }
+            }
         }
     }
+}
+
+private fun compactVadLabel(summary: VadProcessingSummary): String = when (summary.requestedMode) {
+    WhisperVadMode.OFF -> "Aus"
+    WhisperVadMode.ON -> "Ein"
+    WhisperVadMode.AUTOMATIC ->
+        "Automatisch · ${if (summary.usedVad) "verwendet" else "vollständiges Audio"}"
+}
+
+@Composable
+private fun AdvancedVadDiagnostics(state: TranscriptUiState) {
+    state.vadProcessingSummary?.let { summary ->
+        Text(
+            "VAD-Details",
+            modifier = Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.labelLarge
+        )
+        if (summary.measurementsAvailable) {
+            Text(
+                "Audio: ${formatClock(summary.originalDurationMs / 1_000L)} original · " +
+                    "${formatClock(summary.processedDurationMs / 1_000L)} verarbeitet · " +
+                    "${formatClock(summary.skippedDurationMs / 1_000L)} übersprungen"
+            )
+            val skippedPercent = if (summary.originalDurationMs > 0L) {
+                (summary.skippedDurationMs * 100L / summary.originalDurationMs)
+                    .coerceIn(0L, 100L)
+            } else {
+                0L
+            }
+            Text("Pauseneinsparung: $skippedPercent % · ${summary.speechRegionCount} Sprachbereiche")
+        } else {
+            Text("Audioeinsparung: In diesem Modus nicht separat vorgemessen.")
+        }
+        Text("VAD-Entscheidung: ${summary.reason}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun TranscriptionPipelineResult(state: TranscriptUiState) {
+    val timing = state.pipelineTiming
+    Text(
+        "Transkriptions-Pipeline",
+        modifier = Modifier.padding(top = 6.dp),
+        style = MaterialTheme.typography.labelLarge
+    )
+    if (timing.totalSeconds <= 0L) {
+        Text(
+            "Für dieses gespeicherte Ergebnis sind keine Pipeline-Laufzeiten verfügbar.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        return
+    }
+
+    if (timing.mode == TranscriptionMode.SONG) {
+        Text("Audioaufbereitung · in Stimmisolierung enthalten")
+        Text(
+            "Stimmisolierung · ${timing.voiceIsolationModelLabel ?: "Modell unbekannt"} · " +
+                formatClock(timing.voiceIsolationSeconds)
+        )
+    } else {
+        Text("Audioaufbereitung · ${formatClock(timing.audioPreparationSeconds)}")
+        Text("Stimmisolierung · Aus")
+    }
+
+    val vadSummary = state.vadProcessingSummary
+    when (vadSummary?.requestedMode) {
+        WhisperVadMode.OFF -> Text("VAD / Segmentierung · Aus")
+        WhisperVadMode.AUTOMATIC -> Text(
+            "VAD / Segmentierung · ${formatClock(timing.vadSeconds)} · Automatik · " +
+                if (vadSummary.usedVad) "verwendet" else "vollständiges Audio"
+        )
+        WhisperVadMode.ON -> Text("VAD / Segmentierung · Ein · in Whisper integriert")
+        null -> Text("VAD / Segmentierung · keine Messdaten")
+    }
+
+    Text(
+        "Whisper · ${state.completedModel?.modelLabel ?: "Modell unbekannt"} · " +
+            formatClock(timing.whisperSeconds)
+    )
+    Text("Gesamt · ${formatClock(timing.totalSeconds)}", style = MaterialTheme.typography.labelLarge)
+
+    val audioDurationMs = vadSummary?.originalDurationMs
+        ?.takeIf { it > 0L }
+        ?: state.audioDurationMs.takeIf { it > 0L }
+    if (audioDurationMs != null) {
+        Text(
+            "Geschwindigkeit",
+            modifier = Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.labelLarge
+        )
+        Text(
+            "Audio: ${formatClock(audioDurationMs / 1_000L)} · " +
+                "Verarbeitung: ${formatClock(timing.totalSeconds)}"
+        )
+        Text("Echtzeitfaktor: ${formatRealtimeFactor(timing.totalSeconds, audioDurationMs)}")
+        timing.bottleneckLabel()?.let { Text("Engpass: $it") }
+    }
+}
+
+private fun formatRealtimeFactor(totalSeconds: Long, audioDurationMs: Long): String {
+    if (totalSeconds <= 0L || audioDurationMs <= 0L) return "–"
+    val factor = totalSeconds * 1_000.0 / audioDurationMs.toDouble()
+    val tenths = kotlin.math.round(factor * 10.0).toLong().coerceAtLeast(0L)
+    return "${tenths / 10},${tenths % 10}×"
 }
