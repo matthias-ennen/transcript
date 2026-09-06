@@ -20,6 +20,42 @@ class TranscriptionStatePresentationTest {
     }
 
     @Test
+    fun `starting state always begins with a fresh runtime basis`() {
+        val state = TranscriptUiState(
+            elapsedSeconds = 77L,
+            pipelineTiming = TranscriptionPipelineTiming(
+                whisperSeconds = 77L,
+                totalSeconds = 77L,
+                lastElapsedSeconds = 77L
+            )
+        ).presentStartingTranscription(TranscriptionState.Starting("interview.m4a"))
+
+        assertEquals(0L, state.elapsedSeconds)
+        assertEquals(0L, state.pipelineTiming.totalSeconds)
+        assertEquals(0L, state.pipelineTiming.whisperSeconds)
+        assertEquals(0L, state.pipelineTiming.lastElapsedSeconds)
+    }
+
+    @Test
+    fun `cancelled state clears elapsed and pipeline timing`() {
+        val state = TranscriptUiState(
+            isTranscribing = true,
+            elapsedSeconds = 42L,
+            pipelineTiming = TranscriptionPipelineTiming(
+                audioPreparationSeconds = 3L,
+                whisperSeconds = 39L,
+                totalSeconds = 42L,
+                lastElapsedSeconds = 42L,
+                activePhase = TranscriptionPipelinePhase.WHISPER
+            )
+        ).presentCancelledTranscription()
+
+        assertFalse(state.isTranscribing)
+        assertEquals(0L, state.elapsedSeconds)
+        assertEquals(TranscriptionPipelineTiming(), state.pipelineTiming)
+    }
+
+    @Test
     fun `completed state captures the Whisper section length for visible grouping`() {
         val completed = TranscriptionState.Completed(
             fileName = "interview.m4a",

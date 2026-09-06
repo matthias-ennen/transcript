@@ -370,6 +370,18 @@ fun MainScreen(viewModel: MainScreenViewModel) {
                 viewModel = viewModel,
                 state = state,
                 transcriptionMode = transcriptionMode,
+                onVadModeChanged = { mode ->
+                    viewModel.updateWhisperSettings(
+                        state.whisperSettings.copy(vadMode = mode),
+                        WhisperSettingsPage.VAD
+                    )
+                },
+                onVoiceIsolationEnabledChanged = { enabled ->
+                    val mode = if (enabled) TranscriptionMode.SONG else TranscriptionMode.SPEECH
+                    transcriptionMode = mode
+                    TranscriptionModeRuntime.current = mode
+                    transcriptionModePreferences.saveManualMode(mode)
+                },
                 openSettings = { page = AppPage.SETTINGS },
                 innerPadding = innerPadding,
                 audioPicker = { audioPicker.launch(arrayOf("audio/*", "video/*")) },
@@ -450,6 +462,8 @@ private fun MainContent(
     viewModel: MainScreenViewModel,
     state: TranscriptUiState,
     transcriptionMode: TranscriptionMode,
+    onVadModeChanged: (WhisperVadMode) -> Unit,
+    onVoiceIsolationEnabledChanged: (Boolean) -> Unit,
     openSettings: () -> Unit,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     audioPicker: () -> Unit,
@@ -467,7 +481,7 @@ private fun MainContent(
         var confirmTranscriptionCancellation by remember { mutableStateOf(false) }
         var showTranscriptShareDialog by remember { mutableStateOf(false) }
         var showMissingAiModelDialog by remember { mutableStateOf(false) }
-        var showMissingSongModelDialog by remember { mutableStateOf(false) }
+        var missingProcessingModelMessage by remember { mutableStateOf<String?>(null) }
         val scrollState = rememberScrollState()
         val scrollScope = rememberCoroutineScope()
         var transcriptHeadingBottomPx by remember { mutableStateOf<Float?>(null) }
@@ -480,6 +494,14 @@ private fun MainContent(
             activeTranscriptSegment(state.segments, state.playbackPositionMs)
         } else {
             null
+        }
+        val missingTranscriptionModelMessage = when {
+            state.whisperSettings.vadMode != WhisperVadMode.OFF &&
+                !state.vadModelInstallation.isInstalled ->
+                "Für VAD wird ein lokales Modell benötigt. Lade das VAD-Modell zuerst in den Einstellungen herunter."
+            transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled ->
+                "Für die Stimmisolierung wird ein lokales Modell benötigt. Wähle in den Einstellungen ein Modell aus und lade es herunter."
+            else -> null
         }
         val showFloatingTranscriptControls = shouldShowFloatingTranscriptControls(
             hasCompletedTranscript = hasCompletedTranscript,
@@ -543,27 +565,17 @@ private fun MainContent(
             )
         }
 
-        if (showMissingSongModelDialog) {
-            AlertDialog(
-                onDismissRequest = { showMissingSongModelDialog = false },
-                title = { Text("Modell zur Stimmisolierung fehlt") },
-                text = {
-                    Text(
-                        "Für die Stimmisolierung muss zuerst in den Einstellungen ein passendes " +
-                            "Modell heruntergeladen und ausgewählt werden."
-                    )
+        missingProcessingModelMessage?.let { message ->
+            CannaBotQuestionDialog(
+                state = state,
+                message = message,
+                confirmLabel = "Einstellungen",
+                dismissLabel = "Abbrechen",
+                onConfirm = {
+                    missingProcessingModelMessage = null
+                    openSettings()
                 },
-                confirmButton = {
-                    Button(onClick = {
-                        showMissingSongModelDialog = false
-                        openSettings()
-                    }) { Text("Zu den Einstellungen") }
-                },
-                dismissButton = {
-                    OutlinedButton(onClick = { showMissingSongModelDialog = false }) {
-                        Text("Abbrechen")
-                    }
-                }
+                onDismiss = { missingProcessingModelMessage = null }
             )
         }
 
@@ -588,8 +600,8 @@ private fun MainContent(
                         PendingTranscriptAction.SELECT_AUDIO -> audioPicker()
                         PendingTranscriptAction.START_RECORDING -> requestRecording()
                         PendingTranscriptAction.TRANSCRIBE -> {
-                            if (transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled) {
-                                showMissingSongModelDialog = true
+                            if (missingTranscriptionModelMessage != null) {
+                                missingProcessingModelMessage = missingTranscriptionModelMessage
                             } else {
                                 requestTranscription()
                             }
@@ -673,6 +685,28 @@ private fun MainContent(
                 onSeek = viewModel::seekPlayback
             )
 
+            MainProcessingControls(
+                vadMode = state.whisperSettings.vadMode,
+                voiceIsolationEnabled = transcriptionMode == TranscriptionMode.SONG,
+                enabled = !state.isBusy && !state.isRecording && !state.isRecordingStopping,
+                onVadModeSelected = { mode ->
+                    if (mode != WhisperVadMode.OFF && !state.vadModelInstallation.isInstalled) {
+                        missingProcessingModelMessage =
+                            "Für VAD wird ein lokales Modell benötigt. Lade das VAD-Modell zuerst in den Einstellungen herunter."
+                    } else {
+                        onVadModeChanged(mode)
+                    }
+                },
+                onVoiceIsolationEnabledChanged = { enabled ->
+                    if (enabled && !state.selectedSongModelInstalled) {
+                        missingProcessingModelMessage =
+                            "Für die Stimmisolierung wird ein lokales Modell benötigt. Wähle in den Einstellungen ein Modell aus und lade es herunter."
+                    } else {
+                        onVoiceIsolationEnabledChanged(enabled)
+                    }
+                }
+            )
+
             LanguageSelector(
                 selected = state.language,
                 enabled = !state.isBusy && !state.isRecording,
@@ -689,8 +723,8 @@ private fun MainContent(
                         }
                     } else if (state.hasUnsavedTranscriptChanges) {
                         pendingTranscriptAction = PendingTranscriptAction.TRANSCRIBE
-                    } else if (transcriptionMode == TranscriptionMode.SONG && !state.selectedSongModelInstalled) {
-                        showMissingSongModelDialog = true
+                    } else if (missingTranscriptionModelMessage != null) {
+                        missingProcessingModelMessage = missingTranscriptionModelMessage
                     } else {
                         requestTranscription()
                     }
