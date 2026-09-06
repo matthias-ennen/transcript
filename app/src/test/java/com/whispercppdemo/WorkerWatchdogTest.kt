@@ -158,6 +158,83 @@ class WorkerWatchdogTest {
     }
 
     @Test
+    fun `cpu heartbeat outage is never a destructive watchdog recovery`() {
+        val staleCpu = heartbeat(
+            heartbeatAtEpochMs = now - 30_000L,
+            lastProgressAtEpochMs = now - 181_000L
+        ).copy(backend = "CPU")
+
+        assertFalse(
+            shouldProceedWithWatchdogRecovery(
+                initialHeartbeat = staleCpu,
+                confirmedHeartbeat = staleCpu,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false,
+                nowEpochMs = now
+            )
+        )
+    }
+
+    @Test
+    fun `fresh heartbeat during confirmation cancels vulkan recovery`() {
+        val staleVulkan = heartbeat(
+            heartbeatAtEpochMs = now - 30_000L,
+            lastProgressAtEpochMs = now - 181_000L
+        )
+        val refreshed = staleVulkan.copy(heartbeatAtEpochMs = now - 1_000L)
+
+        assertFalse(
+            shouldProceedWithWatchdogRecovery(
+                initialHeartbeat = staleVulkan,
+                confirmedHeartbeat = refreshed,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false,
+                nowEpochMs = now
+            )
+        )
+    }
+
+    @Test
+    fun `confirmed stale vulkan heartbeat proceeds to one cpu recovery`() {
+        val staleVulkan = heartbeat(
+            heartbeatAtEpochMs = now - 30_000L,
+            lastProgressAtEpochMs = now - 181_000L
+        )
+
+        assertTrue(
+            shouldProceedWithWatchdogRecovery(
+                initialHeartbeat = staleVulkan,
+                confirmedHeartbeat = staleVulkan,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false,
+                nowEpochMs = now
+            )
+        )
+    }
+
+    @Test
+    fun `new worker generation cancels pending watchdog recovery`() {
+        val staleVulkan = heartbeat(
+            heartbeatAtEpochMs = now - 30_000L,
+            lastProgressAtEpochMs = now - 181_000L
+        )
+        val replacement = staleVulkan.copy(
+            workerStartedAtEpochMs = workerStart + 1L,
+            heartbeatAtEpochMs = now - 1_000L
+        )
+
+        assertFalse(
+            shouldProceedWithWatchdogRecovery(
+                initialHeartbeat = staleVulkan,
+                confirmedHeartbeat = replacement,
+                expectedJobId = "job-large-model",
+                cpuRetryAlreadyUsed = false,
+                nowEpochMs = now
+            )
+        )
+    }
+
+    @Test
     fun `native vulkan crash retries once on cpu`() {
         val vulkanLoading = heartbeat(
             heartbeatAtEpochMs = now - 1_000L,
